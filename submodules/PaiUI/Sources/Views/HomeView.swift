@@ -131,12 +131,13 @@ struct HomeView: View {
                         if group.active > 0 { Text("\(group.active) active").font(.caption).foregroundStyle(Color.accentColor) }
                     }
                     .foregroundStyle(.secondary)
-                    .padding(.top, group.sessions.isEmpty ? 0 : 6)
+                    .listRowInsets(EdgeInsets(top: group.sessions.isEmpty ? 2 : 10, leading: 16, bottom: group.sessions.isEmpty ? 2 : 4, trailing: 16))
                 }
             }
         }
         .listStyle(.plain)
         .listSectionSpacingCompat()
+        .environment(\.defaultMinListHeaderHeight, 0)
         .refreshable { store.refresh() }
         .animation(.default, value: store.sessions)
     }
