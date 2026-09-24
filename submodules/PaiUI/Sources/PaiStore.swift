@@ -26,7 +26,26 @@ public final class PaiStore: ObservableObject {
     private static let reconnectDelay: UInt64 = 4_000_000_000
     private static let refreshDebounce: UInt64 = 300_000_000
 
-    public init() {}
+    private static let cacheKey = "pai.cache"
+
+    /// The last list seen is shown at once; the daemon's answer replaces it.
+    public init() {
+        if let data = UserDefaults.standard.data(forKey: Self.cacheKey), let cached = try? JSONDecoder().decode(Cache.self, from: data) {
+            sessions = cached.sessions
+            projects = cached.projects
+        }
+    }
+
+    private struct Cache: Codable {
+        let sessions: [PaiSession]
+        let projects: [PaiProject]
+    }
+
+    private func persist() {
+        if let data = try? JSONEncoder().encode(Cache(sessions: sessions, projects: projects)) {
+            UserDefaults.standard.set(data, forKey: Self.cacheKey)
+        }
+    }
 
     public var running: [PaiSession] { sessions.filter { $0.isRunning && !$0.isWaiting } }
     public var waiting: [PaiSession] { sessions.filter { $0.isWaiting } }
@@ -79,6 +98,7 @@ public final class PaiStore: ObservableObject {
             self.sessions = Self.merge(live: fetched.live, recent: fetched.recent)
             self.projects = fetchedProjects
             connectionError = nil
+            persist()
         } catch is CancellationError {
         } catch {
             connectionError = error.localizedDescription

@@ -1,8 +1,8 @@
 import Foundation
 
 /// What the daemon reports about one thread (`Session.summary()` / `/tasks.recent`).
-public struct PaiSession: Decodable, Identifiable, Equatable {
-    public enum State: String, Decodable {
+public struct PaiSession: Codable, Identifiable, Equatable {
+    public enum State: String, Codable {
         case starting, idle, busy, dead, detached
         public init(from decoder: Decoder) throws {
             let raw = try decoder.singleValueContainer().decode(String.self)
@@ -40,7 +40,7 @@ public struct PaiTasks: Decodable {
     public let recent: [PaiSession]
 }
 
-public struct PaiProject: Decodable, Identifiable, Equatable {
+public struct PaiProject: Codable, Identifiable, Equatable {
     public let slug: String
     public let path: String
     public let summary: String?

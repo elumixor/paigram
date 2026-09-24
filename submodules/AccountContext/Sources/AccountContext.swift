@@ -701,11 +701,15 @@ public final class NavigateToChatControllerParams {
     }
     
     public func withSkipAgeVerification(_ skipAgeVerification: Bool) -> NavigateToChatControllerParams {
+        return self.with(chatLocation: self.chatLocation, skipAgeVerification: skipAgeVerification)
+    }
+
+    public func with(chatLocation: Location, skipAgeVerification: Bool? = nil) -> NavigateToChatControllerParams {
         return NavigateToChatControllerParams(
             navigationController: self.navigationController,
             chatController: self.chatController,
             context: self.context,
-            chatLocation: self.chatLocation,
+            chatLocation: chatLocation,
             chatLocationContextHolder: self.chatLocationContextHolder,
             subject: self.subject,
             botStart: self.botStart,
@@ -734,7 +738,7 @@ public final class NavigateToChatControllerParams {
             chatListCompletion: self.chatListCompletion,
             forceOpenChat: self.forceOpenChat,
             customChatNavigationStack: self.customChatNavigationStack,
-            skipAgeVerification: skipAgeVerification
+            skipAgeVerification: skipAgeVerification ?? self.skipAgeVerification
         )
     }
 }

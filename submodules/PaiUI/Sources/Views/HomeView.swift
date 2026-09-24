@@ -83,9 +83,6 @@ struct HomeView: View {
                             Text("\(hidden) more").font(.footnote).foregroundStyle(.secondary)
                         }
                     }
-                    if group.sessions.isEmpty {
-                        Text("No threads").font(.footnote).foregroundStyle(.tertiary)
-                    }
                 } header: {
                     HStack(spacing: 6) {
                         Image(systemName: group.symbol).font(.caption)
