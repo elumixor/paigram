@@ -1,4 +1,5 @@
 import Foundation
+import PaiUI
 import UniformTypeIdentifiers
 import UIKit
 import Display
@@ -264,6 +265,9 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
     private let menuButtonClippingNode: ASDisplayNode
     private let menuButtonIconNode: MenuIconNode
     private let menuButtonTextNode: ImmediateTextNode
+    /// A dot on the Pai button while a thread runs or waits.
+    private let paiIndicatorNode = ASDisplayNode()
+    private var paiIndicatorObserver: NSObjectProtocol?
     
     private let startButton: SolidRoundedButtonNode
     
@@ -1039,6 +1043,11 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         self.menuButton.addSubnode(self.menuButtonClippingNode)
         self.menuButtonClippingNode.addSubnode(self.menuButtonTextNode)
         self.menuButton.addSubnode(self.menuButtonIconNode)
+        self.menuButton.addSubnode(self.paiIndicatorNode)
+        self.paiIndicatorNode.isHidden = true
+        self.paiIndicatorObserver = NotificationCenter.default.addObserver(forName: PaiChat.activityChanged, object: nil, queue: .main) { [weak self] notification in
+            self?.paiIndicatorNode.isHidden = !((notification.object as? Bool) ?? false)
+        }
         
         self.sendAsAvatarContainerNode.addSubnode(self.sendAsAvatarReferenceNode)
         self.sendAsAvatarReferenceNode.addSubnode(self.sendAsAvatarNode)
@@ -1820,6 +1829,8 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
             shouldDisplayMenuButton = true
         } else if case .webView = interfaceState.botMenuButton {
             shouldDisplayMenuButton = true
+        } else if PaiChat.isBot(interfaceState.renderedPeer?.peer) {
+            shouldDisplayMenuButton = true
         }
         
         var displaySendAsAvatarButton = false
@@ -1976,7 +1987,9 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
             }
             
             let buttonTitle: String
-            if case let .webView(title, _) = interfaceState.botMenuButton {
+            if PaiChat.isBot(interfaceState.renderedPeer?.peer) {
+                buttonTitle = "Pai"
+            } else if case let .webView(title, _) = interfaceState.botMenuButton {
                 buttonTitle = title
             } else {
                 buttonTitle = interfaceState.strings.Conversation_InputMenu
@@ -2614,6 +2627,9 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         
         let menuButtonFrame = CGRect(x: leftInset + 8.0, y: menuButtonOriginY, width: menuButtonExpanded ? menuButtonWidth : menuCollapsedButtonWidth, height: menuButtonHeight)
         transition.updateFrameAsPositionAndBounds(node: self.menuButton, frame: menuButtonFrame)
+        self.paiIndicatorNode.frame = CGRect(x: menuButtonFrame.width - 9.0, y: 3.0, width: 8.0, height: 8.0)
+        self.paiIndicatorNode.cornerRadius = 4.0
+        self.paiIndicatorNode.backgroundColor = interfaceState.theme.chat.inputPanel.panelControlAccentColor
         transition.updateFrame(view: self.menuButtonBackgroundView, frame: CGRect(origin: CGPoint(), size: menuButtonFrame.size))
         self.menuButtonBackgroundView.update(size: menuButtonFrame.size, cornerRadius: menuButtonFrame.height * 0.5, isDark: interfaceState.theme.overallDarkAppearance, tintColor: defaultGlassTintWithInnerColor, transition: ComponentTransition(transition))
         transition.updateFrame(node: self.menuButtonClippingNode, frame: CGRect(origin: CGPoint(x: 19.0, y: 0.0), size: CGSize(width: menuButtonWidth - 19.0, height: menuButtonFrame.height)))
@@ -5618,7 +5634,9 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
             return
         }
         
-        if let sendAsPeers = presentationInterfaceState.sendAsPeers, !sendAsPeers.isEmpty {
+        if PaiChat.isBot(presentationInterfaceState.renderedPeer?.peer) {
+            self.interfaceInteraction?.openPai?()
+        } else if let sendAsPeers = presentationInterfaceState.sendAsPeers, !sendAsPeers.isEmpty {
             self.interfaceInteraction?.updateShowSendAsPeers { value in
                 return !value
             }

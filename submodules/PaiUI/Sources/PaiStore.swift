@@ -5,23 +5,28 @@ import SwiftUI
 @available(iOS 16.0, *)
 @MainActor
 public final class PaiStore: ObservableObject {
-    @Published public private(set) var sessions: [PaiSession] = []
+    @Published public private(set) var sessions: [PaiSession] = [] {
+        didSet {
+            let active = sessions.contains { $0.isRunning || $0.isWaiting }
+            if active != hasActive {
+                hasActive = active
+                NotificationCenter.default.post(name: PaiChat.activityChanged, object: active)
+            }
+        }
+    }
+    public private(set) var hasActive = false
     @Published public private(set) var projects: [PaiProject] = []
     @Published public private(set) var connectionError: String?
     @Published public private(set) var isLoading = false
 
-    public let settings: PaiSettings
-    public let client: PaiClient
+    public let client = PaiClient()
     private var followTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
 
     private static let reconnectDelay: UInt64 = 4_000_000_000
     private static let refreshDebounce: UInt64 = 300_000_000
 
-    public init(settings: PaiSettings) {
-        self.settings = settings
-        self.client = PaiClient(settings: settings)
-    }
+    public init() {}
 
     public var running: [PaiSession] { sessions.filter { $0.isRunning && !$0.isWaiting } }
     public var waiting: [PaiSession] { sessions.filter { $0.isWaiting } }
@@ -29,13 +34,8 @@ public final class PaiStore: ObservableObject {
 
     public func session(_ id: String) -> PaiSession? { sessions.first { $0.sessionId == id } }
 
-    /// Starts (or restarts, after a settings change) loading and following.
     public func start() {
-        followTask?.cancel()
-        guard settings.isConfigured else {
-            connectionError = "Add the server address and token in settings"
-            return
-        }
+        guard followTask == nil else { return }
         connectionError = nil
         refresh()
         followTask = Task { [weak self] in
@@ -89,7 +89,8 @@ public final class PaiStore: ObservableObject {
     private static func merge(live: [PaiSession], recent: [PaiSession]) -> [PaiSession] {
         var byId: [String: PaiSession] = [:]
         for session in recent { byId[session.sessionId] = session }
-        for session in live { byId[session.sessionId] = session }
+        // A live process knows its state; only the database row remembers the last reply.
+        for session in live { byId[session.sessionId] = session.withLastResult(byId[session.sessionId]?.lastResult) }
         return byId.values.filter { $0.parent == nil }.sorted { a, b in
             let ra = a.isWaiting ? 0 : a.isRunning ? 1 : 2
             let rb = b.isWaiting ? 0 : b.isRunning ? 1 : 2
@@ -111,18 +112,37 @@ public final class PaiStore: ObservableObject {
 
     // MARK: Actions
 
+    private static let topicWait: UInt64 = 500_000_000
+    private static let topicAttempts = 20
+
+    /// Starts a thread and waits for the bot to give it a Telegram topic, so it can be opened as a chat.
     public func newThread(text: String, project: String?) async throws -> PaiSession {
-        let created = try await client.newThread(text: text, project: project)
+        var created = try await client.newThread(text: text, project: project)
+        sessions = Self.merge(live: [created], recent: sessions)
+        for _ in 0..<Self.topicAttempts where created.threadId == nil {
+            try await Task.sleep(nanoseconds: Self.topicWait)
+            let tasks = try await client.tasks()
+            if let fresh = (tasks.live + tasks.recent).first(where: { $0.sessionId == created.sessionId }) { created = fresh }
+        }
         sessions = Self.merge(live: [created], recent: sessions)
         return created
     }
+
+    public func telegramInfo() async throws -> PaiTelegramInfo { try await client.telegramInfo() }
 }
 
 private extension PaiSession {
+    func withLastResult(_ result: String?) -> PaiSession {
+        guard lastResult == nil, let result else { return self }
+        return PaiSession(sessionId: sessionId, shortId: shortId, kind: kind, title: title, project: project, state: state,
+                          lastActivity: lastActivity, costUsd: costUsd, turns: turns, model: model, lastTool: lastTool,
+                          recentTools: recentTools, waiting: waiting, lastResult: result, parent: parent, threadId: threadId)
+    }
+
     func withTool(_ summary: String) -> PaiSession {
         PaiSession(sessionId: sessionId, shortId: shortId, kind: kind, title: title, project: project, state: .busy,
                    lastActivity: Date().timeIntervalSince1970 * 1000, costUsd: costUsd, turns: turns, model: model,
                    lastTool: summary, recentTools: ((recentTools ?? []) + [summary]).suffix(5).map { $0 },
-                   waiting: false, lastResult: lastResult, parent: parent)
+                   waiting: false, lastResult: lastResult, parent: parent, threadId: threadId)
     }
 }

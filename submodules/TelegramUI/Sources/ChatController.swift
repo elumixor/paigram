@@ -1,4 +1,5 @@
 import Foundation
+import PaiUI
 import UIKit
 import Postbox
 import SwiftSignalKit
@@ -7669,7 +7670,18 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
     override public func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         
+        let wasAppearedBefore = self.didAppear
         self.didAppear = true
+        
+        // The pai bot's chat opens on the thread it was on last time, and keeps its activity feed alive.
+        if !wasAppearedBefore, PaiChat.isBot(self.presentationInterfaceState.renderedPeer?.peer) {
+            if #available(iOS 16.0, *) {
+                PaiHost.store.start()
+            }
+            if self.chatLocation.threadId == nil, let lastThreadId = PaiChat.lastThreadId {
+                self.updateChatLocationThread(threadId: lastThreadId, animationDirection: nil)
+            }
+        }
         
         self.chatDisplayNode.historyNode.experimentalSnapScrollToItem = false
         self.chatDisplayNode.historyNode.canReadHistory.set(self.computedCanReadHistoryPromise.get())
@@ -11085,6 +11097,9 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
     }
     
     public func updateChatLocationThread(threadId: Int64?, animationDirection: ChatControllerAnimateInnerChatSwitchDirection? = nil, replaceInline: Bool = false, transferInputState: Bool = false, completion: (() -> Void)? = nil) {
+        if PaiChat.isBot(self.presentationInterfaceState.renderedPeer?.peer) {
+            PaiChat.lastThreadId = threadId
+        }
         Task { @MainActor [weak self] in
             guard let self else {
                 completion?()

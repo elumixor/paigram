@@ -27,6 +27,7 @@ import ChatControllerInteraction
 import InteractiveTextComponent
 import ShimmeringMask
 import StreamingTextReveal
+import PaiUI
 
 private final class CachedChatMessageText {
     let text: String
@@ -454,6 +455,12 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
                             return true
                         }
                     }
+                }
+                
+                // The pai bot's trailing metadata link is for this client to read, not to show.
+                if let trailer = PaiTrailer.find(text: rawText, entities: messageEntities ?? []) {
+                    rawText = (rawText as NSString).substring(to: trailer.textEnd)
+                    messageEntities = messageEntities?.filter { $0.range.upperBound <= trailer.textEnd }
                 }
                 
                 var formattedDateUpdatePeriod: Int32?

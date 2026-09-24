@@ -1,32 +1,43 @@
 import AccountContext
 import AsyncDisplayKit
 import Display
+import PresentationDataUtils
 import SwiftSignalKit
 import SwiftUI
 import TelegramPresentationData
 import UIKit
 
-/// The Pai tab: a SwiftUI screen hosted inside Telegram's controller tree.
-public final class PaiTabController: ViewController {
+/// One store for the app's lifetime; the chat starts it and this screen reads from it.
+@available(iOS 16.0, *)
+@MainActor
+public enum PaiHost {
+    public static let store = PaiStore()
+    static func make(open: @escaping (PaiSession) -> Void) -> UIViewController {
+        UIHostingController(rootView: PaiRootView(store: store, open: open))
+    }
+}
+
+/// The Pai screen, pushed from the bot's chat: threads and their state, projects, a new thread.
+public final class PaiHomeController: ViewController {
     private let context: AccountContext
     private var presentationData: PresentationData
     private var presentationDataDisposable: Disposable?
-    private let hosting: UIViewController
+    private var hosting: UIViewController!
+
+    /// Set by the chat this screen was pushed from: it goes back there and switches to the topic.
+    public var openThread: ((Int64) -> Void)?
 
     public init(context: AccountContext) {
         self.context = context
         self.presentationData = context.sharedContext.currentPresentationData.with { $0 }
+        super.init(navigationBarPresentationData: NavigationBarPresentationData(presentationData: self.presentationData))
+        self.title = "Pai"
+
         if #available(iOS 16.0, *) {
-            self.hosting = PaiHost.make()
+            self.hosting = PaiHost.make { [weak self] session in self?.open(session) }
         } else {
             self.hosting = UnsupportedController()
         }
-        super.init(navigationBarPresentationData: nil)
-
-        self.tabBarItem.title = "Pai"
-        let icon = UIImage(systemName: "sparkles", withConfiguration: UIImage.SymbolConfiguration(pointSize: 22, weight: .medium))?.withRenderingMode(.alwaysTemplate)
-        self.tabBarItem.image = icon
-        self.tabBarItem.selectedImage = icon
         self.applyTheme()
 
         self.presentationDataDisposable = (context.sharedContext.presentationData |> deliverOnMainQueue).start(next: { [weak self] presentationData in
@@ -42,6 +53,14 @@ public final class PaiTabController: ViewController {
 
     deinit {
         self.presentationDataDisposable?.dispose()
+    }
+
+    private func open(_ session: PaiSession) {
+        guard let threadId = session.threadId else {
+            self.present(textAlertController(context: self.context, title: nil, text: "This thread has no Telegram topic yet", actions: [TextAlertAction(type: .defaultAction, title: "OK", action: {})]), in: .window(.root))
+            return
+        }
+        self.openThread?(threadId)
     }
 
     private func applyTheme() {
@@ -62,22 +81,12 @@ public final class PaiTabController: ViewController {
 
     override public func containerLayoutUpdated(_ layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) {
         super.containerLayoutUpdated(layout, transition: transition)
-        self.hosting.view.frame = CGRect(origin: .zero, size: layout.size)
-        // Telegram's containers do not pass UIKit's safe area down, and its tab bar is not a UITabBar:
-        // the status bar and the tab bar both have to be added by hand.
-        let top = layout.insets(options: [.statusBar]).top
-        let bottom = layout.intrinsicInsets.bottom
-        self.hosting.additionalSafeAreaInsets = UIEdgeInsets(top: top, left: 0, bottom: bottom, right: 0)
+        // Telegram's containers do not pass UIKit's safe area down, so the hosted screen gets the
+        // space under the navigation bar outright.
+        let top = self.navigationLayout(layout: layout).navigationFrame.maxY
+        let bottom = max(layout.intrinsicInsets.bottom, layout.inputHeight ?? 0.0)
+        transition.updateFrame(view: self.hosting.view, frame: CGRect(x: 0, y: top, width: layout.size.width, height: max(0, layout.size.height - top - bottom)))
     }
-}
-
-/// One store for the app's lifetime; the tab may be rebuilt when accounts switch.
-@available(iOS 16.0, *)
-@MainActor
-enum PaiHost {
-    static let settings = PaiSettings()
-    static let store = PaiStore(settings: settings)
-    static func make() -> UIViewController { UIHostingController(rootView: PaiRootView(store: store, settings: settings)) }
 }
 
 /// The oldest iOS the app runs on cannot show the SwiftUI screen; say so instead of crashing.
@@ -97,11 +106,10 @@ private final class UnsupportedController: UIViewController {
 @available(iOS 16.0, *)
 struct PaiRootView: View {
     @ObservedObject var store: PaiStore
-    @ObservedObject var settings: PaiSettings
+    let open: (PaiSession) -> Void
 
     var body: some View {
-        HomeView()
-            .environmentObject(store)
-            .environmentObject(settings)
+        HomeView(open: open).environmentObject(store)
     }
 }
+

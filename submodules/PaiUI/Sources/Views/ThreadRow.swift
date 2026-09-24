@@ -14,10 +14,11 @@ struct ThreadRow: View {
                     Spacer(minLength: 8)
                     Text(session.lastActivityDate.paiAge).font(.caption.monospacedDigit()).foregroundStyle(.tertiary)
                 }
-                HStack(spacing: 6) {
-                    if let project = session.project { Tag(project) }
-                    if session.kind == "code" { Tag("code") }
-                    Text(session.shortId).font(.paiMonoSmall).foregroundStyle(.tertiary)
+                if session.project != nil || session.kind == "code" {
+                    HStack(spacing: 6) {
+                        if let project = session.project { Tag(project) }
+                        if session.kind == "code" { Tag("code") }
+                    }
                 }
                 detail
             }

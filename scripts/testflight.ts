@@ -7,6 +7,7 @@
 import { $ } from "bun";
 import { mkdirSync } from "node:fs";
 import { asc, ascDelete, ascGet, ascPost } from "./asc.ts";
+import { writeSecrets } from "./secrets.ts";
 
 const root = new URL("..", import.meta.url).pathname;
 const config = `${root}build-system/paigram.json`;
@@ -50,6 +51,7 @@ function buildNumber(): number {
 }
 
 async function build(number: number) {
+  await writeSecrets();
   await $`python3 build-system/Make/Make.py --overrideXcodeVersion --cacheDir=${process.env.HOME}/telegram-bazel-cache --bazelArguments=--//Telegram:disableExtensions=True build --configurationPath=${config} --codesigningInformationPath=${codesigning} --buildNumber=${number} --configuration=release_arm64`.cwd(root);
 }
 

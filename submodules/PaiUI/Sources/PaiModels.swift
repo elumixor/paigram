@@ -25,6 +25,8 @@ public struct PaiSession: Decodable, Identifiable, Equatable {
     public let waiting: Bool?
     public let lastResult: String?
     public let parent: String?
+    /// The Telegram topic this thread lives in, when the bot has made one.
+    public let threadId: Int64?
 
     public var id: String { sessionId }
     public var isWaiting: Bool { waiting ?? false }

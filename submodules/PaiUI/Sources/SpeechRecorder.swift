@@ -7,42 +7,57 @@ public struct SpeechError: LocalizedError {
     public var errorDescription: String? { message }
 }
 
-/// Dictation on the device: the microphone goes to `SFSpeechRecognizer`, the text comes back as it forms.
+/// Dictation on the device without picking a language first: the microphone feeds one recognizer
+/// per language at the same time, and the transcript is whichever one is most sure of itself.
 @MainActor
 public final class SpeechRecorder: ObservableObject {
     @Published public private(set) var transcript = ""
     @Published public private(set) var isRecording = false
     @Published public private(set) var level: Float = 0
 
+    public static let languages = ["en-US", "ru-RU", "uk-UA"]
+
+    private struct Candidate {
+        var text = ""
+        var confidence: Float = 0
+        var isFinal = false
+    }
+
+    private final class Listener {
+        let recognizer: SFSpeechRecognizer
+        let request = SFSpeechAudioBufferRecognitionRequest()
+        var task: SFSpeechRecognitionTask?
+        init(recognizer: SFSpeechRecognizer) { self.recognizer = recognizer }
+    }
+
     private let engine = AVAudioEngine()
-    private var recognizer: SFSpeechRecognizer?
-    private var request: SFSpeechAudioBufferRecognitionRequest?
-    private var task: SFSpeechRecognitionTask?
+    private var listeners: [String: Listener] = [:]
+    private var candidates: [String: Candidate] = [:]
 
     public init() {}
 
-    public func start(locale: Locale) async throws {
+    public func start() async throws {
         guard !isRecording else { return }
         guard await Self.authorized() else { throw SpeechError(message: "Allow microphone and speech recognition in Settings") }
-        guard let recognizer = SFSpeechRecognizer(locale: locale), recognizer.isAvailable else {
-            throw SpeechError(message: "Speech recognition is not available for \(locale.identifier)")
+        let recognizers = Self.languages.compactMap { id -> (String, SFSpeechRecognizer)? in
+            guard let r = SFSpeechRecognizer(locale: Locale(identifier: id)), r.isAvailable else { return nil }
+            return (id, r)
         }
-        self.recognizer = recognizer
+        guard !recognizers.isEmpty else { throw SpeechError(message: "Speech recognition is not available right now") }
+
         transcript = ""
+        candidates = [:]
+        listeners = Dictionary(uniqueKeysWithValues: recognizers.map { ($0.0, Listener(recognizer: $0.1)) })
+        for listener in listeners.values { listener.request.shouldReportPartialResults = true }
 
         let audioSession = AVAudioSession.sharedInstance()
         try audioSession.setCategory(.record, mode: .measurement, options: .duckOthers)
         try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
 
-        let request = SFSpeechAudioBufferRecognitionRequest()
-        request.shouldReportPartialResults = true
-        if recognizer.supportsOnDeviceRecognition { request.requiresOnDeviceRecognition = false }
-        self.request = request
-
         let input = engine.inputNode
-        let format = input.outputFormat(forBus: 0)
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            request.append(buffer)
+        let requests = listeners.values.map(\.request)
+        input.installTap(onBus: 0, bufferSize: 1024, format: input.outputFormat(forBus: 0)) { [weak self] buffer, _ in
+            for request in requests { request.append(buffer) }
             let rms = Self.rms(buffer)
             Task { @MainActor in self?.level = rms }
         }
@@ -50,31 +65,47 @@ public final class SpeechRecorder: ObservableObject {
         try engine.start()
         isRecording = true
 
-        task = recognizer.recognitionTask(with: request) { [weak self] result, error in
-            Task { @MainActor in
-                guard let self else { return }
-                if let result { self.transcript = result.bestTranscription.formattedString }
-                if error != nil || result?.isFinal == true { self.tearDown() }
+        for (language, listener) in listeners {
+            listener.task = listener.recognizer.recognitionTask(with: listener.request) { [weak self] result, _ in
+                guard let result else { return }
+                let text = result.bestTranscription.formattedString
+                let segments = result.bestTranscription.segments
+                let confidence = segments.isEmpty ? 0 : segments.map(\.confidence).reduce(0, +) / Float(segments.count)
+                Task { @MainActor in self?.update(language, Candidate(text: text, confidence: confidence, isFinal: result.isFinal)) }
             }
         }
     }
 
-    /// Stops listening; the transcript stays until the next start.
-    public func stop() {
+    /// Stops listening; the transcript settles on the most confident language once the final results are in.
+    public func stop() async {
         guard isRecording else { return }
-        request?.endAudio()
-        tearDown()
-    }
-
-    private func tearDown() {
         engine.stop()
         engine.inputNode.removeTap(onBus: 0)
-        task?.cancel()
-        task = nil
-        request = nil
+        for listener in listeners.values { listener.request.endAudio() }
         isRecording = false
         level = 0
+        // Final results carry the confidences; give the recognizers a moment to deliver them.
+        let deadline = Date().addingTimeInterval(1.5)
+        while Date() < deadline, candidates.values.contains(where: { !$0.isFinal && !$0.text.isEmpty }) {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        for listener in listeners.values { listener.task?.cancel() }
+        listeners = [:]
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    private func update(_ language: String, _ candidate: Candidate) {
+        candidates[language] = candidate
+        transcript = Self.best(candidates)
+    }
+
+    /// Partial results have no confidence yet, so until the end the longest text wins; then confidence does.
+    private static func best(_ candidates: [String: Candidate]) -> String {
+        let scored = candidates.values.filter { !$0.text.isEmpty }
+        if scored.allSatisfy({ $0.confidence == 0 }) {
+            return scored.max { $0.text.count < $1.text.count }?.text ?? ""
+        }
+        return scored.max { $0.confidence < $1.confidence }?.text ?? ""
     }
 
     private static func authorized() async -> Bool {

@@ -1,53 +1,27 @@
 import Foundation
 
+public struct PaiTelegramInfo: Decodable {
+    public let botUsername: String
+}
+
 public struct PaiClientError: LocalizedError {
     public let message: String
     public var errorDescription: String? { message }
 }
 
-/// Where the daemon is and how to talk to it. Persisted so the app remembers the box.
-public final class PaiSettings: ObservableObject {
-    private enum Key {
-        static let baseURL = "pai.baseURL"
-        static let token = "pai.token"
-        static let speechLocale = "pai.speechLocale"
-    }
-    public static let defaultBaseURL = "https://pai.atmagaming.com"
-    public static let speechLocales = ["en-US", "uk-UA", "ru-RU"]
-    private static var defaultSpeechLocale: String {
-        let language = Locale.current.language.languageCode?.identifier ?? "en"
-        return speechLocales.first { $0.hasPrefix(language) } ?? speechLocales[0]
-    }
-
-    @Published public var baseURL: String { didSet { defaults.set(baseURL, forKey: Key.baseURL) } }
-    @Published public var token: String { didSet { defaults.set(token, forKey: Key.token) } }
-    @Published public var speechLocale: String { didSet { defaults.set(speechLocale, forKey: Key.speechLocale) } }
-
-    private let defaults = UserDefaults.standard
-
-    public init() {
-        baseURL = defaults.string(forKey: Key.baseURL) ?? Self.defaultBaseURL
-        token = defaults.string(forKey: Key.token) ?? ""
-        speechLocale = defaults.string(forKey: Key.speechLocale) ?? Self.defaultSpeechLocale
-    }
-
-    public var isConfigured: Bool { !token.isEmpty && URL(string: baseURL) != nil }
-}
-
 /// The daemon's HTTP API: JSON calls plus the SSE event stream.
 @available(iOS 16.0, *)
 public final class PaiClient {
-    private let settings: PaiSettings
     private let session: URLSession = {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 30
         return URLSession(configuration: config)
     }()
 
-    public init(settings: PaiSettings) { self.settings = settings }
+    public init() {}
 
     private func url(_ path: String, query: [String: String] = [:]) throws -> URL {
-        guard var components = URLComponents(string: settings.baseURL.trimmingCharacters(in: .whitespaces)) else {
+        guard var components = URLComponents(string: PaiSecrets.baseURL) else {
             throw PaiClientError(message: "Server address is not a valid URL")
         }
         components.path = (components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path) + path
@@ -59,7 +33,7 @@ public final class PaiClient {
     private func request(_ path: String, method: String = "GET", body: [String: Any]? = nil, query: [String: String] = [:]) throws -> URLRequest {
         var request = URLRequest(url: try url(path, query: query))
         request.httpMethod = method
-        request.setValue("Bearer \(settings.token)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(PaiSecrets.token)", forHTTPHeaderField: "Authorization")
         if let body {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -107,10 +81,7 @@ public final class PaiClient {
         _ = try await call(Ok.self, "/stop", method: "POST", body: ["id": id])
     }
 
-    public func health() async throws -> String {
-        struct Health: Decodable { let version: String? }
-        return try await call(Health.self, "/health").version ?? "unknown"
-    }
+    public func telegramInfo() async throws -> PaiTelegramInfo { try await call(PaiTelegramInfo.self, "/m/telegram/info") }
 
     // MARK: Events
 
@@ -119,7 +90,7 @@ public final class PaiClient {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    var query = ["follow": "1", "replay": "0", "deltas": deltas ? "1" : "0", "token": settings.token]
+                    var query = ["follow": "1", "replay": "0", "deltas": deltas ? "1" : "0", "token": PaiSecrets.token]
                     if let id { query["session"] = id }
                     var request = try request("/events", query: query)
                     request.timeoutInterval = 3600
