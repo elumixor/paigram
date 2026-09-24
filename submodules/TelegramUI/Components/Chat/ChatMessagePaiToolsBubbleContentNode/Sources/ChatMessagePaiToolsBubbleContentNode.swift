@@ -1,7 +1,6 @@
 import AsyncDisplayKit
 import ChatMessageBubbleContentNode
 import ChatMessageItemCommon
-import ChatTitleActivityNode
 import Display
 import Foundation
 import PaiUI
@@ -28,13 +27,45 @@ private final class ToolRowNode: ASDisplayNode {
     }
 }
 
+/// Three dots that pulse one after another while a session works.
+private final class DotsNode: ASDisplayNode {
+    private let dots = (0..<3).map { _ in ASDisplayNode() }
+    private static let dotSize: CGFloat = 5.0
+    private static let spacing: CGFloat = 3.0
+    static let width = dotSize * 3.0 + spacing * 2.0
+
+    override init() {
+        super.init()
+        for dot in self.dots {
+            dot.cornerRadius = Self.dotSize / 2.0
+            self.addSubnode(dot)
+        }
+    }
+
+    func update(color: UIColor, height: CGFloat) {
+        for (index, dot) in self.dots.enumerated() {
+            dot.backgroundColor = color
+            dot.frame = CGRect(x: CGFloat(index) * (Self.dotSize + Self.spacing), y: (height - Self.dotSize) / 2.0, width: Self.dotSize, height: Self.dotSize)
+            if dot.layer.animation(forKey: "pulse") == nil {
+                let animation = CAKeyframeAnimation(keyPath: "opacity")
+                animation.values = [0.3, 1.0, 0.3]
+                animation.keyTimes = [0.0, 0.5, 1.0]
+                animation.duration = 0.9
+                animation.repeatCount = .infinity
+                animation.timeOffset = Double(index) * 0.3
+                dot.layer.add(animation, forKey: "pulse")
+            }
+        }
+    }
+}
+
 /// What a pai turn did, above its answer, and what a running session is doing right now.
 ///
 /// A message with tool metadata gets one grey line ("Ran 3 commands, read 2 files"); a tap opens
 /// the timeline. A status card shows the current tool with typing dots and the elapsed time.
 public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleContentNode {
     private let summaryNode = TextNode()
-    private let activityNode = ChatTitleActivityNode()
+    private let dotsNode = DotsNode()
     private let lineNode = ASDisplayNode()
     private var rowNodes: [ToolRowNode] = []
     private var expanded = false
@@ -43,7 +74,7 @@ public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleConten
     required public init() {
         super.init()
         self.addSubnode(self.summaryNode)
-        self.addSubnode(self.activityNode)
+        self.addSubnode(self.dotsNode)
         self.addSubnode(self.lineNode)
     }
 
@@ -107,11 +138,10 @@ public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleConten
                         let summaryX = insets.left + (showsActivity ? 30.0 : 0.0)
                         summaryNode.frame = CGRect(origin: CGPoint(x: summaryX, y: insets.top + (showsActivity ? max(0.0, (20.0 - summaryHeight) / 2.0) : 0.0)), size: summaryLayout.size)
 
-                        strongSelf.activityNode.isHidden = !showsActivity
+                        strongSelf.dotsNode.isHidden = !showsActivity
                         if showsActivity {
-                            let _ = strongSelf.activityNode.transitionToState(.typingText(NSAttributedString(string: ""), colors.accentTextColor), animation: .none)
-                            let activitySize = strongSelf.activityNode.updateLayout(CGSize(width: 30.0, height: 20.0), alignment: .left)
-                            strongSelf.activityNode.frame = CGRect(origin: CGPoint(x: insets.left - 2.0, y: insets.top), size: activitySize)
+                            strongSelf.dotsNode.frame = CGRect(x: insets.left, y: insets.top, width: DotsNode.width, height: 20.0)
+                            strongSelf.dotsNode.update(color: colors.primaryTextColor.withAlphaComponent(0.8), height: 20.0)
                         }
                         strongSelf.updateTicking(meta: meta)
 

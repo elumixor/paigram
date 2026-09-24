@@ -15,7 +15,6 @@ swift_library(
         "//submodules/SSignalKit/SwiftSignalKit",
         "//submodules/TelegramCore",
         "//submodules/TelegramPresentationData",
-        "//submodules/ChatTitleActivityNode",
         "//submodules/PaiUI:PaiUI",
         "//submodules/TelegramUI/Components/Chat/ChatMessageBubbleContentNode",
         "//submodules/TelegramUI/Components/Chat/ChatMessageItemCommon",
