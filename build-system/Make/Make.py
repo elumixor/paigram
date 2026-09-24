@@ -46,6 +46,7 @@ class BazelCommandLine:
         self.show_actions = False
         self.enable_sandbox = False
         self.disable_provisioning_profiles = False
+        self.extra_arguments = []
         self.profile_swift = False
         self.embed_watch_app = False
         self.watch_api_id = None
@@ -262,6 +263,8 @@ class BazelCommandLine:
 
     def get_additional_build_arguments(self):
         combined_arguments = []
+        # --bazelArguments: whatever the caller wants on every build (Paigram turns the extensions off with it).
+        combined_arguments += self.extra_arguments
         if self.split_submodules:
             combined_arguments += [
                 # https://github.com/bazelbuild/rules_swift
@@ -435,6 +438,8 @@ def clean(bazel, arguments):
         override_xcode_version=arguments.overrideXcodeVersion,
         bazel_user_root=arguments.bazelUserRoot
     )
+    if arguments.bazelArguments is not None:
+        bazel_command_line.extra_arguments = shlex.split(arguments.bazelArguments)
 
     bazel_command_line.invoke_clean()
 
@@ -543,6 +548,8 @@ def generate_project(bazel, arguments):
         override_xcode_version=arguments.overrideXcodeVersion,
         bazel_user_root=arguments.bazelUserRoot
     )
+    if arguments.bazelArguments is not None:
+        bazel_command_line.extra_arguments = shlex.split(arguments.bazelArguments)
 
     if arguments.cacheDir is not None:
         bazel_command_line.add_cache_dir(arguments.cacheDir)
@@ -662,6 +669,8 @@ def build(bazel, arguments):
         override_xcode_version=arguments.overrideXcodeVersion,
         bazel_user_root=arguments.bazelUserRoot
     )
+    if arguments.bazelArguments is not None:
+        bazel_command_line.extra_arguments = shlex.split(arguments.bazelArguments)
 
     if arguments.lock:
         bazel_command_line.set_lock(True)
@@ -744,6 +753,8 @@ def test(bazel, arguments):
         override_xcode_version=arguments.overrideXcodeVersion,
         bazel_user_root=arguments.bazelUserRoot
     )
+    if arguments.bazelArguments is not None:
+        bazel_command_line.extra_arguments = shlex.split(arguments.bazelArguments)
 
     if arguments.cacheDir is not None:
         bazel_command_line.add_cache_dir(arguments.cacheDir)
@@ -770,6 +781,8 @@ def query(bazel, arguments):
         override_xcode_version=arguments.overrideXcodeVersion,
         bazel_user_root=arguments.bazelUserRoot
     )
+    if arguments.bazelArguments is not None:
+        bazel_command_line.extra_arguments = shlex.split(arguments.bazelArguments)
 
     if arguments.cacheDir is not None:
         bazel_command_line.add_cache_dir(arguments.cacheDir)
@@ -800,6 +813,8 @@ def build_spm(bazel, arguments):
         override_xcode_version=arguments.overrideXcodeVersion,
         bazel_user_root=arguments.bazelUserRoot
     )
+    if arguments.bazelArguments is not None:
+        bazel_command_line.extra_arguments = shlex.split(arguments.bazelArguments)
 
     if arguments.cacheDir is not None:
         bazel_command_line.add_cache_dir(arguments.cacheDir)
