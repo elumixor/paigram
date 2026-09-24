@@ -157,8 +157,8 @@ public final class ChatNewThreadInfoItemNode: ListViewItemNode, ASGestureRecogni
         let color = serviceMessageColorComponents(theme: item.presentationData.theme.theme, wallpaper: item.presentationData.theme.wallpaper).primaryText
         let project = PaiChat.pendingProject
         self.projectButton.backgroundColor = color.withAlphaComponent(0.14)
-        self.projectIcon.image = UIImage(systemName: project.map(PaiProjectIcon.symbol) ?? "folder.badge.plus", withConfiguration: UIImage.SymbolConfiguration(pointSize: 13.0, weight: .medium))?.withTintColor(color, renderingMode: .alwaysOriginal)
-        self.projectLabel.attributedText = NSAttributedString(string: project?.slug ?? "Select project", font: Font.medium(14.0), textColor: color)
+        self.projectIcon.image = UIImage(systemName: project.map(PaiProjectIcon.symbol) ?? PaiProjectIcon.general, withConfiguration: UIImage.SymbolConfiguration(pointSize: 13.0, weight: .medium))?.withTintColor(color, renderingMode: .alwaysOriginal)
+        self.projectLabel.attributedText = NSAttributedString(string: project?.slug ?? "General", font: Font.medium(14.0), textColor: color)
         let labelSize = self.projectLabel.updateLayout(CGSize(width: max(1.0, width - 40.0), height: Self.projectRowHeight))
         let iconWidth: CGFloat = 20.0
         let contentWidth = iconWidth + 6.0 + labelSize.width
@@ -258,7 +258,7 @@ public final class ChatNewThreadInfoItemNode: ListViewItemNode, ASGestureRecogni
 
             let showsProject = item.controllerInteraction.selectPaiProject != nil && item.isPaiBot
             if showsProject {
-                backgroundSize.height += Self.projectRowHeight + 12.0
+                backgroundSize.height += Self.projectRowHeight - 4.0
             }
 
             backgroundSize.width = horizontalContentInset * 2.0 + max(titleLayout.size.width, subtitleLayout.size.width, showsProject ? 200.0 : 0.0)
@@ -342,6 +342,7 @@ public final class ChatNewThreadInfoItemNode: ListViewItemNode, ASGestureRecogni
                         arrowView.image = generateTintedImage(image: UIImage(bundleImageName: "Chat/Input/Search/DownButton"), color: .white)?.withRenderingMode(.alwaysTemplate)
                     }
                     arrowView.tintColor = primaryTextColor.withMultipliedAlpha(0.5)
+                    arrowView.isHidden = showsProject
                     if let image = arrowView.image {
                         let scaleFactor: CGFloat = 0.8
                         let imageSize = CGSize(width: floor(image.size.width * scaleFactor), height: floor(image.size.height * scaleFactor))

@@ -26,6 +26,7 @@ public final class PaiProjectPickerController: ViewController {
     public init(context: AccountContext) {
         self.presentationData = context.sharedContext.currentPresentationData.with { $0 }
         super.init(navigationBarPresentationData: nil)
+        self.navigationPresentation = .modal
         self.hosting = UIHostingController(rootView: ProjectPickerView(store: PaiHost.store, pick: { [weak self] project in
             PaiChat.pendingProject = project
             self?.picked?()
@@ -52,7 +53,8 @@ public final class PaiProjectPickerController: ViewController {
         super.containerLayoutUpdated(layout, transition: transition)
         let top = layout.insets(options: [.statusBar]).top
         let bottom = max(layout.intrinsicInsets.bottom, layout.inputHeight ?? 0.0)
-        transition.updateFrame(view: self.hosting.view, frame: CGRect(x: 0, y: top, width: layout.size.width, height: max(0, layout.size.height - top - bottom)))
+        transition.updateFrame(view: self.hosting.view, frame: CGRect(x: 0, y: top, width: layout.size.width, height: max(0, layout.size.height - top)))
+        self.hosting.additionalSafeAreaInsets = UIEdgeInsets(top: 0.0, left: 0.0, bottom: bottom, right: 0.0)
     }
 }
 
@@ -62,6 +64,7 @@ struct ProjectPickerView: View {
     let pick: (PaiProject?) -> Void
     let close: () -> Void
     @State private var query = ""
+    @FocusState private var focused: Bool
 
     private var matches: [PaiProject] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
@@ -79,14 +82,32 @@ struct ProjectPickerView: View {
                 }
             }
             .listStyle(.plain)
-            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Project name")
-            .navigationTitle("Select project")
+            .navigationTitle("Project")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button(action: close) { Image(systemName: "chevron.left") } }
             }
+            .safeAreaInset(edge: .bottom) {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("Project name", text: $query)
+                        .focused($focused)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    if !query.isEmpty {
+                        Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                    }
+                }
+                .padding(.horizontal, 12).padding(.vertical, 9)
+                .background(Color(.secondarySystemBackground), in: Capsule())
+                .padding(.horizontal, 16).padding(.vertical, 8)
+                .background(Color(.systemBackground))
+            }
         }
-        .onAppear(perform: store.start)
+        .onAppear {
+            store.start()
+            focused = true
+        }
     }
 
     private func row(symbol: String, title: String, detail: String?, selected: Bool, action: @escaping () -> Void) -> some View {

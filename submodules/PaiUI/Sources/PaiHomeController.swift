@@ -12,7 +12,7 @@ import UIKit
 @MainActor
 public enum PaiHost {
     public static let store = PaiStore()
-    static func make(open: @escaping (PaiSession) -> Void, newThread: @escaping () -> Void, close: @escaping () -> Void) -> UIViewController {
+    static func make(open: @escaping (PaiSession) -> Void, newThread: @escaping (PaiProject?) -> Void, close: @escaping () -> Void) -> UIViewController {
         UIHostingController(rootView: PaiRootView(store: store, open: open, newThread: newThread, close: close))
     }
 }
@@ -26,8 +26,8 @@ public final class PaiHomeController: ViewController {
 
     /// Set by the chat this screen was pushed from: it goes back there and switches to the topic.
     public var openThread: ((Int64) -> Void)?
-    /// Set by the chat too: back to it, on the view where the next message starts a thread.
-    public var newThread: (() -> Void)?
+    /// Set by the chat too: back to it, on the view where the next message starts a thread in the project.
+    public var newThread: ((PaiProject?) -> Void)?
 
     public init(context: AccountContext) {
         self.context = context
@@ -37,7 +37,7 @@ public final class PaiHomeController: ViewController {
         self.navigationPresentation = .modal
 
         if #available(iOS 16.0, *) {
-            self.hosting = PaiHost.make(open: { [weak self] session in self?.open(session) }, newThread: { [weak self] in self?.newThread?() }, close: { [weak self] in self?.dismiss() })
+            self.hosting = PaiHost.make(open: { [weak self] session in self?.open(session) }, newThread: { [weak self] project in self?.newThread?(project) }, close: { [weak self] in self?.dismiss() })
         } else {
             self.hosting = UnsupportedController()
         }
@@ -98,7 +98,8 @@ public final class PaiHomeController: ViewController {
         // space under the status bar outright.
         let top = layout.insets(options: [.statusBar]).top
         let bottom = max(layout.intrinsicInsets.bottom, layout.inputHeight ?? 0.0)
-        transition.updateFrame(view: self.hosting.view, frame: CGRect(x: 0, y: top, width: layout.size.width, height: max(0, layout.size.height - top - bottom)))
+        transition.updateFrame(view: self.hosting.view, frame: CGRect(x: 0, y: top, width: layout.size.width, height: max(0, layout.size.height - top)))
+        self.hosting.additionalSafeAreaInsets = UIEdgeInsets(top: 0.0, left: 0.0, bottom: bottom, right: 0.0)
     }
 }
 
@@ -120,7 +121,7 @@ private final class UnsupportedController: UIViewController {
 struct PaiRootView: View {
     @ObservedObject var store: PaiStore
     let open: (PaiSession) -> Void
-    let newThread: () -> Void
+    let newThread: (PaiProject?) -> Void
     let close: () -> Void
 
     var body: some View {

@@ -8,7 +8,7 @@ struct ThreadRow: View {
     var body: some View {
         HStack(spacing: 10) {
             StateDot(session: session)
-            Text(session.displayTitle.paiPlain).font(.body).lineLimit(1)
+            Text(session.displayTitle.paiPlain).font(.callout).lineLimit(1)
             Spacer(minLength: 8)
             if session.isWaiting {
                 Image(systemName: "questionmark.bubble").font(.footnote).foregroundStyle(Color.paiWaiting)

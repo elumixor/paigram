@@ -1,15 +1,16 @@
 import SwiftUI
 
-/// Every project with its threads, the ones that need you first; search and a new thread in the bar.
+/// Every project with its threads, the ones that need you first; search and a new thread at the bottom.
 @available(iOS 16.0, *)
 struct HomeView: View {
     let open: (PaiSession) -> Void
-    let newThread: () -> Void
+    let newThread: (PaiProject?) -> Void
     let close: () -> Void
     @EnvironmentObject private var store: PaiStore
     @State private var expanded: Set<String> = []
     @State private var searching = false
     @State private var query = ""
+    @State private var pinned = PaiChat.pinnedProjects
     @FocusState private var searchFocused: Bool
 
     private static let general = "General"
@@ -18,11 +19,13 @@ struct HomeView: View {
     private struct Group: Identifiable {
         let id: String
         let symbol: String
+        let project: PaiProject?
         let sessions: [PaiSession]
         var active: Int { sessions.filter { $0.isRunning || $0.isWaiting }.count }
+        var lastActivity: Double { sessions.map(\.lastActivity).max() ?? 0 }
     }
 
-    /// The general workspace first, then every project the daemon knows, each with its threads (attention first).
+    /// Pinned projects first, then the rest by their latest thread; within a group the ones needing attention first.
     private var groups: [Group] {
         let bySlug = Dictionary(grouping: store.sessions) { $0.project ?? Self.general }
         let sorted: ([PaiSession]?) -> [PaiSession] = { sessions in
@@ -34,62 +37,64 @@ struct HomeView: View {
         }
         let known = Set(store.projects.map(\.slug))
         let orphans = bySlug.keys.filter { $0 != Self.general && !known.contains($0) }.sorted()
-        let all = [Group(id: Self.general, symbol: PaiProjectIcon.general, sessions: sorted(bySlug[Self.general]))]
-            + store.projects.map { Group(id: $0.slug, symbol: PaiProjectIcon.symbol($0), sessions: sorted(bySlug[$0.slug])) }
-            + orphans.map { Group(id: $0, symbol: "folder", sessions: sorted(bySlug[$0])) }
+        let all = [Group(id: Self.general, symbol: PaiProjectIcon.general, project: nil, sessions: sorted(bySlug[Self.general]))]
+            + store.projects.map { Group(id: $0.slug, symbol: PaiProjectIcon.symbol($0), project: $0, sessions: sorted(bySlug[$0.slug])) }
+            + orphans.map { Group(id: $0, symbol: "folder", project: nil, sessions: sorted(bySlug[$0])) }
+        let ordered = all.sorted { a, b in
+            let pa = pinned.firstIndex(of: a.id), pb = pinned.firstIndex(of: b.id)
+            if let pa, let pb { return pa < pb }
+            if pa != nil || pb != nil { return pa != nil }
+            return a.lastActivity > b.lastActivity
+        }
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return all }
-        return all.compactMap { group in
+        guard !q.isEmpty else { return ordered }
+        return ordered.compactMap { group in
             if group.id.lowercased().contains(q) { return group }
             let matching = group.sessions.filter { $0.displayTitle.lowercased().contains(q) }
-            return matching.isEmpty ? nil : Group(id: group.id, symbol: group.symbol, sessions: matching)
+            return matching.isEmpty ? nil : Group(id: group.id, symbol: group.symbol, project: group.project, sessions: matching)
         }
     }
 
     var body: some View {
         NavigationStack {
             list
+                .navigationTitle("Projects")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button(action: searching ? stopSearch : close) { Image(systemName: "chevron.left") }
-                    }
-                    ToolbarItem(placement: .principal) { titleOrSearch }
+                    ToolbarItem(placement: .topBarLeading) { Button(action: close) { Image(systemName: "chevron.left") } }
                     ToolbarItem(placement: .topBarTrailing) {
-                        HStack(spacing: 14) {
-                            if !searching {
-                                Button(action: startSearch) { Image(systemName: "magnifyingglass") }
-                            }
-                            Button(action: newThread) { Image(systemName: "square.and.pencil") }
-                            if let error = store.connectionError { Image(systemName: "bolt.slash").foregroundStyle(.red).help(error) }
-                        }
+                        if let error = store.connectionError { Image(systemName: "bolt.slash").foregroundStyle(.red).help(error) }
                     }
                 }
+                .safeAreaInset(edge: .bottom) { bottomBar }
         }
         .onAppear(perform: store.start)
     }
 
-    /// The title, or the search field grown into its place.
-    @ViewBuilder private var titleOrSearch: some View {
-        if searching {
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Project or thread", text: $query)
-                    .focused($searchFocused)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .submitLabel(.search)
-                if !query.isEmpty {
-                    Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+    /// Search grows out of its button; the new-thread button stays on the right.
+    private var bottomBar: some View {
+        HStack(spacing: 10) {
+            if searching {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("Project or thread", text: $query)
+                        .focused($searchFocused)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .submitLabel(.search)
+                    Button(action: stopSearch) { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
                 }
+                .padding(.horizontal, 12).padding(.vertical, 9)
+                .background(Color(.secondarySystemBackground), in: Capsule())
+                .transition(.scale(scale: 0.2, anchor: .leading).combined(with: .opacity))
+            } else {
+                BarButton(symbol: "magnifyingglass", action: startSearch)
+                Spacer()
             }
-            .padding(.horizontal, 10).padding(.vertical, 6)
-            .background(Color(.secondarySystemBackground), in: Capsule())
-            .frame(minWidth: 240)
-            .transition(.scale(scale: 0.6, anchor: .trailing).combined(with: .opacity))
-        } else {
-            Text("Projects").font(.headline).transition(.opacity)
+            BarButton(symbol: "square.and.pencil", filled: true) { newThread(nil) }
         }
+        .padding(.horizontal, 16).padding(.vertical, 8)
+        .background(Color(.systemBackground))
     }
 
     private func startSearch() {
@@ -101,6 +106,11 @@ struct HomeView: View {
         query = ""
         searchFocused = false
         withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { searching = false }
+    }
+
+    private func togglePin(_ id: String) {
+        pinned = pinned.contains(id) ? pinned.filter { $0 != id } : pinned + [id]
+        PaiChat.pinnedProjects = pinned
     }
 
     private var list: some View {
@@ -117,21 +127,19 @@ struct HomeView: View {
                         ThreadRow(session: session)
                             .contentShape(Rectangle())
                             .onTapGesture { open(session) }
+                            .listRowInsets(EdgeInsets(top: 3, leading: 16, bottom: 3, trailing: 16))
+                            .listRowSeparator(.hidden)
                     }
                     let hidden = group.sessions.count - visible.count
                     if hidden > 0 {
                         Button { expanded.insert(group.id) } label: {
                             Text("\(hidden) more").font(.footnote).foregroundStyle(.secondary)
                         }
+                        .listRowInsets(EdgeInsets(top: 1, leading: 42, bottom: 3, trailing: 16))
+                        .listRowSeparator(.hidden)
                     }
                 } header: {
-                    HStack(spacing: 6) {
-                        Image(systemName: group.symbol).font(.caption)
-                        Text(group.id).font(.caption.weight(.semibold)).textCase(.uppercase).tracking(0.6)
-                        if group.active > 0 { Text("\(group.active) active").font(.caption).foregroundStyle(Color.accentColor) }
-                    }
-                    .foregroundStyle(.secondary)
-                    .listRowInsets(EdgeInsets(top: group.sessions.isEmpty ? 2 : 10, leading: 16, bottom: group.sessions.isEmpty ? 2 : 4, trailing: 16))
+                    header(group)
                 }
             }
         }
@@ -140,6 +148,31 @@ struct HomeView: View {
         .environment(\.defaultMinListHeaderHeight, 0)
         .refreshable { store.refresh() }
         .animation(.default, value: store.sessions)
+    }
+
+    /// The project's name with a pin when pinned, and a way to start a thread right in it.
+    private func header(_ group: Group) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: group.symbol).font(.caption)
+            Text(group.id).font(.caption.weight(.semibold)).textCase(.uppercase).tracking(0.6)
+            if pinned.contains(group.id) { Image(systemName: "pin.fill").font(.caption2) }
+            if group.active > 0 { Text("\(group.active) active").font(.caption).foregroundStyle(Color.accentColor) }
+            Spacer()
+            Button { newThread(group.project) } label: {
+                Image(systemName: "plus").font(.caption.weight(.semibold)).frame(width: 24, height: 20)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.accentColor)
+            .opacity(group.id == Self.general || group.project != nil ? 1 : 0)
+        }
+        .foregroundStyle(.secondary)
+        .contentShape(Rectangle())
+        .contextMenu {
+            Button { togglePin(group.id) } label: {
+                Label(pinned.contains(group.id) ? "Unpin" : "Pin", systemImage: pinned.contains(group.id) ? "pin.slash" : "pin")
+            }
+        }
+        .listRowInsets(EdgeInsets(top: 14, leading: 16, bottom: 2, trailing: 8))
     }
 
     /// Everything running or waiting, then the latest few unless the group is opened up.
@@ -151,11 +184,29 @@ struct HomeView: View {
     }
 }
 
+/// One round bar button, filled when it is the main action.
+@available(iOS 16.0, *)
+struct BarButton: View {
+    let symbol: String
+    var filled = false
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(filled ? Color.white : Color.accentColor)
+                .frame(width: 40, height: 40)
+                .background(filled ? Color.accentColor : Color(.secondarySystemBackground), in: Circle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 @available(iOS 16.0, *)
 private extension View {
     /// Tight section spacing on the systems that have the knob; the older list gets its default.
     @ViewBuilder func listSectionSpacingCompat() -> some View {
-        if #available(iOS 17.0, *) { self.listSectionSpacing(.compact) } else { self }
+        if #available(iOS 17.0, *) { self.listSectionSpacing(0) } else { self }
     }
 }
 

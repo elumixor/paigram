@@ -4869,11 +4869,11 @@ extension ChatControllerImpl {
                 let _ = navigationController.popToViewController(self, animated: true)
                 self.updateChatLocationThread(threadId: threadId, animationDirection: nil)
             }
-            home.newThread = { [weak self, weak navigationController] in
+            home.newThread = { [weak self, weak navigationController] project in
                 guard let self, let navigationController else {
                     return
                 }
-                PaiChat.pendingProject = nil
+                PaiChat.pendingProject = project
                 let _ = navigationController.popToViewController(self, animated: true)
                 self.updateChatLocationThread(threadId: nil, animationDirection: nil)
             }

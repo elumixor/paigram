@@ -1960,7 +1960,8 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
                 self.menuButtonIconNode.enqueueState(.menu, animated: false)
             }
             if themeUpdated || isFirstTime {
-                self.menuButtonIconNode.customColor = interfaceState.theme.chat.inputPanel.actionControlForegroundColor
+                // The Pai button sits on glass, not on the accent fill, so its icon takes the theme's control colour.
+                self.menuButtonIconNode.customColor = PaiChat.isBot(interfaceState.renderedPeer?.peer) ? interfaceState.theme.chat.inputPanel.panelControlColor : interfaceState.theme.chat.inputPanel.actionControlForegroundColor
                 self.startButton.updateTheme(SolidRoundedButtonTheme(theme: interfaceState.theme))
                 
                 self.sendAsCloseIconView.image = generateImage(CGSize(width: 34.0, height: 34.0), rotatedContext: { size, context in
