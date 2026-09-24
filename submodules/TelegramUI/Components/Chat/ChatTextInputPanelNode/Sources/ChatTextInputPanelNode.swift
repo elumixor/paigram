@@ -1043,8 +1043,12 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         self.menuButton.addSubnode(self.menuButtonClippingNode)
         self.menuButtonClippingNode.addSubnode(self.menuButtonTextNode)
         self.menuButton.addSubnode(self.menuButtonIconNode)
-        self.menuButton.addSubnode(self.paiIndicatorNode)
-        self.paiIndicatorNode.isHidden = true
+        self.addSubnode(self.paiIndicatorNode)
+        if #available(iOS 16.0, *) {
+            self.paiIndicatorNode.isHidden = !MainActor.assumeIsolated { PaiHost.store.hasActive }
+        } else {
+            self.paiIndicatorNode.isHidden = true
+        }
         self.paiIndicatorObserver = NotificationCenter.default.addObserver(forName: PaiChat.activityChanged, object: nil, queue: .main) { [weak self] notification in
             self?.paiIndicatorNode.isHidden = !((notification.object as? Bool) ?? false)
         }
@@ -2628,9 +2632,11 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         
         let menuButtonFrame = CGRect(x: leftInset + 8.0, y: menuButtonOriginY, width: menuButtonExpanded ? menuButtonWidth : menuCollapsedButtonWidth, height: menuButtonHeight)
         transition.updateFrameAsPositionAndBounds(node: self.menuButton, frame: menuButtonFrame)
-        self.paiIndicatorNode.frame = CGRect(x: menuButtonFrame.width - 9.0, y: 3.0, width: 8.0, height: 8.0)
-        self.paiIndicatorNode.cornerRadius = 4.0
+        self.paiIndicatorNode.frame = CGRect(x: menuButtonFrame.maxX - 10.0, y: menuButtonFrame.minY + 2.0, width: 9.0, height: 9.0)
+        self.paiIndicatorNode.cornerRadius = 4.5
         self.paiIndicatorNode.backgroundColor = interfaceState.theme.chat.inputPanel.panelControlAccentColor
+        self.paiIndicatorNode.borderWidth = 1.5
+        self.paiIndicatorNode.borderColor = interfaceState.theme.chat.inputPanel.panelBackgroundColor.cgColor
         transition.updateFrame(view: self.menuButtonBackgroundView, frame: CGRect(origin: CGPoint(), size: menuButtonFrame.size))
         self.menuButtonBackgroundView.update(size: menuButtonFrame.size, cornerRadius: menuButtonFrame.height * 0.5, isDark: interfaceState.theme.overallDarkAppearance, tintColor: defaultGlassTintWithInnerColor, transition: ComponentTransition(transition))
         transition.updateFrame(node: self.menuButtonClippingNode, frame: CGRect(origin: CGPoint(x: 19.0, y: 0.0), size: CGSize(width: menuButtonWidth - 19.0, height: menuButtonFrame.height)))
