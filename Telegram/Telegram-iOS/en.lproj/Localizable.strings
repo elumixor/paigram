@@ -419,7 +419,7 @@
 "Tour.Title6" = "Free";
 "Tour.Text6" = "**Telegram** provides free unlimited\ncloud storage for chats and media.";
 
-"Tour.StartButton" = "Start Messaging (fork build)";
+"Tour.StartButton" = "Start Messaging";
 
 // Login
 "Login.PhoneAndCountryHelp" = "Please confirm your country code\nand enter your phone number.";
