@@ -30,6 +30,7 @@ import PeerInfoScreen
 import PeerInfoStoryGridScreen
 import ShareWithPeersScreen
 import ChatEmptyNode
+import PaiUI
 
 private class DetailsChatPlaceholderNode: ASDisplayNode, NavigationDetailsPlaceholderNode {
     private var presentationData: PresentationData
@@ -79,6 +80,7 @@ public final class TelegramRootController: NavigationController, TelegramRootCon
     public var callListController: CallListController?
     public var chatListController: ChatListController?
     public var accountSettingsController: PeerInfoScreen?
+    public var paiController: PaiTabController?
     
     private var permissionsDisposable: Disposable?
     private var presentationDataDisposable: Disposable?
@@ -209,6 +211,9 @@ public final class TelegramRootController: NavigationController, TelegramRootCon
         
         var controllers: [ViewController] = []
         
+        let paiController = PaiTabController(context: self.context)
+        controllers.append(paiController)
+        
         let contactsController = ContactsController(context: self.context)
         contactsController.switchToChatsController = {  [weak self] in
             self?.openChatsController(activateSearch: false)
@@ -239,8 +244,9 @@ public final class TelegramRootController: NavigationController, TelegramRootCon
         accountSettingsController.parentController = self
         controllers.append(accountSettingsController)
                 
-        tabBarController.setControllers(controllers, selectedIndex: restoreSettignsController != nil ? (controllers.count - 1) : (controllers.count - 2))
+        tabBarController.setControllers(controllers, selectedIndex: restoreSettignsController != nil ? (controllers.count - 1) : 0)
         
+        self.paiController = paiController
         self.contactsController = contactsController
         self.callListController = callListController
         self.chatListController = chatListController
@@ -254,6 +260,7 @@ public final class TelegramRootController: NavigationController, TelegramRootCon
             return
         }
         var controllers: [ViewController] = []
+        controllers.append(self.paiController!)
         controllers.append(self.contactsController!)
         if showCallsTab {
             controllers.append(self.callListController!)

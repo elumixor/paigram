@@ -84,3 +84,10 @@ xcode-files
 **/node_modules/
 tools/sim-watcher/dist/
 .mcp.json
+
+# Paigram build configuration (api keys)
+build-system/paigram.json
+build-system/paigram-sim.json
+node_modules
+.env
+build-system/paigram-codesigning
