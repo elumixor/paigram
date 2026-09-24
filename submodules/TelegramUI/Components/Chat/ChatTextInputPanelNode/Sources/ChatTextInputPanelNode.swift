@@ -1849,7 +1849,8 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         } else if let peer = interfaceState.renderedPeer?.peer as? TelegramUser, let _ = peer.botInfo, shouldDisplayMenuButton && interfaceState.editMessageState == nil {
             hasMenuButton = true
             
-            if !inputHasText {
+            // The Pai button is its icon alone.
+            if !inputHasText && !PaiChat.isBot(peer) {
                 switch interfaceState.inputMode {
                 case .none, .inputButtons:
                     menuButtonExpanded = true

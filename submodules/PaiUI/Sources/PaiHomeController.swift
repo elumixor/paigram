@@ -32,6 +32,7 @@ public final class PaiHomeController: ViewController {
         self.presentationData = context.sharedContext.currentPresentationData.with { $0 }
         super.init(navigationBarPresentationData: NavigationBarPresentationData(presentationData: self.presentationData))
         self.title = "Pai"
+        self.navigationItem.leftBarButtonItem = UIBarButtonItem(title: self.presentationData.strings.Common_Back, style: .plain, target: self, action: #selector(self.backPressed))
 
         if #available(iOS 16.0, *) {
             self.hosting = PaiHost.make { [weak self] session in self?.open(session) }
@@ -55,6 +56,10 @@ public final class PaiHomeController: ViewController {
         self.presentationDataDisposable?.dispose()
     }
 
+    @objc private func backPressed() {
+        self.dismiss()
+    }
+
     private func open(_ session: PaiSession) {
         guard let threadId = session.threadId else {
             self.present(textAlertController(context: self.context, title: nil, text: "This thread has no Telegram topic yet", actions: [TextAlertAction(type: .defaultAction, title: "OK", action: {})]), in: .window(.root))
@@ -66,7 +71,6 @@ public final class PaiHomeController: ViewController {
     private func applyTheme() {
         self.statusBar.statusBarStyle = self.presentationData.theme.rootController.statusBarStyle.style
         self.hosting.overrideUserInterfaceStyle = self.presentationData.theme.overallDarkAppearance ? .dark : .light
-        self.hosting.view.tintColor = self.presentationData.theme.list.itemAccentColor
         self.hosting.view.backgroundColor = self.presentationData.theme.list.plainBackgroundColor
     }
 
