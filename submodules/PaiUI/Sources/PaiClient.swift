@@ -81,6 +81,13 @@ public final class PaiClient {
         _ = try await call(Ok.self, "/stop", method: "POST", body: ["id": id])
     }
 
+    public func allThreads() async throws -> [PaiThread] { try await call([PaiThread].self, "/threads/all", query: ["per": "50"]) }
+
+    /// A conversation held on disk becomes a live session; the bot gives it a topic.
+    public func adopt(session id: String, cwd: String, title: String) async throws -> PaiSession {
+        try await call(PaiSession.self, "/adopt", method: "POST", body: ["id": id, "cwd": cwd, "title": title])
+    }
+
     public func telegramInfo() async throws -> PaiTelegramInfo { try await call(PaiTelegramInfo.self, "/m/telegram/info") }
 
     // MARK: Events

@@ -59,11 +59,22 @@ public final class PaiHomeController: ViewController {
     }
 
     private func open(_ session: PaiSession) {
-        guard let threadId = session.threadId else {
-            self.present(textAlertController(context: self.context, title: nil, text: "This thread has no Telegram topic yet", actions: [TextAlertAction(type: .defaultAction, title: "OK", action: {})]), in: .window(.root))
+        if let threadId = session.threadId {
+            self.openThread?(threadId)
             return
         }
-        self.openThread?(threadId)
+        // Held on disk: make it live, the bot gives it a topic, then open that.
+        guard #available(iOS 16.0, *) else { return }
+        Task { @MainActor [weak self] in
+            do {
+                let live = try await PaiHost.store.adopt(session)
+                guard let threadId = live.threadId else { throw PaiClientError(message: "The bot has not made a topic for it yet; try again in a moment") }
+                self?.openThread?(threadId)
+            } catch {
+                guard let self else { return }
+                self.present(textAlertController(context: self.context, title: nil, text: error.localizedDescription, actions: [TextAlertAction(type: .defaultAction, title: "OK", action: {})]), in: .window(.root))
+            }
+        }
     }
 
     private func applyTheme() {
