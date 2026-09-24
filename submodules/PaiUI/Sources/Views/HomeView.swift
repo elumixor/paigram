@@ -7,6 +7,7 @@ struct HomeView: View {
     let newThread: (PaiProject?) -> Void
     let close: () -> Void
     @EnvironmentObject private var store: PaiStore
+    @EnvironmentObject private var insets: PaiInsets
     @State private var expanded: Set<String> = []
     @State private var searching = false
     @State private var query = ""
@@ -93,7 +94,7 @@ struct HomeView: View {
             }
             BarButton(symbol: "square.and.pencil", filled: true) { newThread(nil) }
         }
-        .padding(.horizontal, 16).padding(.vertical, 8)
+        .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 8 + insets.bottom)
         .background(Color(.systemBackground))
     }
 
@@ -146,6 +147,7 @@ struct HomeView: View {
         .listStyle(.plain)
         .listSectionSpacingCompat()
         .environment(\.defaultMinListHeaderHeight, 0)
+        .environment(\.defaultMinListRowHeight, 30)
         .refreshable { store.refresh() }
         .animation(.default, value: store.sessions)
     }
@@ -166,13 +168,16 @@ struct HomeView: View {
             .opacity(group.id == Self.general || group.project != nil ? 1 : 0)
         }
         .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity)
+        .padding(.top, 14).padding(.bottom, 2)
+        .background(Color(.systemBackground))
         .contentShape(Rectangle())
         .contextMenu {
             Button { togglePin(group.id) } label: {
                 Label(pinned.contains(group.id) ? "Unpin" : "Pin", systemImage: pinned.contains(group.id) ? "pin.slash" : "pin")
             }
         }
-        .listRowInsets(EdgeInsets(top: 14, leading: 16, bottom: 2, trailing: 8))
+        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 8))
     }
 
     /// Everything running or waiting, then the latest few unless the group is opened up.

@@ -17,44 +17,20 @@ public enum PaiProjectIcon {
 
 /// Pick the project a new thread starts in, or none for the general workspace.
 @available(iOS 16.0, *)
-public final class PaiProjectPickerController: ViewController {
+public final class PaiProjectPickerController: PaiHostedController {
     /// Called once a choice is made; the presenter takes the screen away.
     public var picked: (() -> Void)?
-    private var hosting: UIViewController!
-    private var presentationData: PresentationData
 
-    public init(context: AccountContext) {
-        self.presentationData = context.sharedContext.currentPresentationData.with { $0 }
-        super.init(navigationBarPresentationData: nil)
-        self.navigationPresentation = .modal
-        self.hosting = UIHostingController(rootView: ProjectPickerView(store: PaiHost.store, pick: { [weak self] project in
+    public override init(context: AccountContext) {
+        super.init(context: context)
+        self.host(ProjectPickerView(store: PaiHost.store, pick: { [weak self] project in
             PaiChat.pendingProject = project
             self?.picked?()
         }, close: { [weak self] in self?.dismiss() }))
-        self.hosting.overrideUserInterfaceStyle = self.presentationData.theme.overallDarkAppearance ? .dark : .light
-        self.hosting.view.backgroundColor = self.presentationData.theme.list.plainBackgroundColor
-        self.statusBar.statusBarStyle = self.presentationData.theme.rootController.statusBarStyle.style
     }
 
     required init(coder aDecoder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
-    }
-
-    override public func loadDisplayNode() {
-        self.displayNode = ASDisplayNode()
-        self.displayNode.backgroundColor = self.presentationData.theme.list.plainBackgroundColor
-        self.addChild(self.hosting)
-        self.displayNode.view.addSubview(self.hosting.view)
-        self.hosting.didMove(toParent: self)
-        self.displayNodeDidLoad()
-    }
-
-    override public func containerLayoutUpdated(_ layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) {
-        super.containerLayoutUpdated(layout, transition: transition)
-        let top = layout.insets(options: [.statusBar]).top
-        let bottom = max(layout.intrinsicInsets.bottom, layout.inputHeight ?? 0.0)
-        transition.updateFrame(view: self.hosting.view, frame: CGRect(x: 0, y: top, width: layout.size.width, height: max(0, layout.size.height - top)))
-        self.hosting.additionalSafeAreaInsets = UIEdgeInsets(top: 0.0, left: 0.0, bottom: bottom, right: 0.0)
     }
 }
 
@@ -65,6 +41,7 @@ struct ProjectPickerView: View {
     let close: () -> Void
     @State private var query = ""
     @FocusState private var focused: Bool
+    @EnvironmentObject private var insets: PaiInsets
 
     private var matches: [PaiProject] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
@@ -100,7 +77,7 @@ struct ProjectPickerView: View {
                 }
                 .padding(.horizontal, 12).padding(.vertical, 9)
                 .background(Color(.secondarySystemBackground), in: Capsule())
-                .padding(.horizontal, 16).padding(.vertical, 8)
+                .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 8 + insets.bottom)
                 .background(Color(.systemBackground))
             }
         }
