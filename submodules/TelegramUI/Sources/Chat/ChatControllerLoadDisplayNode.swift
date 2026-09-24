@@ -4880,7 +4880,7 @@ extension ChatControllerImpl {
             navigationController.pushViewController(home)
         }
         interfaceInteraction.selectPaiProject = { [weak self] in
-            guard let self, let navigationController = self.navigationController as? NavigationController else {
+            guard let self, let navigationController = self.effectiveNavigationController else {
                 return
             }
             if #available(iOS 16.0, *) {
