@@ -14,8 +14,12 @@ const skipBuild = process.argv.includes("--no-build");
 
 if (!(await Bun.file(config).exists())) throw new Error(`${config} is missing: copy build-system/paigram.example.json and fill in the api keys`);
 
-/** The simulator keeps the installed app when the build number does not change. */
-const buildNumber = Math.floor(Date.now() / 60_000);
+/**
+ * Bazel gets one fixed build number, so a changed define does not invalidate every action; the
+ * simulator keeps an installed app whose version has not changed, so the unzipped copy gets a fresh one.
+ */
+const buildNumber = 100002;
+const installedVersion = Math.floor(Date.now() / 60_000);
 
 if (!skipBuild) {
   await writeSecrets();
@@ -33,6 +37,7 @@ if (!device) throw new Error("no iPhone simulator available");
 
 const dir = mkdtempSync(`${tmpdir()}/paigram-`);
 await $`unzip -q ${root}bazel-bin/Telegram/Telegram.ipa -d ${dir}`;
+await $`plutil -replace CFBundleVersion -string ${String(installedVersion)} ${dir}/Payload/Telegram.app/Info.plist`;
 if (device.state !== "Booted") await $`xcrun simctl boot ${device.udid}`;
 await $`open -a Simulator`;
 await $`xcrun simctl bootstatus ${device.udid} -b`.quiet();

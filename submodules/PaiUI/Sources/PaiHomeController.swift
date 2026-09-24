@@ -12,8 +12,8 @@ import UIKit
 @MainActor
 public enum PaiHost {
     public static let store = PaiStore()
-    static func make(open: @escaping (PaiSession) -> Void, close: @escaping () -> Void) -> UIViewController {
-        UIHostingController(rootView: PaiRootView(store: store, open: open, close: close))
+    static func make(open: @escaping (PaiSession) -> Void, newThread: @escaping () -> Void, close: @escaping () -> Void) -> UIViewController {
+        UIHostingController(rootView: PaiRootView(store: store, open: open, newThread: newThread, close: close))
     }
 }
 
@@ -26,6 +26,8 @@ public final class PaiHomeController: ViewController {
 
     /// Set by the chat this screen was pushed from: it goes back there and switches to the topic.
     public var openThread: ((Int64) -> Void)?
+    /// Set by the chat too: back to it, on the view where the next message starts a thread.
+    public var newThread: (() -> Void)?
 
     public init(context: AccountContext) {
         self.context = context
@@ -33,7 +35,7 @@ public final class PaiHomeController: ViewController {
         super.init(navigationBarPresentationData: nil)
 
         if #available(iOS 16.0, *) {
-            self.hosting = PaiHost.make(open: { [weak self] session in self?.open(session) }, close: { [weak self] in self?.dismiss() })
+            self.hosting = PaiHost.make(open: { [weak self] session in self?.open(session) }, newThread: { [weak self] in self?.newThread?() }, close: { [weak self] in self?.dismiss() })
         } else {
             self.hosting = UnsupportedController()
         }
@@ -105,10 +107,11 @@ private final class UnsupportedController: UIViewController {
 struct PaiRootView: View {
     @ObservedObject var store: PaiStore
     let open: (PaiSession) -> Void
+    let newThread: () -> Void
     let close: () -> Void
 
     var body: some View {
-        HomeView(open: open, close: close).environmentObject(store)
+        HomeView(open: open, newThread: newThread, close: close).environmentObject(store)
     }
 }
 

@@ -9,9 +9,11 @@ import TelegramCore
 import TelegramPresentationData
 import UIKit
 
-private let iconSize: CGFloat = 20.0
-private let rowHeight: CGFloat = 28.0
-private let insets = UIEdgeInsets(top: 6.0, left: 12.0, bottom: 4.0, right: 12.0)
+private let iconSize: CGFloat = 18.0
+private let rowHeight: CGFloat = 26.0
+private let pillInsets = UIEdgeInsets(top: 5.0, left: 12.0, bottom: 5.0, right: 12.0)
+private let outerInsets = UIEdgeInsets(top: 2.0, left: 8.0, bottom: 2.0, right: 8.0)
+private let dotsGap: CGFloat = 6.0
 
 /// A row of the expanded timeline: the tool's icon and what it did.
 private final class ToolRowNode: ASDisplayNode {
@@ -27,43 +29,36 @@ private final class ToolRowNode: ASDisplayNode {
     }
 }
 
-/// Three dots that pulse one after another while a session works.
-private final class DotsNode: ASDisplayNode {
-    private let dots = (0..<3).map { _ in ASDisplayNode() }
-    private static let dotSize: CGFloat = 5.0
-    private static let spacing: CGFloat = 3.0
-    static let width = dotSize * 3.0 + spacing * 2.0
+/// An ellipsis that breathes while a session works.
+private final class DotsNode: ASImageNode {
+    static let width: CGFloat = 20.0
 
     override init() {
         super.init()
-        for dot in self.dots {
-            dot.cornerRadius = Self.dotSize / 2.0
-            self.addSubnode(dot)
-        }
+        self.displaysAsynchronously = false
+        self.contentMode = .center
     }
 
-    func update(color: UIColor, height: CGFloat) {
-        for (index, dot) in self.dots.enumerated() {
-            dot.backgroundColor = color
-            dot.frame = CGRect(x: CGFloat(index) * (Self.dotSize + Self.spacing), y: (height - Self.dotSize) / 2.0, width: Self.dotSize, height: Self.dotSize)
-            if dot.layer.animation(forKey: "pulse") == nil {
-                let animation = CAKeyframeAnimation(keyPath: "opacity")
-                animation.values = [0.3, 1.0, 0.3]
-                animation.keyTimes = [0.0, 0.5, 1.0]
-                animation.duration = 0.9
-                animation.repeatCount = .infinity
-                animation.timeOffset = Double(index) * 0.3
-                dot.layer.add(animation, forKey: "pulse")
-            }
+    func update(color: UIColor) {
+        self.image = UIImage(systemName: "ellipsis", withConfiguration: UIImage.SymbolConfiguration(pointSize: 14.0, weight: .bold))?.withTintColor(color, renderingMode: .alwaysOriginal)
+        if self.layer.animation(forKey: "pulse") == nil {
+            let animation = CAKeyframeAnimation(keyPath: "opacity")
+            animation.values = [0.25, 1.0, 0.25]
+            animation.keyTimes = [0.0, 0.5, 1.0]
+            animation.duration = 1.2
+            animation.repeatCount = .infinity
+            self.layer.add(animation, forKey: "pulse")
         }
     }
 }
 
-/// What a pai turn did, above its answer, and what a running session is doing right now.
+/// What a pai turn did, and what a running session is doing right now, as a service-style pill.
 ///
-/// A message with tool metadata gets one grey line ("Ran 3 commands, read 2 files"); a tap opens
-/// the timeline. A status card shows the current tool with typing dots and the elapsed time.
+/// A message with tool metadata gets the pill above its bubble ("Ran 3 commands, read 2 files"); a tap
+/// opens the timeline. A status card is nothing but the pill: the current tool with a pulse and the
+/// elapsed time while a turn runs, one word once it is over.
 public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleContentNode {
+    private let pillNode = ASDisplayNode()
     private let summaryNode = TextNode()
     private let dotsNode = DotsNode()
     private let lineNode = ASDisplayNode()
@@ -73,9 +68,10 @@ public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleConten
 
     required public init() {
         super.init()
-        self.addSubnode(self.summaryNode)
-        self.addSubnode(self.dotsNode)
-        self.addSubnode(self.lineNode)
+        self.addSubnode(self.pillNode)
+        self.pillNode.addSubnode(self.summaryNode)
+        self.pillNode.addSubnode(self.dotsNode)
+        self.pillNode.addSubnode(self.lineNode)
     }
 
     required public init?(coder aDecoder: NSCoder) {
@@ -92,17 +88,16 @@ public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleConten
         let makeRowLayouts = self.rowNodes.map { TextNode.asyncLayout($0.textNode) }
 
         return { item, layoutConstants, _, _, constrainedSize, _ in
-            let contentProperties = ChatMessageBubbleContentProperties(hidesSimpleAuthorHeader: false, headerSpacing: 4.0, hidesBackground: .never, forceFullCorners: false, forceAlignment: .none)
             let trailer = PaiTrailer.find(item.message)
             let meta = trailer?.meta
             let tools = meta?.tools ?? []
-            let theme = item.presentationData.theme.theme
-            let incoming = item.message.effectivelyIncoming(item.context.account.peerId)
-            let colors = incoming ? theme.chat.message.incoming : theme.chat.message.outgoing
-            let secondary = colors.secondaryTextColor
+            let isStatus = meta?.isStatus ?? false
+            // Metadata sits above the bubble; a status card has no bubble at all.
+            let contentProperties = ChatMessageBubbleContentProperties(hidesSimpleAuthorHeader: true, headerSpacing: 0.0, hidesBackground: isStatus ? .always : .never, forceFullCorners: false, forceAlignment: isStatus ? .center : .none, hidesHeaders: isStatus, isDetached: !isStatus)
+            let colors = serviceMessageColorComponents(theme: item.presentationData.theme.theme, wallpaper: item.presentationData.theme.wallpaper)
             let baseSize = item.presentationData.messageFont.pointSize
-            let font = Font.regular(floor(baseSize * 14.0 / 17.0))
-            let smallFont = Font.regular(floor(baseSize * 13.0 / 17.0))
+            let font = Font.regular(floor(baseSize * 13.0 / 17.0))
+            let smallFont = Font.regular(floor(baseSize * 12.0 / 17.0))
 
             let summaryText: String
             let showsActivity: Bool
@@ -115,51 +110,60 @@ public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleConten
             }
 
             return (contentProperties, nil, CGFloat.greatestFiniteMagnitude, { constrainedSize, _ in
-                let textWidth = max(1.0, constrainedSize.width - insets.left - insets.right - (showsActivity ? 30.0 : 0.0))
-                let (summaryLayout, summaryApply) = makeSummaryLayout(TextNodeLayoutArguments(attributedString: NSAttributedString(string: summaryText, font: font, textColor: secondary), backgroundColor: nil, maximumNumberOfLines: 2, truncationType: .end, constrainedSize: CGSize(width: textWidth, height: CGFloat.greatestFiniteMagnitude), alignment: .natural, cutout: nil, insets: UIEdgeInsets()))
+                let maxTextWidth = max(1.0, constrainedSize.width - outerInsets.left - outerInsets.right - pillInsets.left - pillInsets.right - (showsActivity ? DotsNode.width + dotsGap : 0.0))
+                let (summaryLayout, summaryApply) = makeSummaryLayout(TextNodeLayoutArguments(attributedString: NSAttributedString(string: summaryText, font: font, textColor: colors.primaryText), backgroundColor: nil, maximumNumberOfLines: 2, truncationType: .end, constrainedSize: CGSize(width: maxTextWidth, height: CGFloat.greatestFiniteMagnitude), alignment: .center, cutout: nil, insets: UIEdgeInsets()))
 
                 var rowLayouts: [(TextNodeLayout, () -> TextNode)] = []
                 if expanded {
                     for (index, tool) in tools.enumerated() where index < makeRowLayouts.count {
-                        rowLayouts.append(makeRowLayouts[index](TextNodeLayoutArguments(attributedString: NSAttributedString(string: PaiToolSummary.title(tool), font: smallFont, textColor: colors.primaryTextColor), backgroundColor: nil, maximumNumberOfLines: 1, truncationType: .middle, constrainedSize: CGSize(width: max(1.0, constrainedSize.width - insets.left - insets.right - iconSize - 10.0), height: rowHeight), alignment: .natural, cutout: nil, insets: UIEdgeInsets())))
+                        rowLayouts.append(makeRowLayouts[index](TextNodeLayoutArguments(attributedString: NSAttributedString(string: PaiToolSummary.title(tool), font: smallFont, textColor: colors.primaryText), backgroundColor: nil, maximumNumberOfLines: 1, truncationType: .middle, constrainedSize: CGSize(width: max(1.0, maxTextWidth - iconSize - 8.0), height: rowHeight), alignment: .natural, cutout: nil, insets: UIEdgeInsets())))
                     }
                 }
 
-                let width = constrainedSize.width
-                return (width, { boundingWidth in
-                    let summaryHeight = summaryLayout.size.height
-                    let rowsHeight = CGFloat(rowLayouts.count) * rowHeight
-                    let size = CGSize(width: boundingWidth, height: insets.top + max(summaryHeight, showsActivity ? 20.0 : 0.0) + (rowLayouts.isEmpty ? 0.0 : 6.0 + rowsHeight) + insets.bottom)
+                let headerWidth = summaryLayout.size.width + (showsActivity ? DotsNode.width + dotsGap : 0.0)
+                let rowsWidth = rowLayouts.map { $0.0.size.width + iconSize + 8.0 }.max() ?? 0.0
+                let pillWidth = max(headerWidth, rowsWidth) + pillInsets.left + pillInsets.right
+                let headerHeight = max(summaryLayout.size.height, showsActivity ? 18.0 : 0.0)
+                let rowsHeight = rowLayouts.isEmpty ? 0.0 : 6.0 + CGFloat(rowLayouts.count) * rowHeight
+                let pillHeight = pillInsets.top + headerHeight + rowsHeight + pillInsets.bottom
+                let size = CGSize(width: pillWidth + outerInsets.left + outerInsets.right, height: pillHeight + outerInsets.top + outerInsets.bottom)
 
-                    return (size, { [weak self] _, _, _ in
+                return (size.width, { boundingWidth in
+                    return (CGSize(width: boundingWidth, height: size.height), { [weak self] _, _, _ in
                         guard let strongSelf = self else { return }
                         strongSelf.item = item
+
+                        let pillFrame = CGRect(x: floor((boundingWidth - pillWidth) / 2.0), y: outerInsets.top, width: pillWidth, height: pillHeight)
+                        strongSelf.pillNode.frame = pillFrame
+                        strongSelf.pillNode.backgroundColor = colors.fill
+                        strongSelf.pillNode.cornerRadius = min(14.0, pillHeight / 2.0)
+
+                        let contentLeft = pillInsets.left + (pillWidth - pillInsets.left - pillInsets.right - headerWidth) / 2.0
                         let summaryNode = summaryApply()
-                        let summaryX = insets.left + (showsActivity ? 30.0 : 0.0)
-                        summaryNode.frame = CGRect(origin: CGPoint(x: summaryX, y: insets.top + (showsActivity ? max(0.0, (20.0 - summaryHeight) / 2.0) : 0.0)), size: summaryLayout.size)
+                        summaryNode.frame = CGRect(origin: CGPoint(x: contentLeft + (showsActivity ? DotsNode.width + dotsGap : 0.0), y: pillInsets.top + (headerHeight - summaryLayout.size.height) / 2.0), size: summaryLayout.size)
 
                         strongSelf.dotsNode.isHidden = !showsActivity
                         if showsActivity {
-                            strongSelf.dotsNode.frame = CGRect(x: insets.left, y: insets.top, width: DotsNode.width, height: 20.0)
-                            strongSelf.dotsNode.update(color: colors.primaryTextColor.withAlphaComponent(0.8), height: 20.0)
+                            strongSelf.dotsNode.frame = CGRect(x: contentLeft, y: pillInsets.top, width: DotsNode.width, height: headerHeight)
+                            strongSelf.dotsNode.update(color: colors.primaryText)
                         }
                         strongSelf.updateTicking(meta: meta)
 
-                        strongSelf.lineNode.backgroundColor = secondary.withAlphaComponent(0.25)
+                        strongSelf.lineNode.backgroundColor = colors.primaryText.withAlphaComponent(0.25)
                         strongSelf.lineNode.isHidden = rowLayouts.count < 2
-                        var y = insets.top + summaryHeight + 6.0
+                        var y = pillInsets.top + headerHeight + 6.0
                         for (index, (rowLayout, rowApply)) in rowLayouts.enumerated() {
                             let row = strongSelf.rowNodes[index]
-                            row.frame = CGRect(x: insets.left, y: y, width: boundingWidth - insets.left - insets.right, height: rowHeight)
-                            row.iconNode.image = UIImage(systemName: PaiToolSummary.symbol(tools[index]), withConfiguration: UIImage.SymbolConfiguration(pointSize: 14.0, weight: .regular))?.withTintColor(secondary, renderingMode: .alwaysOriginal)
+                            row.frame = CGRect(x: pillInsets.left, y: y, width: pillWidth - pillInsets.left - pillInsets.right, height: rowHeight)
+                            row.iconNode.image = UIImage(systemName: PaiToolSummary.symbol(tools[index]), withConfiguration: UIImage.SymbolConfiguration(pointSize: 12.0, weight: .regular))?.withTintColor(colors.primaryText, renderingMode: .alwaysOriginal)
                             row.iconNode.frame = CGRect(x: 0.0, y: (rowHeight - iconSize) / 2.0, width: iconSize, height: iconSize)
                             let textNode = rowApply()
-                            textNode.frame = CGRect(origin: CGPoint(x: iconSize + 10.0, y: (rowHeight - rowLayout.size.height) / 2.0), size: rowLayout.size)
+                            textNode.frame = CGRect(origin: CGPoint(x: iconSize + 8.0, y: (rowHeight - rowLayout.size.height) / 2.0), size: rowLayout.size)
                             y += rowHeight
                         }
                         if rowLayouts.count >= 2 {
-                            let top = insets.top + summaryHeight + 6.0 + rowHeight / 2.0
-                            strongSelf.lineNode.frame = CGRect(x: insets.left + iconSize / 2.0 - 0.5, y: top, width: 1.0, height: CGFloat(rowLayouts.count - 1) * rowHeight)
+                            let top = pillInsets.top + headerHeight + 6.0 + rowHeight / 2.0
+                            strongSelf.lineNode.frame = CGRect(x: pillInsets.left + iconSize / 2.0 - 0.5, y: top, width: 1.0, height: CGFloat(rowLayouts.count - 1) * rowHeight)
                         }
                     })
                 })
@@ -213,7 +217,7 @@ public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleConten
         while self.rowNodes.count < count {
             let row = ToolRowNode()
             self.rowNodes.append(row)
-            self.addSubnode(row)
+            self.pillNode.addSubnode(row)
         }
         for (index, row) in self.rowNodes.enumerated() { row.isHidden = !self.expanded || index >= count }
     }
