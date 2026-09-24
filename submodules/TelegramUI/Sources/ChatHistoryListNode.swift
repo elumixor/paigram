@@ -264,7 +264,7 @@ private func mappedInsertEntries(context: AccountContext, chatLocation: ChatLoca
                 case let .userInfo(peer, verification, registrationDate, phoneCountry, groupsInCommonCount):
                     item = ChatUserInfoItem(peer: peer, verification: verification, registrationDate: registrationDate, phoneCountry: phoneCountry, groupsInCommonCount: groupsInCommonCount, controllerInteraction: controllerInteraction, presentationData: presentationData, context: context)
                 case .newThreadInfo:
-                    item = ChatNewThreadInfoItem(controllerInteraction: controllerInteraction, presentationData: presentationData, context: context)
+                    item = ChatNewThreadInfoItem(controllerInteraction: controllerInteraction, presentationData: presentationData, context: context, peerId: chatLocation.peerId)
                 }
                 return ListViewInsertItem(index: entry.index, previousIndex: entry.previousIndex, item: item, directionHint: entry.directionHint)
         }
@@ -319,7 +319,7 @@ private func mappedUpdateEntries(context: AccountContext, chatLocation: ChatLoca
                 case let .userInfo(peer, verification, registrationDate, phoneCountry, groupsInCommonCount):
                     item = ChatUserInfoItem(peer: peer, verification: verification, registrationDate: registrationDate, phoneCountry: phoneCountry, groupsInCommonCount: groupsInCommonCount, controllerInteraction: controllerInteraction, presentationData: presentationData, context: context)
                 case .newThreadInfo:
-                    item = ChatNewThreadInfoItem(controllerInteraction: controllerInteraction, presentationData: presentationData, context: context)
+                    item = ChatNewThreadInfoItem(controllerInteraction: controllerInteraction, presentationData: presentationData, context: context, peerId: chatLocation.peerId)
                 }
                 return ListViewUpdateItem(index: entry.index, previousIndex: entry.previousIndex, item: item, directionHint: entry.directionHint)
         }

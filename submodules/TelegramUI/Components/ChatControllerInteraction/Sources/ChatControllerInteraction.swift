@@ -328,6 +328,8 @@ public final class ChatControllerInteraction: ChatControllerInteractionProtocol 
     public let displayPollRestrictedToast: (EngineMessage.Id) -> Void
     
     public var canPlayMedia: Bool = false
+    /// The pai bot's chat: the New Thread card offers the project the thread starts in.
+    public var selectPaiProject: (() -> Void)?
     public var hiddenMedia: [EngineMessage.Id: [EngineRawMedia]] = [:]
     public var expandedTranslationMessageStableIds: Set<UInt32> = Set()
     public var selectionState: ChatInterfaceSelectionState?

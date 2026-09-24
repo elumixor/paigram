@@ -33,6 +33,8 @@ public final class PaiHomeController: ViewController {
         self.context = context
         self.presentationData = context.sharedContext.currentPresentationData.with { $0 }
         super.init(navigationBarPresentationData: nil)
+        // Slides up from the bottom and goes away with a drag down.
+        self.navigationPresentation = .modal
 
         if #available(iOS 16.0, *) {
             self.hosting = PaiHost.make(open: { [weak self] session in self?.open(session) }, newThread: { [weak self] in self?.newThread?() }, close: { [weak self] in self?.dismiss() })

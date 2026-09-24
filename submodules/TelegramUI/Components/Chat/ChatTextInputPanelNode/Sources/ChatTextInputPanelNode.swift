@@ -1814,7 +1814,8 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         var displayBotStartButton = false
         if case .scheduledMessages = interfaceState.subject {
         } else {
-            if let user = interfaceState.renderedPeer?.peer as? TelegramUser, user.botInfo != nil {
+            // The pai bot's chat shows nothing but the New Thread card outside a topic; that is not an empty chat.
+            if let user = interfaceState.renderedPeer?.peer as? TelegramUser, user.botInfo != nil, !PaiChat.isBot(user) {
                 if let chatHistoryState = interfaceState.chatHistoryState, case .loaded(true, _) = chatHistoryState, interfaceState.chatLocation.threadId == nil {
                     displayBotStartButton = true
                 } else if interfaceState.peerIsBlocked {
