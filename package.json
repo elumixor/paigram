@@ -1,0 +1,12 @@
+{
+  "name": "paigram",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "sim": "bun scripts/sim.ts",
+    "testflight": "bun scripts/testflight.ts"
+  },
+  "dependencies": {
+    "jose": "^6.0.0"
+  }
+}
