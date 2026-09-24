@@ -13,6 +13,7 @@ swift_library(
         "//submodules/AsyncDisplayKit",
         "//submodules/Display",
         "//submodules/TelegramCore",
+        "//submodules/PaiUI:PaiUI",
         "//submodules/TextFormat",
         "//submodules/UrlEscaping",
         "//submodules/TelegramUniversalVideoContent",

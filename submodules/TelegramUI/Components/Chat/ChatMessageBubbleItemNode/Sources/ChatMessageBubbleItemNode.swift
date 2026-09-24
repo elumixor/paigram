@@ -78,6 +78,8 @@ import ChatMessageDisableCopyProtectionBubbleContentNode
 import ChatMessageGiveawayBubbleContentNode
 import ChatMessageJoinedChannelBubbleContentNode
 import ChatMessageFactCheckBubbleContentNode
+import ChatMessagePaiToolsBubbleContentNode
+import PaiUI
 import ChatMessageUnlockMediaNode
 import ChatMessageStarsMediaInfoNode
 import UIKitRuntimeUtils
@@ -345,6 +347,16 @@ private func contentNodeMessagesAndClassesForItem(_ item: ChatMessageItem) -> ([
             }
         }
                 
+        // A pai bot message: its tool metadata gets a node of its own above the text, and a status card is nothing but that node.
+        let paiTrailer = PaiTrailer.find(message)
+        if let paiTrailer, paiTrailer.meta.isStatus || !(paiTrailer.meta.tools ?? []).isEmpty {
+            result.append((message, ChatMessagePaiToolsBubbleContentNode.self, itemAttributes, BubbleItemAttributes(isAttachment: false, neighborType: .text, neighborSpacing: .default)))
+            needReactions = false
+            if paiTrailer.meta.isStatus {
+                skipText = true
+            }
+        }
+        
         if !messageText.isEmpty || (message.attributes.contains(where: { $0 is TypingDraftMessageAttribute }) && richText == nil) || isUnsupportedMedia || isStoryWithText {
             if !skipText {
                 if case .group = item.content, !isFile {

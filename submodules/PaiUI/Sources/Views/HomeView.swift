@@ -3,16 +3,14 @@ import SwiftUI
 /// Every thread at a glance, the composer always in reach.
 @available(iOS 16.0, *)
 struct HomeView: View {
+    let open: (PaiSession) -> Void
     @EnvironmentObject private var store: PaiStore
-    @EnvironmentObject private var settings: PaiSettings
     @State private var projectFilter: String?
     @State private var composeProject: String?
-    @State private var path: [String] = []
-    @State private var showSettings = false
     @State private var sendError: String?
 
     var body: some View {
-        NavigationStack(path: $path) {
+        Group {
             VStack(spacing: 0) {
                 list
                 if let sendError {
@@ -21,27 +19,8 @@ struct HomeView: View {
                 projectPicker
                 Composer(placeholder: "New thread", isBusy: false, onSend: newThread, onStop: nil)
             }
-            .navigationTitle("Pai")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    if let error = store.connectionError {
-                        Image(systemName: "bolt.slash").foregroundStyle(.red).help(error)
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showSettings = true } label: { Image(systemName: "gearshape") }
-                }
-            }
-            .navigationDestination(for: String.self) { id in
-                ThreadView(sessionId: id)
-            }
-            .sheet(isPresented: $showSettings, onDismiss: store.start) { SettingsView() }
         }
-        .onAppear {
-            store.start()
-            if !settings.isConfigured { showSettings = true }
-        }
+        .onAppear(perform: store.start)
     }
 
     // MARK: List
@@ -75,7 +54,7 @@ struct HomeView: View {
                 ForEach(sessions) { session in
                     ThreadRow(session: session)
                         .contentShape(Rectangle())
-                        .onTapGesture { path.append(session.sessionId) }
+                        .onTapGesture { open(session) }
                         .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
                 }
             } header: {
@@ -106,7 +85,7 @@ struct HomeView: View {
                 }
                 .padding(.horizontal, 16).padding(.vertical, 8)
             }
-            .background(.bar)
+            .background(Color(.systemBackground))
         }
     }
 
@@ -127,7 +106,7 @@ struct HomeView: View {
             Spacer()
         }
         .padding(.horizontal, 16).padding(.top, 6)
-        .background(.bar)
+        .background(Color(.systemBackground))
         .onChange(of: projectFilter) { composeProject = $0 }
     }
 
@@ -135,8 +114,7 @@ struct HomeView: View {
         sendError = nil
         Task {
             do {
-                let created = try await store.newThread(text: text, project: composeProject)
-                path.append(created.sessionId)
+                open(try await store.newThread(text: text, project: composeProject))
             } catch {
                 sendError = error.localizedDescription
             }

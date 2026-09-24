@@ -8,7 +8,6 @@ struct Composer: View {
     let onSend: (String) -> Void
     let onStop: (() -> Void)?
 
-    @EnvironmentObject private var settings: PaiSettings
     @StateObject private var recorder = SpeechRecorder()
     @State private var text = ""
     @State private var speechError: String?
@@ -27,7 +26,7 @@ struct Composer: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(.bar)
+        .background(Color(.systemBackground))
         .onChange(of: recorder.transcript) { text = $0 }
     }
 
@@ -73,23 +72,23 @@ struct Composer: View {
         focused = false
         speechError = nil
         Task {
-            do { try await recorder.start(locale: Locale(identifier: settings.speechLocale)) } catch { speechError = error.localizedDescription }
+            do { try await recorder.start() } catch { speechError = error.localizedDescription }
         }
     }
 
     private func stopRecordingAndSend() {
-        recorder.stop()
-        // The recognizer may still deliver its last words right after the tap is removed.
         Task {
-            try? await Task.sleep(nanoseconds: 250_000_000)
+            await recorder.stop()
             text = recorder.transcript
             send()
         }
     }
 
     private func cancelRecording() {
-        recorder.stop()
-        text = ""
+        Task {
+            await recorder.stop()
+            text = ""
+        }
     }
 }
 

@@ -168,6 +168,8 @@ public final class ChatPanelInterfaceInteraction {
     public let presentChatRequestAdminInfo: () -> Void
     public let displayCopyProtectionTip: (UIView, Bool) -> Void
     public let openWebView: (String, String, Bool, ChatOpenWebViewSource) -> Void
+    /// The pai bot's chat: its menu button opens the Pai screen instead of bot commands.
+    public var openPai: (() -> Void)?
     public let updateShowWebView: ((Bool) -> Bool) -> Void
     public let insertText: (NSAttributedString) -> Void
     public let backwardsDeleteText: () -> Void

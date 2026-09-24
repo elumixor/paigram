@@ -1,4 +1,5 @@
 import Foundation
+import PaiUI
 import UIKit
 import Postbox
 import SwiftSignalKit
@@ -4856,6 +4857,20 @@ extension ChatControllerImpl {
             return self
         }, statuses: ChatPanelInterfaceInteractionStatuses(editingMessage: self.editingMessage.get(), startingBot: self.startingBot.get(), unblockingPeer: self.unblockingPeer.get(), searching: self.searching.get(), loadingMessage: self.loadingMessage.get(), inlineSearch: self.performingInlineSearch.get()))
         
+        interfaceInteraction.openPai = { [weak self] in
+            guard let self, let navigationController = self.navigationController as? NavigationController else {
+                return
+            }
+            let home = PaiHomeController(context: self.context)
+            home.openThread = { [weak self, weak navigationController] threadId in
+                guard let self, let navigationController else {
+                    return
+                }
+                let _ = navigationController.popToViewController(self, animated: true)
+                self.updateChatLocationThread(threadId: threadId, animationDirection: nil)
+            }
+            navigationController.pushViewController(home)
+        }
         self.interfaceInteraction = interfaceInteraction
         
         if let search = self.focusOnSearchAfterAppearance {

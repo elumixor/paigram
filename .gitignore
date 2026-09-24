@@ -92,3 +92,4 @@ node_modules
 .env
 build-system/paigram-codesigning
 bazel-paigram
+submodules/PaiUI/Sources/PaiSecrets.swift
