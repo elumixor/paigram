@@ -2450,27 +2450,11 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
                         }
                     })
                 } else {
-                    var messages = strongSelf.transformEnqueueMessages(messages, postpone: postpone)
+                    let messages = strongSelf.transformEnqueueMessages(messages, postpone: postpone)
                     
                     var targetThreadId: Int64?
                     var clearMainThreadForward = false
                     if strongSelf.chatLocation.threadId == nil, let user = strongSelf.presentationInterfaceState.renderedPeer?.peer as? TelegramUser, let botInfo = user.botInfo, botInfo.flags.contains(.hasForum), botInfo.flags.contains(.forumManagedByUser) {
-                        // A new pai thread starts in the project chosen for it: the bot reads the first line.
-                        if PaiChat.isBot(user), let project = PaiChat.pendingProject {
-                            messages = messages.map { message in
-                                guard case let .message(text, attributes, inlineStickers, mediaReference, threadId, replyToMessageId, replyToStoryId, localGroupingKey, correlationId, bubbleUpEmojiOrStickersets) = message else {
-                                    return message
-                                }
-                                let prefix = PaiChat.prefixed("", project: project)
-                                let shifted = attributes.map { attribute -> MessageAttribute in
-                                    guard let entities = attribute as? TextEntitiesMessageAttribute else { return attribute }
-                                    let offset = (prefix as NSString).length
-                                    return TextEntitiesMessageAttribute(entities: entities.entities.map { MessageTextEntity(range: ($0.range.lowerBound + offset)..<($0.range.upperBound + offset), type: $0.type) })
-                                }
-                                return .message(text: prefix + text, attributes: shifted, inlineStickers: inlineStickers, mediaReference: mediaReference, threadId: threadId, replyToMessageId: replyToMessageId, replyToStoryId: replyToStoryId, localGroupingKey: localGroupingKey, correlationId: correlationId, bubbleUpEmojiOrStickersets: bubbleUpEmojiOrStickersets)
-                            }
-                            PaiChat.pendingProject = nil
-                        }
                         if let message = messages.first {
                             switch message {
                             case let .message(_, _, _, _, _, replyToMessageId, _, _, _, _):
@@ -7707,13 +7691,10 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
         let wasAppearedBefore = self.didAppear
         self.didAppear = true
         
-        // The pai bot's chat opens on the thread it was on last time, and keeps its activity feed alive.
+        // The pai bot's chat keeps its activity feed alive while open.
         if !wasAppearedBefore, PaiChat.isBot(self.presentationInterfaceState.renderedPeer?.peer) {
             if #available(iOS 16.0, *) {
                 PaiHost.store.start()
-            }
-            if self.chatLocation.threadId == nil, let lastThreadId = PaiChat.lastThreadId {
-                self.updateChatLocationThread(threadId: lastThreadId, animationDirection: nil)
             }
         }
         
@@ -8894,7 +8875,33 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
         }
     }
         
+    /// A new pai thread starts in the project chosen for it: the bot reads the first line of the first message.
+    private func withPaiProject(_ messages: [EnqueueMessage]) -> [EnqueueMessage] {
+        guard self.chatLocation.threadId == nil, PaiChat.isBot(self.presentationInterfaceState.renderedPeer?.peer), let project = PaiChat.pendingProject else {
+            return messages
+        }
+        var prefixed = false
+        let result = messages.map { message -> EnqueueMessage in
+            guard !prefixed, case let .message(text, attributes, inlineStickers, mediaReference, threadId, replyToMessageId, replyToStoryId, localGroupingKey, correlationId, bubbleUpEmojiOrStickersets) = message else {
+                return message
+            }
+            prefixed = true
+            let prefix = PaiChat.prefixed("", project: project)
+            let offset = (prefix as NSString).length
+            let shifted = attributes.map { attribute -> MessageAttribute in
+                guard let entities = attribute as? TextEntitiesMessageAttribute else { return attribute }
+                return TextEntitiesMessageAttribute(entities: entities.entities.map { MessageTextEntity(range: ($0.range.lowerBound + offset)..<($0.range.upperBound + offset), type: $0.type) })
+            }
+            return .message(text: prefix + text, attributes: shifted, inlineStickers: inlineStickers, mediaReference: mediaReference, threadId: threadId, replyToMessageId: replyToMessageId, replyToStoryId: replyToStoryId, localGroupingKey: localGroupingKey, correlationId: correlationId, bubbleUpEmojiOrStickersets: bubbleUpEmojiOrStickersets)
+        }
+        if prefixed {
+            PaiChat.pendingProject = nil
+        }
+        return result
+    }
+
     func transformEnqueueMessages(_ messages: [EnqueueMessage], silentPosting: Bool, scheduleTime: Int32? = nil, repeatPeriod: Int32? = nil, postpone: Bool = false) -> [EnqueueMessage] {
+        let messages = self.withPaiProject(messages)
         var defaultThreadId: Int64?
         var defaultReplyMessageSubject: EngineMessageReplySubject?
         switch self.chatLocation {
