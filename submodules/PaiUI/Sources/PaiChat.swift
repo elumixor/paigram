@@ -24,6 +24,14 @@ public enum PaiChat {
         set { UserDefaults.standard.set(newValue ?? 0, forKey: lastThreadKey) }
     }
 
+    private static let pinnedKey = "pai.pinnedProjects"
+
+    /// Projects pinned to the top of the list, in the order they were pinned.
+    public static var pinnedProjects: [String] {
+        get { UserDefaults.standard.stringArray(forKey: pinnedKey) ?? [] }
+        set { UserDefaults.standard.set(newValue, forKey: pinnedKey) }
+    }
+
     /// Posted on the main thread whenever whether any thread is running or waiting changes; `object` is that Bool.
     public static let activityChanged = Notification.Name("pai.activityChanged")
 }
