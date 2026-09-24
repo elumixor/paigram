@@ -12,8 +12,8 @@ import UIKit
 @MainActor
 public enum PaiHost {
     public static let store = PaiStore()
-    static func make(open: @escaping (PaiSession) -> Void) -> UIViewController {
-        UIHostingController(rootView: PaiRootView(store: store, open: open))
+    static func make(open: @escaping (PaiSession) -> Void, close: @escaping () -> Void) -> UIViewController {
+        UIHostingController(rootView: PaiRootView(store: store, open: open, close: close))
     }
 }
 
@@ -30,12 +30,10 @@ public final class PaiHomeController: ViewController {
     public init(context: AccountContext) {
         self.context = context
         self.presentationData = context.sharedContext.currentPresentationData.with { $0 }
-        super.init(navigationBarPresentationData: NavigationBarPresentationData(presentationData: self.presentationData))
-        self.title = "Pai"
-        self.navigationItem.leftBarButtonItem = UIBarButtonItem(title: self.presentationData.strings.Common_Back, style: .plain, target: self, action: #selector(self.backPressed))
+        super.init(navigationBarPresentationData: nil)
 
         if #available(iOS 16.0, *) {
-            self.hosting = PaiHost.make { [weak self] session in self?.open(session) }
+            self.hosting = PaiHost.make(open: { [weak self] session in self?.open(session) }, close: { [weak self] in self?.dismiss() })
         } else {
             self.hosting = UnsupportedController()
         }
@@ -54,10 +52,6 @@ public final class PaiHomeController: ViewController {
 
     deinit {
         self.presentationDataDisposable?.dispose()
-    }
-
-    @objc private func backPressed() {
-        self.dismiss()
     }
 
     private func open(_ session: PaiSession) {
@@ -86,8 +80,8 @@ public final class PaiHomeController: ViewController {
     override public func containerLayoutUpdated(_ layout: ContainerViewLayout, transition: ContainedViewLayoutTransition) {
         super.containerLayoutUpdated(layout, transition: transition)
         // Telegram's containers do not pass UIKit's safe area down, so the hosted screen gets the
-        // space under the navigation bar outright.
-        let top = self.navigationLayout(layout: layout).navigationFrame.maxY
+        // space under the status bar outright.
+        let top = layout.insets(options: [.statusBar]).top
         let bottom = max(layout.intrinsicInsets.bottom, layout.inputHeight ?? 0.0)
         transition.updateFrame(view: self.hosting.view, frame: CGRect(x: 0, y: top, width: layout.size.width, height: max(0, layout.size.height - top - bottom)))
     }
@@ -111,9 +105,10 @@ private final class UnsupportedController: UIViewController {
 struct PaiRootView: View {
     @ObservedObject var store: PaiStore
     let open: (PaiSession) -> Void
+    let close: () -> Void
 
     var body: some View {
-        HomeView(open: open).environmentObject(store)
+        HomeView(open: open, close: close).environmentObject(store)
     }
 }
 

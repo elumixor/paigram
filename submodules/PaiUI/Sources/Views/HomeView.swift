@@ -4,12 +4,13 @@ import SwiftUI
 @available(iOS 16.0, *)
 struct HomeView: View {
     let open: (PaiSession) -> Void
+    let close: () -> Void
     @EnvironmentObject private var store: PaiStore
     @State private var composeProject: String?
     @State private var sendError: String?
 
     var body: some View {
-        Group {
+        NavigationStack {
             VStack(spacing: 0) {
                 list
                 if let sendError {
@@ -17,6 +18,18 @@ struct HomeView: View {
                 }
                 projectPicker
                 Composer(placeholder: "New thread", isBusy: false, onSend: newThread, onStop: nil)
+            }
+            .navigationTitle("Pai")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(action: close) { Image(systemName: "chevron.left") }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if let error = store.connectionError {
+                        Image(systemName: "bolt.slash").foregroundStyle(.red).help(error)
+                    }
+                }
             }
         }
         .onAppear(perform: store.start)
