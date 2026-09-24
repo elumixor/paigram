@@ -5,7 +5,6 @@ import SwiftUI
 struct HomeView: View {
     let open: (PaiSession) -> Void
     @EnvironmentObject private var store: PaiStore
-    @State private var projectFilter: String?
     @State private var composeProject: String?
     @State private var sendError: String?
 
@@ -25,8 +24,16 @@ struct HomeView: View {
 
     // MARK: List
 
-    private var visible: [PaiSession] {
-        store.sessions.filter { projectFilter == nil || $0.project == projectFilter }
+    private static let workspace = "Workspace"
+
+    /// Threads by project, the workspace first, then the projects alphabetically; within a group the ones needing attention first.
+    private var groups: [(project: String, sessions: [PaiSession])] {
+        let byProject = Dictionary(grouping: store.sessions) { $0.project ?? Self.workspace }
+        return byProject.keys.sorted { a, b in
+            if a == Self.workspace { return true }
+            if b == Self.workspace { return false }
+            return a < b
+        }.map { (project: $0, sessions: byProject[$0] ?? []) }
     }
 
     private var list: some View {
@@ -35,58 +42,29 @@ struct HomeView: View {
                 ContentUnavailableCompat(symbol: "bolt.slash", title: "Not connected", detail: error)
             } else if store.isLoading {
                 ForEach(0..<4, id: \.self) { _ in SkeletonRow() }
-            } else if visible.isEmpty {
+            } else if store.sessions.isEmpty {
                 ContentUnavailableCompat(symbol: "text.bubble", title: "No threads yet", detail: "Type or speak below to start one.")
             }
-            section("Running", visible.filter { $0.isRunning && !$0.isWaiting })
-            section("Needs you", visible.filter { $0.isWaiting })
-            section("Recent", visible.filter { !$0.isRunning && !$0.isWaiting })
+            ForEach(groups, id: \.project) { group in
+                Section {
+                    ForEach(group.sessions) { session in
+                        ThreadRow(session: session)
+                            .contentShape(Rectangle())
+                            .onTapGesture { open(session) }
+                    }
+                } header: {
+                    HStack(spacing: 6) {
+                        Text(group.project).font(.caption.weight(.semibold)).textCase(.uppercase).tracking(0.6)
+                        let active = group.sessions.filter { $0.isRunning || $0.isWaiting }.count
+                        if active > 0 { Text("\(active) active").font(.caption).foregroundStyle(Color.accentColor) }
+                    }
+                    .foregroundStyle(.secondary)
+                }
+            }
         }
         .listStyle(.plain)
         .refreshable { store.refresh() }
-        .safeAreaInset(edge: .top) { filterBar }
         .animation(.default, value: store.sessions)
-    }
-
-    @ViewBuilder private func section(_ title: String, _ sessions: [PaiSession]) -> some View {
-        if !sessions.isEmpty {
-            Section {
-                ForEach(sessions) { session in
-                    ThreadRow(session: session)
-                        .contentShape(Rectangle())
-                        .onTapGesture { open(session) }
-                        .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
-                }
-            } header: {
-                HStack(spacing: 6) {
-                    Text(title).font(.caption.weight(.semibold)).textCase(.uppercase).tracking(0.6)
-                    Text("\(sessions.count)").font(.caption.monospacedDigit()).foregroundStyle(.tertiary)
-                }
-                .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    /// Only projects that have threads are worth filtering by.
-    private var usedProjects: [String] {
-        Array(Set(store.sessions.compactMap { $0.project })).sorted()
-    }
-
-    @ViewBuilder private var filterBar: some View {
-        if !usedProjects.isEmpty {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    FilterChip(title: "All", selected: projectFilter == nil) { projectFilter = nil }
-                    ForEach(usedProjects, id: \.self) { slug in
-                        FilterChip(title: slug, selected: projectFilter == slug) {
-                            projectFilter = projectFilter == slug ? nil : slug
-                        }
-                    }
-                }
-                .padding(.horizontal, 16).padding(.vertical, 8)
-            }
-            .background(Color(.systemBackground))
-        }
     }
 
     // MARK: Compose
@@ -107,7 +85,6 @@ struct HomeView: View {
         }
         .padding(.horizontal, 16).padding(.top, 6)
         .background(Color(.systemBackground))
-        .onChange(of: projectFilter) { composeProject = $0 }
     }
 
     private func newThread(_ text: String) {
@@ -119,23 +96,6 @@ struct HomeView: View {
                 sendError = error.localizedDescription
             }
         }
-    }
-}
-
-@available(iOS 16.0, *)
-struct FilterChip: View {
-    let title: String
-    let selected: Bool
-    let action: () -> Void
-    var body: some View {
-        Button(action: action) {
-            Text(title)
-                .font(.caption.weight(.medium))
-                .padding(.horizontal, 10).padding(.vertical, 5)
-                .background(selected ? Color.accentColor : Color(.secondarySystemBackground), in: Capsule())
-                .foregroundStyle(selected ? Color.white : Color.primary)
-        }
-        .buttonStyle(.plain)
     }
 }
 
