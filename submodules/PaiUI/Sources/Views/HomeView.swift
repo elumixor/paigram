@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Every project with its threads, the ones that need you first, and a way to start another.
+/// Every project with its threads, the ones that need you first; search and a new thread in the bar.
 @available(iOS 16.0, *)
 struct HomeView: View {
     let open: (PaiSession) -> Void
@@ -8,6 +8,9 @@ struct HomeView: View {
     let close: () -> Void
     @EnvironmentObject private var store: PaiStore
     @State private var expanded: Set<String> = []
+    @State private var searching = false
+    @State private var query = ""
+    @FocusState private var searchFocused: Bool
 
     private static let general = "General"
     private static let shown = 3
@@ -31,35 +34,73 @@ struct HomeView: View {
         }
         let known = Set(store.projects.map(\.slug))
         let orphans = bySlug.keys.filter { $0 != Self.general && !known.contains($0) }.sorted()
-        return [Group(id: Self.general, symbol: PaiProjectIcon.general, sessions: sorted(bySlug[Self.general]))]
+        let all = [Group(id: Self.general, symbol: PaiProjectIcon.general, sessions: sorted(bySlug[Self.general]))]
             + store.projects.map { Group(id: $0.slug, symbol: PaiProjectIcon.symbol($0), sessions: sorted(bySlug[$0.slug])) }
             + orphans.map { Group(id: $0, symbol: "folder", sessions: sorted(bySlug[$0])) }
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return all }
+        return all.compactMap { group in
+            if group.id.lowercased().contains(q) { return group }
+            let matching = group.sessions.filter { $0.displayTitle.lowercased().contains(q) }
+            return matching.isEmpty ? nil : Group(id: group.id, symbol: group.symbol, sessions: matching)
+        }
     }
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                list
-                Button(action: newThread) {
-                    Label("New thread", systemImage: "plus")
-                        .font(.body.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
+            list
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button(action: searching ? stopSearch : close) { Image(systemName: "chevron.left") }
+                    }
+                    ToolbarItem(placement: .principal) { titleOrSearch }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        HStack(spacing: 14) {
+                            if !searching {
+                                Button(action: startSearch) { Image(systemName: "magnifyingglass") }
+                            }
+                            Button(action: newThread) { Image(systemName: "square.and.pencil") }
+                            if let error = store.connectionError { Image(systemName: "bolt.slash").foregroundStyle(.red).help(error) }
+                        }
+                    }
                 }
-                .buttonStyle(.borderedProminent)
-                .padding(.horizontal, 16).padding(.vertical, 10)
-                .background(Color(.systemBackground))
-            }
-            .navigationTitle("Projects")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button(action: close) { Image(systemName: "chevron.left") } }
-                ToolbarItem(placement: .topBarTrailing) {
-                    if let error = store.connectionError { Image(systemName: "bolt.slash").foregroundStyle(.red).help(error) }
-                }
-            }
         }
         .onAppear(perform: store.start)
+    }
+
+    /// The title, or the search field grown into its place.
+    @ViewBuilder private var titleOrSearch: some View {
+        if searching {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Project or thread", text: $query)
+                    .focused($searchFocused)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .submitLabel(.search)
+                if !query.isEmpty {
+                    Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                }
+            }
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .background(Color(.secondarySystemBackground), in: Capsule())
+            .frame(minWidth: 240)
+            .transition(.scale(scale: 0.6, anchor: .trailing).combined(with: .opacity))
+        } else {
+            Text("Projects").font(.headline).transition(.opacity)
+        }
+    }
+
+    private func startSearch() {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { searching = true }
+        searchFocused = true
+    }
+
+    private func stopSearch() {
+        query = ""
+        searchFocused = false
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { searching = false }
     }
 
     private var list: some View {
@@ -90,20 +131,30 @@ struct HomeView: View {
                         if group.active > 0 { Text("\(group.active) active").font(.caption).foregroundStyle(Color.accentColor) }
                     }
                     .foregroundStyle(.secondary)
+                    .padding(.top, group.sessions.isEmpty ? 0 : 6)
                 }
             }
         }
         .listStyle(.plain)
+        .listSectionSpacingCompat()
         .refreshable { store.refresh() }
         .animation(.default, value: store.sessions)
     }
 
     /// Everything running or waiting, then the latest few unless the group is opened up.
     private func visibleSessions(_ group: Group) -> [PaiSession] {
-        if expanded.contains(group.id) { return group.sessions }
+        if expanded.contains(group.id) || !query.isEmpty { return group.sessions }
         let active = group.sessions.filter { $0.isRunning || $0.isWaiting }
         let rest = group.sessions.filter { !($0.isRunning || $0.isWaiting) }
         return active + rest.prefix(max(0, Self.shown - active.count))
+    }
+}
+
+@available(iOS 16.0, *)
+private extension View {
+    /// Tight section spacing on the systems that have the knob; the older list gets its default.
+    @ViewBuilder func listSectionSpacingCompat() -> some View {
+        if #available(iOS 17.0, *) { self.listSectionSpacing(.compact) } else { self }
     }
 }
 

@@ -94,8 +94,9 @@ public final class PaiStore: ObservableObject {
         do {
             async let tasks = client.tasks()
             async let projects = client.projects()
-            let (fetched, fetchedProjects) = try await (tasks, projects)
-            self.sessions = Self.merge(live: fetched.live, recent: fetched.recent)
+            async let held = client.allThreads()
+            let (fetched, fetchedProjects, fetchedHeld) = try await (tasks, projects, held)
+            self.sessions = Self.merge(live: fetched.live, recent: fetched.recent, held: fetchedHeld.map(\.asSession))
             self.projects = fetchedProjects
             connectionError = nil
             persist()
@@ -106,11 +107,12 @@ public final class PaiStore: ObservableObject {
     }
 
     /// Live processes win over their database rows; sorted so the ones needing attention come first.
-    private static func merge(live: [PaiSession], recent: [PaiSession]) -> [PaiSession] {
+    private static func merge(live: [PaiSession], recent: [PaiSession], held: [PaiSession] = []) -> [PaiSession] {
         var byId: [String: PaiSession] = [:]
-        for session in recent { byId[session.sessionId] = session }
+        for session in held { byId[session.sessionId] = session }
+        for session in recent { byId[session.sessionId] = session.withCwd(byId[session.sessionId]?.cwd) }
         // A live process knows its state; only the database row remembers the last reply.
-        for session in live { byId[session.sessionId] = session.withLastResult(byId[session.sessionId]?.lastResult) }
+        for session in live { byId[session.sessionId] = session.withLastResult(byId[session.sessionId]?.lastResult).withCwd(byId[session.sessionId]?.cwd) }
         return byId.values.filter { $0.parent == nil }.sorted { a, b in
             let ra = a.isWaiting ? 0 : a.isRunning ? 1 : 2
             let rb = b.isWaiting ? 0 : b.isRunning ? 1 : 2
@@ -149,6 +151,19 @@ public final class PaiStore: ObservableObject {
     }
 
     public func telegramInfo() async throws -> PaiTelegramInfo { try await client.telegramInfo() }
+
+    /// Brings a conversation held on disk to life and waits for its Telegram topic.
+    public func adopt(_ session: PaiSession) async throws -> PaiSession {
+        guard let cwd = session.cwd else { throw PaiClientError(message: "This conversation has no folder to open it in") }
+        var live = try await client.adopt(session: session.sessionId, cwd: cwd, title: session.title)
+        for _ in 0..<Self.topicAttempts where live.threadId == nil {
+            try await Task.sleep(nanoseconds: Self.topicWait)
+            let tasks = try await client.tasks()
+            if let fresh = (tasks.live + tasks.recent).first(where: { $0.sessionId == live.sessionId }) { live = fresh }
+        }
+        sessions = Self.merge(live: [live], recent: sessions)
+        return live
+    }
 }
 
 private extension PaiSession {
@@ -156,13 +171,20 @@ private extension PaiSession {
         guard lastResult == nil, let result else { return self }
         return PaiSession(sessionId: sessionId, shortId: shortId, kind: kind, title: title, project: project, state: state,
                           lastActivity: lastActivity, costUsd: costUsd, turns: turns, model: model, lastTool: lastTool,
-                          recentTools: recentTools, waiting: waiting, lastResult: result, parent: parent, threadId: threadId)
+                          recentTools: recentTools, waiting: waiting, lastResult: result, parent: parent, threadId: threadId, cwd: cwd)
+    }
+
+    func withCwd(_ path: String?) -> PaiSession {
+        guard let path, cwd != path else { return self }
+        return PaiSession(sessionId: sessionId, shortId: shortId, kind: kind, title: title, project: project, state: state,
+                          lastActivity: lastActivity, costUsd: costUsd, turns: turns, model: model, lastTool: lastTool,
+                          recentTools: recentTools, waiting: waiting, lastResult: lastResult, parent: parent, threadId: threadId, cwd: path)
     }
 
     func withTool(_ summary: String) -> PaiSession {
         PaiSession(sessionId: sessionId, shortId: shortId, kind: kind, title: title, project: project, state: .busy,
                    lastActivity: Date().timeIntervalSince1970 * 1000, costUsd: costUsd, turns: turns, model: model,
                    lastTool: summary, recentTools: ((recentTools ?? []) + [summary]).suffix(5).map { $0 },
-                   waiting: false, lastResult: lastResult, parent: parent, threadId: threadId)
+                   waiting: false, lastResult: lastResult, parent: parent, threadId: threadId, cwd: cwd)
     }
 }
