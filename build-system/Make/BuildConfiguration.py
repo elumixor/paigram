@@ -221,6 +221,18 @@ def resolve_aps_environment_from_directory(source_path, team_id, bundle_id):
     return None
 
 
+def fill_missing_profiles(destination_path):
+    """Extensions are left out of Paigram's builds, but Bazel still resolves their profile labels:
+    the app's own profile stands in for any that were not provided."""
+    app_profile = destination_path + '/Telegram.mobileprovision'
+    if not os.path.isfile(app_profile):
+        return
+    for name in ['Intents', 'NotificationContent', 'NotificationService', 'Share', 'WatchApp', 'WatchExtension', 'Widget', 'BroadcastUpload']:
+        target = destination_path + '/' + name + '.mobileprovision'
+        if not os.path.isfile(target):
+            shutil.copyfile(app_profile, target)
+
+
 def copy_certificates_from_directory(source_path, destination_path):
     for file_name in os.listdir(source_path):
         file_path = source_path + '/' + file_name
@@ -310,6 +322,7 @@ class DirectoryCodesigningSource(CodesigningSource):
 
     def copy_profiles_to_destination(self, destination_path):
         copy_profiles_from_directory(source_path=self.directory_path + '/profiles', destination_path=destination_path, team_id=self.team_id, bundle_id=self.bundle_id)
+        fill_missing_profiles(destination_path)
 
     def resolve_aps_environment(self):
         return resolve_aps_environment_from_directory(source_path=self.directory_path + '/profiles', team_id=self.team_id, bundle_id=self.bundle_id)
