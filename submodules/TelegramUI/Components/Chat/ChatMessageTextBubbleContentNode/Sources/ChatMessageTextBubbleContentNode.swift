@@ -462,6 +462,17 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
                     rawText = (rawText as NSString).substring(to: trailer.textEnd)
                     messageEntities = messageEntities?.filter { $0.range.upperBound <= trailer.textEnd }
                 }
+                // Nor is the project line this client put in front of a thread's first message.
+                if PaiChat.isBot(item.message.peers[item.message.id.peerId]) {
+                    let cut = PaiChat.prefixLength(in: rawText)
+                    if cut > 0 {
+                        rawText = (rawText as NSString).substring(from: cut)
+                        messageEntities = messageEntities?.compactMap { entity in
+                            guard entity.range.lowerBound >= cut else { return nil }
+                            return MessageTextEntity(range: (entity.range.lowerBound - cut)..<(entity.range.upperBound - cut), type: entity.type)
+                        }
+                    }
+                }
                 
                 var formattedDateUpdatePeriod: Int32?
                 if let messageEntities {

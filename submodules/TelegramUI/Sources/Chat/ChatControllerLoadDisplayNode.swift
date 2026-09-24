@@ -4869,7 +4869,30 @@ extension ChatControllerImpl {
                 let _ = navigationController.popToViewController(self, animated: true)
                 self.updateChatLocationThread(threadId: threadId, animationDirection: nil)
             }
+            home.newThread = { [weak self, weak navigationController] in
+                guard let self, let navigationController else {
+                    return
+                }
+                PaiChat.pendingProject = nil
+                let _ = navigationController.popToViewController(self, animated: true)
+                self.updateChatLocationThread(threadId: nil, animationDirection: nil)
+            }
             navigationController.pushViewController(home)
+        }
+        interfaceInteraction.selectPaiProject = { [weak self] in
+            guard let self, let navigationController = self.navigationController as? NavigationController else {
+                return
+            }
+            if #available(iOS 16.0, *) {
+                let picker = PaiProjectPickerController(context: self.context)
+                picker.picked = { [weak navigationController, weak picker] in
+                    guard let navigationController, let picker else {
+                        return
+                    }
+                    navigationController.filterController(picker, animated: true)
+                }
+                navigationController.pushViewController(picker)
+            }
         }
         self.interfaceInteraction = interfaceInteraction
         

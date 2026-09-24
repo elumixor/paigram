@@ -170,6 +170,8 @@ public final class ChatPanelInterfaceInteraction {
     public let openWebView: (String, String, Bool, ChatOpenWebViewSource) -> Void
     /// The pai bot's chat: its menu button opens the Pai screen instead of bot commands.
     public var openPai: (() -> Void)?
+    /// The pai bot's chat, before a first message: pick the project the new thread starts in.
+    public var selectPaiProject: (() -> Void)?
     public let updateShowWebView: ((Bool) -> Bool) -> Void
     public let insertText: (NSAttributedString) -> Void
     public let backwardsDeleteText: () -> Void

@@ -1,75 +1,96 @@
 import SwiftUI
 
-/// Every thread at a glance, the composer always in reach.
+/// Every project with its threads, the ones that need you first, and a way to start another.
 @available(iOS 16.0, *)
 struct HomeView: View {
     let open: (PaiSession) -> Void
+    let newThread: () -> Void
     let close: () -> Void
     @EnvironmentObject private var store: PaiStore
-    @State private var composeProject: String?
-    @State private var sendError: String?
+    @State private var expanded: Set<String> = []
+
+    private static let general = "General"
+    private static let shown = 3
+
+    private struct Group: Identifiable {
+        let id: String
+        let symbol: String
+        let sessions: [PaiSession]
+        var active: Int { sessions.filter { $0.isRunning || $0.isWaiting }.count }
+    }
+
+    /// The general workspace first, then every project the daemon knows, each with its threads (attention first).
+    private var groups: [Group] {
+        let bySlug = Dictionary(grouping: store.sessions) { $0.project ?? Self.general }
+        let sorted: ([PaiSession]?) -> [PaiSession] = { sessions in
+            (sessions ?? []).sorted { a, b in
+                let ra = a.isWaiting ? 0 : a.isRunning ? 1 : 2
+                let rb = b.isWaiting ? 0 : b.isRunning ? 1 : 2
+                return ra != rb ? ra < rb : a.lastActivity > b.lastActivity
+            }
+        }
+        let known = Set(store.projects.map(\.slug))
+        let orphans = bySlug.keys.filter { $0 != Self.general && !known.contains($0) }.sorted()
+        return [Group(id: Self.general, symbol: PaiProjectIcon.general, sessions: sorted(bySlug[Self.general]))]
+            + store.projects.map { Group(id: $0.slug, symbol: PaiProjectIcon.symbol($0), sessions: sorted(bySlug[$0.slug])) }
+            + orphans.map { Group(id: $0, symbol: "folder", sessions: sorted(bySlug[$0])) }
+    }
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
                 list
-                if let sendError {
-                    Text(sendError).font(.footnote).foregroundStyle(.red).padding(.horizontal, 16).padding(.bottom, 4)
+                Button(action: newThread) {
+                    Label("New thread", systemImage: "plus")
+                        .font(.body.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
                 }
-                projectPicker
-                Composer(placeholder: "New thread", isBusy: false, onSend: newThread, onStop: nil)
+                .buttonStyle(.borderedProminent)
+                .padding(.horizontal, 16).padding(.vertical, 10)
+                .background(Color(.systemBackground))
             }
-            .navigationTitle("Pai")
+            .navigationTitle("Projects")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button(action: close) { Image(systemName: "chevron.left") }
-                }
+                ToolbarItem(placement: .topBarLeading) { Button(action: close) { Image(systemName: "chevron.left") } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    if let error = store.connectionError {
-                        Image(systemName: "bolt.slash").foregroundStyle(.red).help(error)
-                    }
+                    if let error = store.connectionError { Image(systemName: "bolt.slash").foregroundStyle(.red).help(error) }
                 }
             }
         }
         .onAppear(perform: store.start)
     }
 
-    // MARK: List
-
-    private static let workspace = "Workspace"
-
-    /// Threads by project, the workspace first, then the projects alphabetically; within a group the ones needing attention first.
-    private var groups: [(project: String, sessions: [PaiSession])] {
-        let byProject = Dictionary(grouping: store.sessions) { $0.project ?? Self.workspace }
-        return byProject.keys.sorted { a, b in
-            if a == Self.workspace { return true }
-            if b == Self.workspace { return false }
-            return a < b
-        }.map { (project: $0, sessions: byProject[$0] ?? []) }
-    }
-
     private var list: some View {
         List {
-            if let error = store.connectionError, store.sessions.isEmpty {
+            if let error = store.connectionError, store.sessions.isEmpty, store.projects.isEmpty {
                 ContentUnavailableCompat(symbol: "bolt.slash", title: "Not connected", detail: error)
             } else if store.isLoading {
                 ForEach(0..<4, id: \.self) { _ in SkeletonRow() }
-            } else if store.sessions.isEmpty {
-                ContentUnavailableCompat(symbol: "text.bubble", title: "No threads yet", detail: "Type or speak below to start one.")
             }
-            ForEach(groups, id: \.project) { group in
+            ForEach(groups) { group in
                 Section {
-                    ForEach(group.sessions) { session in
+                    let visible = visibleSessions(group)
+                    ForEach(visible) { session in
                         ThreadRow(session: session)
                             .contentShape(Rectangle())
                             .onTapGesture { open(session) }
                     }
+                    let hidden = group.sessions.count - visible.count
+                    if hidden > 0 {
+                        Button { expanded.insert(group.id) } label: {
+                            Text("\(hidden) more").font(.footnote).foregroundStyle(.secondary)
+                        }
+                    }
+                    if group.sessions.isEmpty {
+                        Text("No threads").font(.footnote).foregroundStyle(.tertiary)
+                    }
                 } header: {
                     HStack(spacing: 6) {
-                        Text(group.project).font(.caption.weight(.semibold)).textCase(.uppercase).tracking(0.6)
-                        let active = group.sessions.filter { $0.isRunning || $0.isWaiting }.count
-                        if active > 0 { Text("\(active) active").font(.caption).foregroundStyle(Color.accentColor) }
+                        Image(systemName: group.symbol).font(.caption)
+                        Text(group.id).font(.caption.weight(.semibold)).textCase(.uppercase).tracking(0.6)
+                        if group.active > 0 { Text("\(group.active) active").font(.caption).foregroundStyle(Color.accentColor) }
                     }
                     .foregroundStyle(.secondary)
                 }
@@ -80,35 +101,12 @@ struct HomeView: View {
         .animation(.default, value: store.sessions)
     }
 
-    // MARK: Compose
-
-    private var projectPicker: some View {
-        HStack {
-            Menu {
-                Button("Workspace") { composeProject = nil }
-                ForEach(store.projects) { project in
-                    Button(project.slug) { composeProject = project.slug }
-                }
-            } label: {
-                Label(composeProject ?? "Workspace", systemImage: "folder")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 16).padding(.top, 6)
-        .background(Color(.systemBackground))
-    }
-
-    private func newThread(_ text: String) {
-        sendError = nil
-        Task {
-            do {
-                open(try await store.newThread(text: text, project: composeProject))
-            } catch {
-                sendError = error.localizedDescription
-            }
-        }
+    /// Everything running or waiting, then the latest few unless the group is opened up.
+    private func visibleSessions(_ group: Group) -> [PaiSession] {
+        if expanded.contains(group.id) { return group.sessions }
+        let active = group.sessions.filter { $0.isRunning || $0.isWaiting }
+        let rest = group.sessions.filter { !($0.isRunning || $0.isWaiting) }
+        return active + rest.prefix(max(0, Self.shown - active.count))
     }
 }
 
