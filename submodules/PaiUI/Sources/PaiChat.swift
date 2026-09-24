@@ -12,6 +12,9 @@ public enum PaiChat {
         return user.addressName?.lowercased() == PaiSecrets.botUsername.lowercased()
     }
 
+    /// The bot's peer id, learned when its history is first built; lets list items tell the chat apart.
+    public static var botPeerId: PeerId?
+
     /// The topic the chat was on last time, so it opens there again.
     public static var lastThreadId: Int64? {
         get {

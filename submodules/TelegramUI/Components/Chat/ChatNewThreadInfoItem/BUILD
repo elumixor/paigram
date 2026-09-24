@@ -14,6 +14,7 @@ swift_library(
         "//submodules/AsyncDisplayKit",
         "//submodules/SSignalKit/SwiftSignalKit",
         "//submodules/TelegramCore",
+        "//submodules/Postbox",
         "//submodules/TelegramPresentationData",
         "//submodules/TextFormat",
         "//submodules/AccountContext",
@@ -23,6 +24,7 @@ swift_library(
         "//submodules/TelegramStringFormatting",
         "//submodules/ComponentFlow",
         "//submodules/Components/BundleIconComponent",
+        "//submodules/PaiUI:PaiUI",
     ],
     visibility = [
         "//visibility:public",

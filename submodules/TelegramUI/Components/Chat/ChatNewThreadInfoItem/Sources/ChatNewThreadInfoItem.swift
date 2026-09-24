@@ -4,6 +4,7 @@ import Display
 import AsyncDisplayKit
 import SwiftSignalKit
 import TelegramCore
+import Postbox
 import TelegramPresentationData
 import TextFormat
 import AccountContext
@@ -14,20 +15,24 @@ import TelegramStringFormatting
 import ChatControllerInteraction
 import ComponentFlow
 import BundleIconComponent
+import PaiUI
 
 public final class ChatNewThreadInfoItem: ListViewItem {
     fileprivate let controllerInteraction: ChatControllerInteraction
     fileprivate let presentationData: ChatPresentationData
     fileprivate let context: AccountContext
+    fileprivate let isPaiBot: Bool
     
     public init(
         controllerInteraction: ChatControllerInteraction,
         presentationData: ChatPresentationData,
-        context: AccountContext
+        context: AccountContext,
+        peerId: PeerId?
     ) {
         self.controllerInteraction = controllerInteraction
         self.presentationData = presentationData
         self.context = context
+        self.isPaiBot = peerId != nil && peerId == PaiChat.botPeerId
     }
     
     public func nodeConfiguredForParams(async: @escaping (@escaping () -> Void) -> Void, params: ListViewItemLayoutParams, synchronousLoads: Bool, previousItem: ListViewItem?, nextItem: ListViewItem?, completion: @escaping (ListViewItemNode, @escaping () -> (Signal<Void, NoError>?, (ListViewItemApply) -> Void)) -> Void) {
@@ -79,6 +84,11 @@ public final class ChatNewThreadInfoItemNode: ListViewItemNode, ASGestureRecogni
     public let offsetContainer: ASDisplayNode
     public let titleNode: TextNode
     public let subtitleNode: TextNode
+    /// The pai bot's chat: the project the new thread starts in.
+    private let projectButton = ASDisplayNode()
+    private let projectIcon = ASImageNode()
+    private let projectLabel = ImmediateTextNode()
+    private var projectObserver: NSObjectProtocol?
     var arrowView: UIImageView?
     let iconBackground: SimpleLayer
     var icon = ComponentView<Empty>()
@@ -112,6 +122,49 @@ public final class ChatNewThreadInfoItemNode: ListViewItemNode, ASGestureRecogni
         self.addSubnode(self.offsetContainer)
         self.offsetContainer.addSubnode(self.titleNode)
         self.offsetContainer.addSubnode(self.subtitleNode)
+
+        self.projectIcon.displaysAsynchronously = false
+        self.projectIcon.contentMode = .center
+        self.projectLabel.displaysAsynchronously = false
+        self.projectLabel.maximumNumberOfLines = 1
+        self.projectButton.cornerRadius = 10.0
+        self.projectButton.isHidden = true
+        self.projectButton.addSubnode(self.projectIcon)
+        self.projectButton.addSubnode(self.projectLabel)
+        self.projectButton.isUserInteractionEnabled = false
+        self.offsetContainer.addSubnode(self.projectButton)
+        self.projectObserver = NotificationCenter.default.addObserver(forName: PaiChat.projectChanged, object: nil, queue: .main) { [weak self] _ in
+            self?.updateProjectButton()
+        }
+    }
+
+    deinit {
+        if let projectObserver = self.projectObserver {
+            NotificationCenter.default.removeObserver(projectObserver)
+        }
+    }
+
+    @objc private func projectPressed() {
+        self.item?.controllerInteraction.selectPaiProject?()
+    }
+
+    private static let projectRowHeight: CGFloat = 34.0
+
+    /// Relabels the row in place; its size is fixed, so no relayout is needed.
+    private func updateProjectButton(width: CGFloat? = nil) {
+        guard let item = self.item, !self.projectButton.isHidden else { return }
+        let width = width ?? self.projectButton.frame.width
+        let color = serviceMessageColorComponents(theme: item.presentationData.theme.theme, wallpaper: item.presentationData.theme.wallpaper).primaryText
+        let project = PaiChat.pendingProject
+        self.projectButton.backgroundColor = color.withAlphaComponent(0.14)
+        self.projectIcon.image = UIImage(systemName: project.map(PaiProjectIcon.symbol) ?? "folder.badge.plus", withConfiguration: UIImage.SymbolConfiguration(pointSize: 13.0, weight: .medium))?.withTintColor(color, renderingMode: .alwaysOriginal)
+        self.projectLabel.attributedText = NSAttributedString(string: project?.slug ?? "Select project", font: Font.medium(14.0), textColor: color)
+        let labelSize = self.projectLabel.updateLayout(CGSize(width: max(1.0, width - 40.0), height: Self.projectRowHeight))
+        let iconWidth: CGFloat = 20.0
+        let contentWidth = iconWidth + 6.0 + labelSize.width
+        let x = floor((width - contentWidth) / 2.0)
+        self.projectIcon.frame = CGRect(x: x, y: floor((Self.projectRowHeight - iconWidth) / 2.0), width: iconWidth, height: iconWidth)
+        self.projectLabel.frame = CGRect(origin: CGPoint(x: x + iconWidth + 6.0, y: floor((Self.projectRowHeight - labelSize.height) / 2.0)), size: labelSize)
     }
                 
     override public func didLoad() {
@@ -134,6 +187,10 @@ public final class ChatNewThreadInfoItemNode: ListViewItemNode, ASGestureRecogni
     }
     
     @objc private func tapGesture(_ gestureRecognizer: UITapGestureRecognizer) {
+        if !self.projectButton.isHidden, self.projectButton.frame.contains(gestureRecognizer.location(in: self.offsetContainer.view)) {
+            self.projectPressed()
+            return
+        }
         if let item = self.item {
             item.controllerInteraction.updateInputMode { mode in
                 if case .none = mode {
@@ -199,7 +256,12 @@ public final class ChatNewThreadInfoItemNode: ListViewItemNode, ASGestureRecogni
             backgroundSize.height += subtitleLayout.size.height
             backgroundSize.height += 10.0
 
-            backgroundSize.width = horizontalContentInset * 2.0 + max(titleLayout.size.width, subtitleLayout.size.width)
+            let showsProject = item.controllerInteraction.selectPaiProject != nil && item.isPaiBot
+            if showsProject {
+                backgroundSize.height += Self.projectRowHeight + 12.0
+            }
+
+            backgroundSize.width = horizontalContentInset * 2.0 + max(titleLayout.size.width, subtitleLayout.size.width, showsProject ? 200.0 : 0.0)
             
             backgroundSize.height += bottomInset
          
@@ -267,6 +329,14 @@ public final class ChatNewThreadInfoItemNode: ListViewItemNode, ASGestureRecogni
                     strongSelf.subtitleNode.frame = subtitleFrame
                     contentOriginY += subtitleLayout.size.height
                     contentOriginY += 20.0
+
+                    strongSelf.projectButton.isHidden = !showsProject
+                    if showsProject {
+                        let rowWidth = backgroundSize.width - horizontalContentInset * 2.0
+                        strongSelf.projectButton.frame = CGRect(x: backgroundFrame.minX + horizontalContentInset, y: contentOriginY - 6.0, width: rowWidth, height: Self.projectRowHeight)
+                        strongSelf.updateProjectButton(width: rowWidth)
+                        contentOriginY += Self.projectRowHeight + 12.0
+                    }
                     
                     if arrowView.image == nil {
                         arrowView.image = generateTintedImage(image: UIImage(bundleImageName: "Chat/Input/Search/DownButton"), color: .white)?.withRenderingMode(.alwaysTemplate)

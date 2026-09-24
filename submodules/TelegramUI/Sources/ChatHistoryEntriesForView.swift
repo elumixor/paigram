@@ -3,6 +3,7 @@ import UIKit
 import Postbox
 import TelegramCore
 import TemporaryCachedPeerDataManager
+import PaiUI
 import Emoji
 import AccountContext
 import TelegramPresentationData
@@ -341,7 +342,15 @@ func chatHistoryEntriesForView(
     }
     
     var addBotForumHeader = false
-    if location.threadId == nil, let user = chatPeer as? TelegramUser, let botInfo = user.botInfo, botInfo.flags.contains(.hasForum), botInfo.flags.contains(.forumManagedByUser), !entries.isEmpty, !view.holeEarlier, !view.isLoading {
+    // The pai bot's chat outside a topic is where a thread starts: nothing but the card, no other topics' messages.
+    let isPaiBot = PaiChat.isBot(chatPeer)
+    if isPaiBot {
+        PaiChat.botPeerId = chatPeer?.id
+    }
+    if isPaiBot, location.threadId == nil, !view.isLoading {
+        entries.removeAll()
+        addBotForumHeader = true
+    } else if location.threadId == nil, let user = chatPeer as? TelegramUser, let botInfo = user.botInfo, botInfo.flags.contains(.hasForum), botInfo.flags.contains(.forumManagedByUser), !entries.isEmpty, !view.holeEarlier, !view.isLoading {
         addBotForumHeader = true
         outer: for i in (0 ..< entries.count).reversed() {
             switch entries[i] {

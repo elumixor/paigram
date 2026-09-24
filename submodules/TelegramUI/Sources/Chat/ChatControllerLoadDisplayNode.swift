@@ -4879,21 +4879,6 @@ extension ChatControllerImpl {
             }
             navigationController.pushViewController(home)
         }
-        interfaceInteraction.selectPaiProject = { [weak self] in
-            guard let self, let navigationController = self.effectiveNavigationController else {
-                return
-            }
-            if #available(iOS 16.0, *) {
-                let picker = PaiProjectPickerController(context: self.context)
-                picker.picked = { [weak navigationController, weak picker] in
-                    guard let navigationController, let picker else {
-                        return
-                    }
-                    navigationController.filterController(picker, animated: true)
-                }
-                navigationController.pushViewController(picker)
-            }
-        }
         self.interfaceInteraction = interfaceInteraction
         
         if let search = self.focusOnSearchAfterAppearance {

@@ -5947,6 +5947,24 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
         }, automaticMediaDownloadSettings: self.automaticMediaDownloadSettings, pollActionState: ChatInterfacePollActionState(), stickerSettings: self.stickerSettings, presentationContext: ChatPresentationContext(context: context, backgroundNode: self.chatBackgroundNode))
         controllerInteraction.enableFullTranslucency = context.sharedContext.energyUsageSettings.fullTranslucency
         
+        // The pai bot's New Thread card: which project the thread starts in. Whether this chat is the
+        // bot's is only known once the peer has loaded, so the card checks the peer itself.
+        controllerInteraction.selectPaiProject = { [weak self] in
+            guard let self, let navigationController = self.effectiveNavigationController else {
+                return
+            }
+            if #available(iOS 16.0, *) {
+                let picker = PaiProjectPickerController(context: self.context)
+                picker.picked = { [weak navigationController, weak picker] in
+                    guard let navigationController, let picker else {
+                        return
+                    }
+                    navigationController.filterController(picker, animated: true)
+                }
+                navigationController.pushViewController(picker)
+            }
+        }
+        
         self.controllerInteraction = controllerInteraction
         
         self.navigationBar?.allowsCustomTransition = { [weak self] in

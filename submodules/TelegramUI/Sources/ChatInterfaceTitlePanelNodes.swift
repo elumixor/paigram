@@ -1,5 +1,4 @@
 import Foundation
-import PaiUI
 import UIKit
 import TelegramCore
 import AccountContext
@@ -107,17 +106,6 @@ func titlePanelForChatPresentationInterfaceState(_ chatPresentationInterfaceStat
             break
         default:
             selectedContext = nil
-        }
-    }
-    
-    // The pai bot's chat, before a first message: the project the new thread will start in.
-    if case .peer = chatPresentationInterfaceState.chatLocation, chatPresentationInterfaceState.chatLocation.threadId == nil, PaiChat.isBot(chatPresentationInterfaceState.renderedPeer?.peer) {
-        if let currentPanel = currentPanel as? ChatPaiProjectTitlePanelNode {
-            return currentPanel
-        } else {
-            let panel = ChatPaiProjectTitlePanelNode()
-            panel.interfaceInteraction = interfaceInteraction
-            return panel
         }
     }
     
