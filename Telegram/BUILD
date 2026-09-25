@@ -160,7 +160,7 @@ genrule(
     ],
 )
 
-minimum_os_version = "13.0"
+minimum_os_version = "15.0"
 
 notificationServiceExtensionVersion = "v1"
 
@@ -1635,6 +1635,8 @@ plist_fragment(
     <string>You can use Face ID to unlock the app.</string>
     <key>NSLocationAlwaysUsageDescription</key>
     <string>When you send your location to your friends, Telegram needs access to show them a map. You also need this to send locations from an Apple Watch.</string>
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+    <string>When you send your location to your friends, Telegram needs access to show them a map. You also need this to send locations from an Apple Watch.</string>
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>When you send your location to your friends, Telegram needs access to show them a map.</string>
     <key>NSMicrophoneUsageDescription</key>
@@ -1763,7 +1765,7 @@ ios_application(
     bundle_id = "{telegram_bundle_id}".format(
         telegram_bundle_id = telegram_bundle_id,
     ),
-    families = ["iphone", "ipad"],
+    families = ["iphone"],
     minimum_os_version = minimum_os_version,
     provisioning_profile = select({
         ":disableProvisioningProfilesSetting": None,
@@ -1880,7 +1882,7 @@ ios_application(
     bundle_id = "{telegram_bundle_id}".format(
         telegram_bundle_id = telegram_bundle_id,
     ),
-    families = ["iphone", "ipad"],
+    families = ["iphone"],
     minimum_os_version = minimum_os_version,
     provisioning_profile = select({
         ":disableProvisioningProfilesSetting": None,
@@ -1923,7 +1925,7 @@ ios_application(
     bundle_id = "{telegram_bundle_id}".format(
         telegram_bundle_id = telegram_bundle_id,
     ),
-    families = ["iphone", "ipad"],
+    families = ["iphone"],
     minimum_os_version = minimum_os_version,
     provisioning_profile = select({
         ":disableProvisioningProfilesSetting": None,
@@ -1948,7 +1950,7 @@ ios_application(
     bundle_id = "{telegram_bundle_id}".format(
         telegram_bundle_id = telegram_bundle_id,
     ),
-    families = ["iphone", "ipad"],
+    families = ["iphone"],
     minimum_os_version = minimum_os_version,
     provisioning_profile = select({
         ":disableProvisioningProfilesSetting": None,
