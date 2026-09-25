@@ -21,7 +21,8 @@ public struct PaiRichMeta: Decodable, Equatable {
 
     public static let version = 1
     public var isStatus: Bool { kind == "status" }
-    public var isBusy: Bool { state == "busy" || state == "starting" }
+    /// A process coming up with a turn to answer; one revived with nothing to do is not busy.
+    public var isBusy: Bool { state == "busy" || (state == "starting" && startedAt != nil) }
     public var isWaiting: Bool { state == "waiting" }
 }
 

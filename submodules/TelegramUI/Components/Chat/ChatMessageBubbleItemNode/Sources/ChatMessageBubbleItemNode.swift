@@ -5141,7 +5141,8 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
             var effectiveContentOriginX = contentOrigin.x
             var effectiveContentOriginY = useContentOrigin ? contentOrigin.y : 0.0
             if properties.isDetached {
-                effectiveContentOriginX = floorToScreenPixels((layout.size.width - relativeFrame.width) / 2.0)
+                // pai metadata sits flush with the bubble's text, the way a tool line sits above an answer; other detached content is centered.
+                effectiveContentOriginX = contentNode is ChatMessagePaiToolsBubbleContentNode ? contentOrigin.x + layoutConstants.text.bubbleInsets.left : floorToScreenPixels((layout.size.width - relativeFrame.width) / 2.0)
                 effectiveContentOriginY = layoutInsets.top
             }
             
