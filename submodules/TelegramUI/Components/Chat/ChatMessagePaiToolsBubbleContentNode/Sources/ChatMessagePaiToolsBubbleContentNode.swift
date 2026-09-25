@@ -12,7 +12,7 @@ import UIKit
 private let iconSize: CGFloat = 18.0
 private let rowHeight: CGFloat = 26.0
 private let outerInsets = UIEdgeInsets(top: 3.0, left: 0.0, bottom: 3.0, right: 8.0)
-private let dotsGap: CGFloat = 6.0
+private let dotsGap: CGFloat = 5.0
 
 /// A row of the expanded timeline: the tool's icon and what it did.
 private final class ToolRowNode: ASDisplayNode {
@@ -28,9 +28,9 @@ private final class ToolRowNode: ASDisplayNode {
     }
 }
 
-/// An ellipsis that breathes while a session works.
-private final class DotsNode: ASImageNode {
-    static let width: CGFloat = 20.0
+/// The thinking mark: a four-point spark that turns and breathes while a session works.
+private final class SparkNode: ASImageNode {
+    static let width: CGFloat = 18.0
 
     override init() {
         super.init()
@@ -39,35 +39,55 @@ private final class DotsNode: ASImageNode {
     }
 
     func update(color: UIColor) {
-        self.image = UIImage(systemName: "ellipsis", withConfiguration: UIImage.SymbolConfiguration(pointSize: 14.0, weight: .bold))?.withTintColor(color, renderingMode: .alwaysOriginal)
-        if self.layer.animation(forKey: "pulse") == nil {
-            let animation = CAKeyframeAnimation(keyPath: "opacity")
-            animation.values = [0.25, 1.0, 0.25]
-            animation.keyTimes = [0.0, 0.5, 1.0]
-            animation.duration = 1.2
-            animation.repeatCount = .infinity
-            self.layer.add(animation, forKey: "pulse")
+        self.image = UIImage(systemName: "sparkle", withConfiguration: UIImage.SymbolConfiguration(pointSize: 12.0, weight: .semibold))?.withTintColor(color, renderingMode: .alwaysOriginal)
+        if self.layer.animation(forKey: "spin") == nil {
+            let spin = CABasicAnimation(keyPath: "transform.rotation.z")
+            spin.fromValue = 0.0
+            spin.toValue = Double.pi * 2.0
+            spin.duration = 2.4
+            spin.repeatCount = .infinity
+            self.layer.add(spin, forKey: "spin")
+            let breathe = CAKeyframeAnimation(keyPath: "transform.scale")
+            breathe.values = [0.8, 1.15, 0.8]
+            breathe.keyTimes = [0.0, 0.5, 1.0]
+            breathe.duration = 1.2
+            breathe.repeatCount = .infinity
+            self.layer.add(breathe, forKey: "breathe")
         }
     }
 }
 
-/// What a pai turn did, and what a running session is doing right now, as a quiet line of text.
+/// A line of quiet text that stays readable on any wallpaper: a halo in the bubble's colour behind the glyphs.
+private func haloed(_ node: ASDisplayNode, color: UIColor) {
+    node.layer.shadowColor = color.cgColor
+    node.layer.shadowOpacity = 0.9
+    node.layer.shadowRadius = 2.0
+    node.layer.shadowOffset = .zero
+}
+
+/// What a pai turn did, and what a running session is doing right now, as quiet lines around the bubble.
 ///
-/// A message with tool metadata gets the line above its bubble, flush with the bubble's text ("Ran 3 commands,
-/// read 2 files"); a tap opens the timeline under it. A status card is nothing but the line: the current tool
-/// with a pulse and the elapsed time while a turn runs, one word once it is over. No bubble, no pill.
+/// Above the bubble: "Used 3 tools" for a finished turn (a tap opens the timeline), or the spark with the
+/// current tool and the elapsed time while a turn runs (its tools so far open the same way). Below the
+/// bubble: "Baked for 5s · done 11:11". A status card is nothing but the line above; no bubble, no pill.
 public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleContentNode {
+    /// Where the bubble ends, in this node's coordinates; the item node sets it before layout applies.
+    public var bubbleBottom: CGFloat = 0.0
+
     private let summaryNode = TextNode()
-    private let dotsNode = DotsNode()
+    private let footerNode = TextNode()
+    private let sparkNode = SparkNode()
     private let lineNode = ASDisplayNode()
     private var rowNodes: [ToolRowNode] = []
     private var expanded = false
     private var timer: SwiftSignalKit.Timer?
+    private var headerHeight: CGFloat = 0.0
 
     required public init() {
         super.init()
         self.addSubnode(self.summaryNode)
-        self.addSubnode(self.dotsNode)
+        self.addSubnode(self.footerNode)
+        self.addSubnode(self.sparkNode)
         self.addSubnode(self.lineNode)
     }
 
@@ -81,6 +101,7 @@ public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleConten
 
     override public func asyncLayoutContent() -> (_ item: ChatMessageBubbleContentItem, _ layoutConstants: ChatMessageItemLayoutConstants, _ preparePosition: ChatMessageBubblePreparePosition, _ messageSelection: Bool?, _ constrainedSize: CGSize, _ avatarInset: CGFloat) -> (ChatMessageBubbleContentProperties, CGSize?, CGFloat, (CGSize, ChatMessageBubbleContentPosition) -> (CGFloat, (CGFloat) -> (CGSize, (ListViewItemUpdateAnimation, Bool, ListViewItemApply?) -> Void))) {
         let makeSummaryLayout = TextNode.asyncLayout(self.summaryNode)
+        let makeFooterLayout = TextNode.asyncLayout(self.footerNode)
         let expanded = self.expanded
         let makeRowLayouts = self.rowNodes.map { TextNode.asyncLayout($0.textNode) }
 
@@ -89,9 +110,9 @@ public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleConten
             let meta = trailer?.meta
             let tools = meta?.tools ?? []
             let isStatus = meta?.isStatus ?? false
-            // Metadata sits above the bubble; a status card is a bare line at the bubble's place, no background.
-            let contentProperties = ChatMessageBubbleContentProperties(hidesSimpleAuthorHeader: true, headerSpacing: 0.0, hidesBackground: isStatus ? .always : .never, forceFullCorners: false, forceAlignment: .none, hidesHeaders: isStatus, isDetached: !isStatus)
-            let textColor = item.presentationData.theme.theme.chat.message.incoming.secondaryTextColor
+            let theme = item.presentationData.theme.theme
+            let textColor = theme.chat.message.incoming.primaryTextColor.withAlphaComponent(0.75)
+            let haloColor = theme.chat.message.incoming.bubble.withWallpaper.fill.first ?? theme.list.plainBackgroundColor
             let baseSize = item.presentationData.messageFont.pointSize
             let font = Font.regular(floor(baseSize * 14.0 / 17.0))
             let smallFont = Font.regular(floor(baseSize * 13.0 / 17.0))
@@ -106,11 +127,18 @@ public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleConten
                 showsActivity = false
                 summaryText = PaiToolSummary.line(tools)
             }
-            let dotsWidth = showsActivity ? DotsNode.width + dotsGap : 0.0
+            let footerText = isStatus ? "" : Self.footerText(meta, timestamp: item.message.timestamp)
+            let sparkWidth = showsActivity ? SparkNode.width + dotsGap : 0.0
+            let footerGap: CGFloat = 3.0
+
+            let belowHeight: CGFloat = footerText.isEmpty ? 0.0 : footerGap + font.pointSize + 6.0
+            // Metadata sits above the bubble and the footer below it; a status card is a bare line at the bubble's place.
+            let contentProperties = ChatMessageBubbleContentProperties(hidesSimpleAuthorHeader: true, headerSpacing: 0.0, hidesBackground: isStatus ? .always : .never, forceFullCorners: false, forceAlignment: .none, hidesHeaders: isStatus, isDetached: !isStatus, detachedBottomHeight: belowHeight)
 
             return (contentProperties, nil, CGFloat.greatestFiniteMagnitude, { constrainedSize, _ in
-                let maxTextWidth = max(1.0, constrainedSize.width - leftInset - dotsWidth)
+                let maxTextWidth = max(1.0, constrainedSize.width - leftInset - sparkWidth)
                 let (summaryLayout, summaryApply) = makeSummaryLayout(TextNodeLayoutArguments(attributedString: NSAttributedString(string: summaryText, font: font, textColor: textColor), backgroundColor: nil, maximumNumberOfLines: 2, truncationType: .end, constrainedSize: CGSize(width: maxTextWidth, height: CGFloat.greatestFiniteMagnitude), alignment: .natural, cutout: nil, insets: UIEdgeInsets()))
+                let (footerLayout, footerApply) = makeFooterLayout(TextNodeLayoutArguments(attributedString: NSAttributedString(string: footerText, font: font, textColor: textColor), backgroundColor: nil, maximumNumberOfLines: 1, truncationType: .end, constrainedSize: CGSize(width: max(1.0, constrainedSize.width), height: CGFloat.greatestFiniteMagnitude), alignment: .natural, cutout: nil, insets: UIEdgeInsets()))
 
                 var rowLayouts: [(TextNodeLayout, () -> TextNode)] = []
                 if expanded {
@@ -119,24 +147,36 @@ public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleConten
                     }
                 }
 
-                let headerWidth = summaryLayout.size.width + dotsWidth
+                let hasHeader = !summaryText.isEmpty
+                let headerWidth = summaryLayout.size.width + sparkWidth
                 let rowsWidth = rowLayouts.map { $0.0.size.width + iconSize + 8.0 }.max() ?? 0.0
-                let headerHeight = max(summaryLayout.size.height, showsActivity ? 18.0 : 0.0)
+                let headerHeight = hasHeader ? max(summaryLayout.size.height, showsActivity ? 18.0 : 0.0) : 0.0
                 let rowsHeight = rowLayouts.isEmpty ? 0.0 : 6.0 + CGFloat(rowLayouts.count) * rowHeight
-                let size = CGSize(width: leftInset + max(headerWidth, rowsWidth) + outerInsets.right, height: outerInsets.top + headerHeight + rowsHeight + outerInsets.bottom)
+                let aboveHeight = hasHeader ? outerInsets.top + headerHeight + rowsHeight + outerInsets.bottom : 0.0
+                let size = CGSize(width: leftInset + max(headerWidth, rowsWidth, footerLayout.size.width) + outerInsets.right, height: aboveHeight + belowHeight)
 
                 return (size.width, { _ in
                     return (size, { [weak self] _, _, _ in
                         guard let strongSelf = self else { return }
                         strongSelf.item = item
+                        strongSelf.headerHeight = aboveHeight
 
                         let summaryNode = summaryApply()
-                        summaryNode.frame = CGRect(origin: CGPoint(x: leftInset + dotsWidth, y: outerInsets.top + (headerHeight - summaryLayout.size.height) / 2.0), size: summaryLayout.size)
+                        summaryNode.isHidden = !hasHeader
+                        summaryNode.frame = CGRect(origin: CGPoint(x: leftInset + sparkWidth, y: outerInsets.top + (headerHeight - summaryLayout.size.height) / 2.0), size: summaryLayout.size)
+                        haloed(summaryNode, color: haloColor)
 
-                        strongSelf.dotsNode.isHidden = !showsActivity
+                        let footerNode = footerApply()
+                        footerNode.isHidden = footerText.isEmpty
+                        footerNode.frame = CGRect(origin: CGPoint(x: leftInset, y: strongSelf.bubbleBottom + footerGap), size: footerLayout.size)
+                        haloed(footerNode, color: haloColor)
+
+                        strongSelf.sparkNode.isHidden = !showsActivity
                         if showsActivity {
-                            strongSelf.dotsNode.frame = CGRect(x: leftInset, y: outerInsets.top, width: DotsNode.width, height: headerHeight)
-                            strongSelf.dotsNode.update(color: textColor)
+                            strongSelf.sparkNode.frame = CGRect(x: leftInset, y: outerInsets.top, width: SparkNode.width, height: headerHeight)
+                            strongSelf.sparkNode.update(color: textColor)
+                        } else {
+                            strongSelf.sparkNode.layer.removeAllAnimations()
                         }
                         strongSelf.updateTicking(meta: meta)
 
@@ -150,6 +190,7 @@ public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleConten
                             row.iconNode.frame = CGRect(x: 0.0, y: (rowHeight - iconSize) / 2.0, width: iconSize, height: iconSize)
                             let textNode = rowApply()
                             textNode.frame = CGRect(origin: CGPoint(x: iconSize + 8.0, y: (rowHeight - rowLayout.size.height) / 2.0), size: rowLayout.size)
+                            haloed(row, color: haloColor)
                             y += rowHeight
                         }
                         if rowLayouts.count >= 2 {
@@ -165,15 +206,43 @@ public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleConten
     private static func statusText(_ meta: PaiRichMeta) -> String {
         if meta.isWaiting { return "Waiting for your answer" }
         if meta.isBusy {
-            let doing = meta.tool.map { $0.hasPrefix("$ ") ? "Running \($0.dropFirst(2))" : $0 } ?? "Thinking"
+            let doing = meta.tool.map(Self.doing) ?? "Thinking"
             let elapsed = Self.elapsed(meta)
             return elapsed.isEmpty ? "\(doing)…" : "\(doing)… · \(elapsed)"
         }
         switch meta.state {
         case "dead": return "Ended"
         case "error": return "Failed"
-        default: return "Done"
+        default:
+            let tools = PaiToolSummary.line(meta.tools ?? [])
+            let baked = meta.durationMs.map { "Baked for \(Self.duration($0))" } ?? "Done"
+            return tools.isEmpty ? baked : "\(baked) · \(tools.prefix(1).lowercased() + tools.dropFirst())"
         }
+    }
+
+    /// The current tool as a present participle: "$ ls" → "Running ls", "Read ~/x.ts" → "Reading ~/x.ts".
+    private static func doing(_ tool: String) -> String {
+        if tool.hasPrefix("$ ") { return "Running \(tool.dropFirst(2))" }
+        let verbs = ["Read": "Reading", "Edit": "Editing", "Write": "Writing", "Grep": "Searching", "Glob": "Finding", "WebSearch": "Searching", "WebFetch": "Fetching", "Agent": "Delegating", "Task": "Delegating"]
+        for (name, verb) in verbs where tool == name || tool.hasPrefix(name + " ") {
+            let rest = tool.dropFirst(name.count).trimmingCharacters(in: .whitespaces)
+            return rest.isEmpty ? verb : "\(verb) \(rest)"
+        }
+        return "Using \(tool)"
+    }
+
+    private static func footerText(_ meta: PaiRichMeta?, timestamp: Int32) -> String {
+        guard let durationMs = meta?.durationMs else { return "" }
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        formatter.dateStyle = .none
+        let at = formatter.string(from: Date(timeIntervalSince1970: TimeInterval(timestamp)))
+        return "Baked for \(Self.duration(durationMs)) · done \(at)"
+    }
+
+    private static func duration(_ ms: Double) -> String {
+        let seconds = max(1, Int(ms / 1000))
+        return seconds < 60 ? "\(seconds)s" : "\(seconds / 60)m \(seconds % 60)s"
     }
 
     private static func elapsed(_ meta: PaiRichMeta) -> String {
@@ -215,7 +284,7 @@ public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleConten
     }
 
     override public func tapActionAtPoint(_ point: CGPoint, gesture: TapLongTapOrDoubleTapGesture, isEstimating: Bool) -> ChatMessageBubbleContentTapAction {
-        guard self.bounds.contains(point), let item = self.item, let meta = PaiTrailer.find(item.message)?.meta, !meta.isStatus, !(meta.tools ?? []).isEmpty else {
+        guard self.bounds.contains(point), point.y <= self.headerHeight, let item = self.item, let meta = PaiTrailer.find(item.message)?.meta, !(meta.tools ?? []).isEmpty else {
             return ChatMessageBubbleContentTapAction(content: .none)
         }
         return ChatMessageBubbleContentTapAction(content: .custom({ [weak self] in

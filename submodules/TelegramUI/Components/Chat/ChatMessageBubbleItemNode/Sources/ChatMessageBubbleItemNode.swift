@@ -349,7 +349,7 @@ private func contentNodeMessagesAndClassesForItem(_ item: ChatMessageItem) -> ([
                 
         // A pai bot message: its tool metadata gets a node of its own above the text, and a status card is nothing but that node.
         let paiTrailer = PaiTrailer.find(message)
-        if let paiTrailer, paiTrailer.meta.isStatus || !(paiTrailer.meta.tools ?? []).isEmpty {
+        if let paiTrailer, paiTrailer.meta.isStatus || !(paiTrailer.meta.tools ?? []).isEmpty || paiTrailer.meta.durationMs != nil {
             result.append((message, ChatMessagePaiToolsBubbleContentNode.self, itemAttributes, BubbleItemAttributes(isAttachment: false, neighborType: .text, neighborSpacing: .default)))
             needReactions = false
             if paiTrailer.meta.isStatus {
@@ -3498,6 +3498,7 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
         var totalContentNodesHeight: CGFloat = 0.0
         var currentContainerGroupOverlap: CGFloat = 0.0
         var detachedContentNodesHeight: CGFloat = 0.0
+        var detachedBelowHeight: CGFloat = 0.0
         var additionalTopHeight: CGFloat = 0.0
         
         var mosaicStatusOrigin: CGPoint?
@@ -3602,6 +3603,8 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
                 if properties.isDetached {
                     detachedContentNodesHeight += size.height + 4.0
                     totalContentNodesHeight += 4.0
+                    // The part of a detached node that hangs below the bubble (pai's footer line): the bubble moves up by it.
+                    detachedBelowHeight += properties.detachedBottomHeight
                 }
             }
         }
@@ -3706,11 +3709,11 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
         let contentUpperRightCorner: CGPoint
         switch alignment {
             case .none:
-                backgroundFrame = CGRect(origin: CGPoint(x: incoming ? (params.leftInset + layoutConstants.bubble.edgeInset + avatarInset) : (params.width - params.rightInset - layoutBubbleSize.width - layoutConstants.bubble.edgeInset - deliveryFailedInset), y: detachedContentNodesHeight + additionalTopHeight), size: layoutBubbleSize)
+                backgroundFrame = CGRect(origin: CGPoint(x: incoming ? (params.leftInset + layoutConstants.bubble.edgeInset + avatarInset) : (params.width - params.rightInset - layoutBubbleSize.width - layoutConstants.bubble.edgeInset - deliveryFailedInset), y: detachedContentNodesHeight - detachedBelowHeight + additionalTopHeight), size: layoutBubbleSize)
                 contentOrigin = CGPoint(x: backgroundFrame.origin.x + (incoming ? layoutConstants.bubble.contentInsets.left : layoutConstants.bubble.contentInsets.right), y: backgroundFrame.origin.y + layoutConstants.bubble.contentInsets.top + headerSize.height + contentVerticalOffset)
                 contentUpperRightCorner = CGPoint(x: backgroundFrame.maxX - (incoming ? layoutConstants.bubble.contentInsets.right : layoutConstants.bubble.contentInsets.left), y: backgroundFrame.origin.y + layoutConstants.bubble.contentInsets.top + headerSize.height)
             case .center:
-                backgroundFrame = CGRect(origin: CGPoint(x: params.leftInset + floor((availableWidth - layoutBubbleSize.width) / 2.0), y: detachedContentNodesHeight), size: layoutBubbleSize)
+                backgroundFrame = CGRect(origin: CGPoint(x: params.leftInset + floor((availableWidth - layoutBubbleSize.width) / 2.0), y: detachedContentNodesHeight - detachedBelowHeight), size: layoutBubbleSize)
                 let contentOriginX: CGFloat
                 if !hideBackground {
                     contentOriginX = (incoming ? layoutConstants.bubble.contentInsets.left : layoutConstants.bubble.contentInsets.right)
@@ -3794,7 +3797,7 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
                 nameNodeSizeApply: nameNodeSizeApply,
                 viaWidth: viaWidth,
                 contentOrigin: contentOrigin.offsetBy(dx: 0.0, dy: layoutInsets.top),
-                nameNodeOriginY: layoutInsets.top + nameNodeOriginY + detachedContentNodesHeight + additionalTopHeight,
+                nameNodeOriginY: layoutInsets.top + nameNodeOriginY + detachedContentNodesHeight - detachedBelowHeight + additionalTopHeight,
                 hasTitleAvatar: hasTitleAvatar,
                 hasTitleTopicNavigation: hasTitleTopicNavigation,
                 authorNameColor: authorNameColor,
@@ -3802,18 +3805,18 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
                 currentCredibilityIcon: currentCredibilityIcon,
                 rankBadgeNodeSizeApply: rankBadgeNodeSizeApply,
                 ephemeralBadgeNodeSizeApply: ephemeralBadgeNodeSizeApply,
-                ephemeralBadgeOriginY: layoutInsets.top + ephemeralBadgeOriginY + detachedContentNodesHeight + additionalTopHeight,
+                ephemeralBadgeOriginY: layoutInsets.top + ephemeralBadgeOriginY + detachedContentNodesHeight - detachedBelowHeight + additionalTopHeight,
                 ephemeralBadgeIconSize: ephemeralBadgeIconSize,
                 ephemeralBadgeIconSpacing: ephemeralBadgeIconSpacing,
                 ephemeralBadgeHorizontalInset: ephemeralBadgeHorizontalInset,
                 boostNodeSizeApply: boostNodeSizeApply,
                 contentUpperRightCorner: contentUpperRightCorner,
                 threadInfoSizeApply: threadInfoSizeApply,
-                threadInfoOriginY: layoutInsets.top + threadInfoOriginY + detachedContentNodesHeight + additionalTopHeight,
+                threadInfoOriginY: layoutInsets.top + threadInfoOriginY + detachedContentNodesHeight - detachedBelowHeight + additionalTopHeight,
                 forwardInfoSizeApply: forwardInfoSizeApply,
-                forwardInfoOriginY: layoutInsets.top + forwardInfoOriginY + detachedContentNodesHeight + additionalTopHeight,
+                forwardInfoOriginY: layoutInsets.top + forwardInfoOriginY + detachedContentNodesHeight - detachedBelowHeight + additionalTopHeight,
                 replyInfoSizeApply: replyInfoSizeApply,
-                replyInfoOriginY: layoutInsets.top + replyInfoOriginY + detachedContentNodesHeight + additionalTopHeight,
+                replyInfoOriginY: layoutInsets.top + replyInfoOriginY + detachedContentNodesHeight - detachedBelowHeight + additionalTopHeight,
                 removedContentNodeIndices: removedContentNodeIndices,
                 updatedContentNodeOrder: updatedContentNodeOrder,
                 addedContentNodes: addedContentNodes,
@@ -5147,6 +5150,9 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
             }
             
             let contentNodeFrame = relativeFrame.offsetBy(dx: effectiveContentOriginX, dy: effectiveContentOriginY)
+            if let paiNode = contentNode as? ChatMessagePaiToolsBubbleContentNode {
+                paiNode.bubbleBottom = backgroundFrame.maxY - contentNodeFrame.minY
+            }
             
             if case let .System(duration, _) = animation {
                 var animateFrame = false
