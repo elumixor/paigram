@@ -12,7 +12,7 @@ Bazel builds, driven by Telegram's `build-system/Make/Make.py`. First time: `bun
 
 ```sh
 bun run sim [--no-build]          # simulator build, installed and launched on the newest iPhone simulator
-bun run testflight [--no-build]   # App Store profile via the API, release build, upload, wait for processing
+bun run testflight [--no-build] [--minor]   # bumps the version (versions.json, committed), App Store profile via the API, release build, upload, wait
 ```
 
 TestFlight needs `.env` with `ASC_KEY_ID`, `ASC_ISSUER_ID`, `TEAM_ID` and the key at `~/.appstoreconnect/private_keys/`. App extensions are left out of both builds (`--//Telegram:disableExtensions=True`), so only the app itself needs a profile. The App Store Connect app record and the app group `group.com.elumixor.paigram` have to be created by hand in the portal, which the API does not allow.
