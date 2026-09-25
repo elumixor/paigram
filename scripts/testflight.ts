@@ -1,5 +1,5 @@
 /**
- * `bun run testflight [--no-build] [--no-upload]`: a fresh App Store provisioning profile for the
+ * `bun run testflight [--no-build] [--no-upload] [--minor]`: a patch (or minor) version bump committed to versions.json, a fresh App Store provisioning profile for the
  * bundle id, a release build for devices, the ipa uploaded to App Store Connect, then a wait until
  * TestFlight has processed it. Needs `.env` (ASC_KEY_ID, ASC_ISSUER_ID, TEAM_ID) and
  * `build-system/paigram.json`.
@@ -73,11 +73,24 @@ async function waitProcessed(number: number) {
   throw new Error("TestFlight did not finish processing in 30 minutes");
 }
 
+/** Every upload is a new patch version (`--minor` bumps the minor), recorded in versions.json and committed, so TestFlight tells builds apart. */
+async function bumpVersion() {
+  const file = Bun.file(`${root}versions.json`);
+  const versions = await file.json();
+  const [major, minor, patch] = String(versions.app).split(".").map(Number);
+  versions.app = process.argv.includes("--minor") ? `${major}.${minor + 1}.0` : `${major}.${minor}.${patch + 1}`;
+  await Bun.write(file, `${JSON.stringify(versions, null, 4)}\n`);
+  await $`git commit -qm ${`Paigram v${versions.app}`} -- versions.json`.cwd(root);
+  console.log(`version ${versions.app}`);
+  return versions.app as string;
+}
+
 const number = buildNumber();
 await freshProfile();
+const version = skipBuild ? (await Bun.file(`${root}versions.json`).json()).app : await bumpVersion();
 if (!skipBuild) await build(number);
 if (!skipUpload) {
   await upload();
   const build = await waitProcessed(number);
-  console.log(`build ${number} is on TestFlight (${build.id})`);
+  console.log(`v${version} build ${number} is on TestFlight (${build.id})`);
 }
