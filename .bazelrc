@@ -39,3 +39,6 @@ common:index_build --noannounce_rc
 common:index_build --noshow_timestamps
 common:index_build --curses=no
 common:index_build --color=no
+
+# iOS 15 target: APIs deprecated since 13 are warnings, not errors (Swift: -warnings-as-errors stripped from BUILD files).
+build --copt=-Wno-error=deprecated-declarations

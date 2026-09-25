@@ -1009,7 +1009,6 @@ swift_library(
         "Share/**/*.swift",
     ]),
     copts = [
-        "-warnings-as-errors",
     ],
     deps = [
         "//submodules/TelegramUI",
@@ -1096,7 +1095,6 @@ swift_library(
         "NotificationContent/**/*.swift",
     ]),
     copts = [
-        "-warnings-as-errors",
     ],
     deps = [
         "//submodules/TelegramUI:TelegramUI",
@@ -1191,7 +1189,6 @@ swift_library(
         "WidgetKitWidget/**/*.swift",
     ]),
     copts = [
-        "-warnings-as-errors",
     ],
     data = [
         ":WidgetAssets",
@@ -1326,7 +1323,6 @@ swift_library(
         "SiriIntents/**/*.swift",
     ]),
     copts = [
-        "-warnings-as-errors",
     ],
     data = glob([
         "SiriIntents/*.lproj/Intents.intentdefinition"
@@ -1429,7 +1425,6 @@ swift_library(
         "BroadcastUpload/**/*.swift",
     ]),
     copts = [
-        "-warnings-as-errors",
     ],
     deps = [
         "//submodules/TelegramUI:TelegramUI",
