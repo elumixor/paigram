@@ -60,10 +60,13 @@ async function bumpVersion() {
   return versions.app as string;
 }
 
-const number = buildNumber();
-await provision();
+/** `--no-build` uploads the ipa as it is: its build number is read back, and the profiles it embeds stay untouched. */
+const number = skipBuild ? Number(await $`unzip -p ${root}bazel-bin/Telegram/Telegram.ipa Payload/Telegram.app/Info.plist | plutil -extract CFBundleVersion raw -o - -`.text()) : buildNumber();
 const version = skipBuild ? (await Bun.file(`${root}versions.json`).json()).app : await bumpVersion();
-if (!skipBuild) await build(number);
+if (!skipBuild) {
+  await provision();
+  await build(number);
+}
 if (!skipUpload) {
   await upload();
   const build = await waitProcessed(number);
