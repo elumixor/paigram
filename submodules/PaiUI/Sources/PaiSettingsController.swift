@@ -10,9 +10,12 @@ import UIKit
 /// (tools, skills, instructions, memories). Opened from the avatar in the chat's bar.
 @available(iOS 16.0, *)
 public final class PaiSettingsController: PaiHostedController {
+    /// Set by the chat: opens the Pai screen (threads by project) on top of this one.
+    public var openProjects: (() -> Void)?
+
     public override init(context: AccountContext) {
         super.init(context: context)
-        self.host(SettingsView(store: PaiHost.store, settings: PaiSettingsStore(), close: { [weak self] in self?.dismiss() }))
+        self.host(SettingsView(store: PaiHost.store, settings: PaiSettingsStore(), openProjects: { [weak self] in self?.openProjects?() }, close: { [weak self] in self?.dismiss() }))
     }
 
     required init(coder aDecoder: NSCoder) {
@@ -31,6 +34,14 @@ final class PaiSettingsStore: ObservableObject {
     private let client = PaiClient()
 
     func items(_ kind: String) -> [PaiContextItem] { (context?.items ?? []).filter { $0.kind == kind } }
+    func item(_ id: String) -> PaiContextItem? { context?.items.first { $0.id == id } }
+
+    @MainActor func save(_ item: PaiContextItem, text: String) async throws {
+        let saved = try await client.saveContext(name: item.name, text: text)
+        guard var context else { return }
+        context = PaiContext(items: context.items.map { $0.id == saved.id ? saved : $0 }, sessions: context.sessions)
+        self.context = context
+    }
 
     @MainActor func load() async {
         isLoading = context == nil
@@ -70,6 +81,7 @@ private struct ContextKind {
 struct SettingsView: View {
     @ObservedObject var store: PaiStore
     @ObservedObject var settings: PaiSettingsStore
+    let openProjects: () -> Void
     let close: () -> Void
 
     var body: some View {
@@ -89,7 +101,10 @@ struct SettingsView: View {
                 }
             }
             .navigationDestination(for: ContextKindRoute.self) { route in
-                ContextListView(kind: route.kind, title: route.title, items: settings.items(route.kind))
+                ContextListView(kind: route.kind, title: route.title, settings: settings)
+            }
+            .navigationDestination(for: ContextItemRoute.self) { route in
+                ContextDetailView(id: route.id, settings: settings)
             }
             .refreshable { await settings.load() }
         }
@@ -123,13 +138,15 @@ struct SettingsView: View {
 
     private var statusSection: some View {
         Section {
-            SettingsRow(symbol: "circle.grid.2x2.fill", color: .green, title: "Threads", value: threadsValue)
+            Button(action: openProjects) {
+                HStack {
+                    SettingsRow(symbol: "circle.grid.2x2.fill", color: .green, title: "Projects", value: threadsValue)
+                    Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                }
+            }
+            .foregroundStyle(.primary)
             if let health = settings.health {
                 SettingsRow(symbol: "clock.fill", color: .gray, title: "Uptime", value: Self.duration(health.uptime))
-                SettingsRow(symbol: "server.rack", color: .indigo, title: "Server", value: health.host.publicUrl?.replacingOccurrences(of: "https://", with: "") ?? health.host.hostname)
-            }
-            if let session = settings.context?.sessions?.first {
-                SettingsRow(symbol: "cpu.fill", color: .teal, title: "Model", value: session.model)
             }
         } header: {
             Text("Status")
@@ -250,13 +267,15 @@ private struct UsageRow: View {
     }
 }
 
-/// Everything of one kind, tools expanding in place, the rest opening on their text.
+/// Everything of one kind: tools expanding in place with what each does, the rest opening on their text.
 @available(iOS 16.0, *)
 private struct ContextListView: View {
     let kind: String
     let title: String
-    let items: [PaiContextItem]
+    @ObservedObject var settings: PaiSettingsStore
     @State private var expanded: Set<String> = []
+
+    private var items: [PaiContextItem] { settings.items(kind) }
 
     var body: some View {
         List {
@@ -267,9 +286,7 @@ private struct ContextListView: View {
                 if kind == "tool" {
                     toolServer(item)
                 } else {
-                    NavigationLink {
-                        ContextDetailView(item: item)
-                    } label: {
+                    NavigationLink(value: ContextItemRoute(id: item.id)) {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(item.name).font(.body)
                             if !item.description.isEmpty { Text(item.description).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
@@ -306,33 +323,115 @@ private struct ContextListView: View {
                 }
             }
             if expanded.contains(item.id) {
-                ForEach(item.lines, id: \.self) { tool in
-                    Text(tool).font(.paiMono).foregroundStyle(.secondary)
+                ForEach(item.tools ?? item.lines.map { PaiContextItem.Tool(name: $0, description: nil) }) { tool in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(tool.name).font(.paiMono)
+                        if let description = tool.description, !description.isEmpty {
+                            Text(description).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                        }
+                    }
+                    .padding(.vertical, 1)
                 }
             }
         }
     }
 }
 
-/// The text of one instruction, memory or skill, as the session sees it.
+@available(iOS 16.0, *)
+private struct ContextItemRoute: Hashable {
+    let id: String
+}
+
+/// The text of one instruction, memory or skill, rendered; an editable one opens in an editor and saves back.
 @available(iOS 16.0, *)
 private struct ContextDetailView: View {
-    let item: PaiContextItem
+    let id: String
+    @ObservedObject var settings: PaiSettingsStore
+    @State private var editing = false
+    @State private var draft = ""
+    @State private var saving = false
+    @State private var error: String?
+    @FocusState private var focused: Bool
+
+    private var item: PaiContextItem? { settings.item(id) }
 
     var body: some View {
+        Group {
+            if let item {
+                if editing {
+                    editor
+                } else {
+                    reader(item)
+                }
+            } else {
+                ContentUnavailableCompat(symbol: "doc", title: "Gone", detail: "This item is no longer listed.")
+            }
+        }
+        .navigationTitle(item?.name ?? "")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if let item, item.editable {
+                ToolbarItem(placement: .topBarTrailing) {
+                    if editing {
+                        HStack(spacing: 14) {
+                            Button("Cancel") { editing = false }
+                            Button(saving ? "Saving…" : "Save") { save(item) }.fontWeight(.semibold).disabled(saving)
+                        }
+                    } else {
+                        Button("Edit") {
+                            draft = item.body ?? ""
+                            editing = true
+                            focused = true
+                        }
+                    }
+                }
+            }
+        }
+        .navigationBarBackButtonHidden(editing)
+    }
+
+    private func reader(_ item: PaiContextItem) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 if !item.description.isEmpty { Text(item.description).font(.footnote).foregroundStyle(.secondary) }
                 Text(item.source).font(.paiMonoSmall).foregroundStyle(.tertiary).textSelection(.enabled)
+                if let error { Text(error).font(.footnote).foregroundStyle(.red) }
                 Divider()
-                Text((item.body ?? "").isEmpty ? "(empty)" : item.body!)
-                    .font(.callout)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                if (item.body ?? "").isEmpty {
+                    Text("(empty)").foregroundStyle(.tertiary)
+                } else {
+                    MarkdownView(text: item.body!)
+                }
             }
             .padding(16)
         }
-        .navigationTitle(item.name)
-        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var editor: some View {
+        TextEditor(text: $draft)
+            .font(.paiMono)
+            .focused($focused)
+            .autocorrectionDisabled()
+            .textInputAutocapitalization(.never)
+            .scrollContentBackground(.hidden)
+            .padding(.horizontal, 10)
+            .background(Color(.systemBackground))
+            .overlay(alignment: .bottom) {
+                if let error { Text(error).font(.footnote).foregroundStyle(.red).padding(8).frame(maxWidth: .infinity).background(.thinMaterial) }
+            }
+    }
+
+    private func save(_ item: PaiContextItem) {
+        saving = true
+        error = nil
+        Task { @MainActor in
+            defer { saving = false }
+            do {
+                try await settings.save(item, text: draft)
+                editing = false
+            } catch {
+                self.error = error.localizedDescription
+            }
+        }
     }
 }
