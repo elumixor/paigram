@@ -1,47 +1,22 @@
 /**
- * `bun run testflight [--no-build] [--no-upload] [--minor]`: a patch (or minor) version bump committed to versions.json, a fresh App Store provisioning profile for the
- * bundle id, a release build for devices, the ipa uploaded to App Store Connect, then a wait until
+ * `bun run testflight [--no-build] [--no-upload] [--minor]`: a patch (or minor) version bump committed to versions.json, fresh App Store provisioning profiles for the
+ * app, its extensions and the watch app (scripts/provision.ts), a release build for devices with
+ * every extension and the watch app embedded, the ipa uploaded to App Store Connect, then a wait until
  * TestFlight has processed it. Needs `.env` (ASC_KEY_ID, ASC_ISSUER_ID, TEAM_ID) and
  * `build-system/paigram.json`.
  */
 import { $ } from "bun";
-import { mkdirSync } from "node:fs";
-import { asc, ascDelete, ascGet, ascPost } from "./asc.ts";
+import { asc, ascGet } from "./asc.ts";
+import { provision } from "./provision.ts";
 import { writeSecrets } from "./secrets.ts";
 
 const root = new URL("..", import.meta.url).pathname;
 const config = `${root}build-system/paigram.json`;
 const codesigning = `${root}build-system/paigram-codesigning`;
-const profileName = "Paigram App Store";
 const skipBuild = process.argv.includes("--no-build");
 const skipUpload = process.argv.includes("--no-upload");
 
-const { bundle_id: bundleId, team_id: teamId } = (await Bun.file(config).json()) as { bundle_id: string; team_id: string };
-if (teamId !== asc.teamId) throw new Error(`team_id in paigram.json (${teamId}) differs from TEAM_ID in .env (${asc.teamId})`);
-
-async function freshProfile() {
-  const bundle = (await ascGet(`/bundleIds?filter[identifier]=${bundleId}`)).data.find((b: any) => b.attributes.identifier === bundleId);
-  if (!bundle) throw new Error(`bundle id ${bundleId} is not registered`);
-  const certs = (await ascGet("/certificates?filter[certificateType]=DISTRIBUTION&limit=50")).data
-    .filter((c: any) => new Date(c.attributes.expirationDate) > new Date())
-    .sort((a: any, b: any) => b.attributes.expirationDate.localeCompare(a.attributes.expirationDate));
-  if (!certs.length) throw new Error("no unexpired Distribution certificate on the account");
-  for (const old of (await ascGet(`/profiles?filter[name]=${encodeURIComponent(profileName)}`)).data) await ascDelete(`/profiles/${old.id}`);
-  const profile = await ascPost("/profiles", {
-    data: {
-      type: "profiles",
-      attributes: { name: profileName, profileType: "IOS_APP_STORE" },
-      relationships: {
-        bundleId: { data: { type: "bundleIds", id: bundle.id } },
-        certificates: { data: [{ type: "certificates", id: certs[0].id }] },
-      },
-    },
-  });
-  mkdirSync(`${codesigning}/profiles`, { recursive: true });
-  mkdirSync(`${codesigning}/certs`, { recursive: true });
-  await Bun.write(`${codesigning}/profiles/Telegram.mobileprovision`, Buffer.from(profile.data.attributes.profileContent, "base64"));
-  console.log(`profile ${profileName} written`);
-}
+const { bundle_id: bundleId, api_id: apiId, api_hash: apiHash } = (await Bun.file(config).json()) as { bundle_id: string; api_id: string; api_hash: string };
 
 /** Build numbers must only go up; the minute of the upload is unique enough for one person. */
 function buildNumber(): number {
@@ -52,7 +27,7 @@ function buildNumber(): number {
 
 async function build(number: number) {
   await writeSecrets();
-  await $`python3 build-system/Make/Make.py --overrideXcodeVersion --cacheDir=${process.env.HOME}/telegram-bazel-cache --bazelArguments=--//Telegram:disableExtensions=True build --configurationPath=${config} --codesigningInformationPath=${codesigning} --buildNumber=${number} --configuration=release_arm64`.cwd(root);
+  await $`python3 build-system/Make/Make.py --overrideXcodeVersion --cacheDir=${process.env.HOME}/telegram-bazel-cache build --configurationPath=${config} --codesigningInformationPath=${codesigning} --buildNumber=${number} --configuration=release_arm64 --embedWatchApp --watchApiId=${apiId} --watchApiHash=${apiHash}`.cwd(root);
 }
 
 async function upload() {
@@ -86,7 +61,7 @@ async function bumpVersion() {
 }
 
 const number = buildNumber();
-await freshProfile();
+await provision();
 const version = skipBuild ? (await Bun.file(`${root}versions.json`).json()).app : await bumpVersion();
 if (!skipBuild) await build(number);
 if (!skipUpload) {

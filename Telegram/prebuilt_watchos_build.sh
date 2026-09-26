@@ -25,9 +25,10 @@
 #                   bakes it into CFBundleIdentifier (and signs with it); the Info.plist
 #                   derives WKCompanionAppBundleIdentifier from it via
 #                   $(PRODUCT_BUNDLE_IDENTIFIER:base), so no post-build plist patching.
+#   $11 display_name CFBundleDisplayName to show on the watch; empty => keep the project's.
 set -euo pipefail
 
-SRC="$1"; OUT_ZIP="$2"; API_ID="$3"; API_HASH="$4"; IDENTITY="${5:-}"; PROFILE="${6:-}"; INFOPLIST_OUT="${7:-}"; VERSIONS_JSON="${8:-}"; BUILD_NUMBER="${9:-1}"; WATCH_BUNDLE_ID="${10:-}"
+SRC="$1"; OUT_ZIP="$2"; API_ID="$3"; API_HASH="$4"; IDENTITY="${5:-}"; PROFILE="${6:-}"; INFOPLIST_OUT="${7:-}"; VERSIONS_JSON="${8:-}"; BUILD_NUMBER="${9:-1}"; WATCH_BUNDLE_ID="${10:-}"; DISPLAY_NAME="${11:-}"
 
 if [ ! -e "$SRC/tgwatch.xcodeproj" ]; then
   echo "error: no tgwatch.xcodeproj at $SRC (re-sync the Telegram/WatchApp snapshot via tgwatch/tools/export-sources.sh)" >&2
@@ -68,6 +69,10 @@ APP="$(find "$DD/Build/Products" -maxdepth 2 -name 'tgwatch Watch App.app' -type
 if [ -z "$APP" ]; then
   echo "error: built watch .app not found under $DD/Build/Products" >&2
   exit 1
+fi
+
+if [ -n "$DISPLAY_NAME" ]; then
+  /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName $DISPLAY_NAME" "$APP/Info.plist"
 fi
 
 # Expose the watch app's Info.plist (the host reads it to verify the companion

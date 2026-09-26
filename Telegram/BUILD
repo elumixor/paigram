@@ -1752,6 +1752,7 @@ apple_prebuilt_watchos_application(
     bundle_id = "{telegram_bundle_id}.watchkitapp".format(
         telegram_bundle_id = telegram_bundle_id,
     ),
+    display_name = "Paigram",
     tags = ["manual"],
 )
 
