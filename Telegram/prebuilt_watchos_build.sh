@@ -92,6 +92,7 @@ fi
 # app (resolved from the shared codesigning material) — required for App Store, where
 # every nested bundle must carry the Apple submission certificate. Without a profile
 # the app is left unsigned (the host does not re-sign it).
+xattr -cr "$APP"
 if [ -n "$PROFILE" ]; then
   cp "$PROFILE" "$APP/embedded.mobileprovision"
   ENT="$(mktemp)"
@@ -101,6 +102,16 @@ if [ -n "$PROFILE" ]; then
     echo "error: provisioning profile has no Entitlements key: $PROFILE" >&2
     exit 1
   fi
+  # Sign with what Xcode would: the app's identity and get-task-allow. The profile also carries
+  # wildcard keychain groups and beta-reports-active; App Store Connect refuses a bundle whose
+  # signature claims those (ITMS-90034, blamed on the host app).
+  python3 - "$ENT" <<'PY'
+import plistlib, sys
+path = sys.argv[1]
+ents = plistlib.load(open(path, "rb"))
+keep = {"application-identifier", "com.apple.developer.team-identifier", "get-task-allow"}
+plistlib.dump({k: v for k, v in ents.items() if k in keep}, open(path, "wb"))
+PY
 
   if [ -z "$IDENTITY" ]; then
     # The identity is the SHA-1 of the profile's first embedded certificate, which is
@@ -114,13 +125,9 @@ if [ -n "$PROFILE" ]; then
     echo "note: signing watch app with identity $IDENTITY derived from $(basename "$PROFILE")" >&2
   fi
 
-  # Distribution profiles (App Store / Ad Hoc) set get-task-allow=false and require a
-  # secure timestamp; development builds set it true and can skip the timestamp (faster,
-  # no round-trip to Apple's timestamp service).
-  TS_FLAG="--timestamp"
-  if /usr/libexec/PlistBuddy -c 'Print :get-task-allow' "$ENT" 2>/dev/null | grep -qi '^true$'; then
-    TS_FLAG="--timestamp=none"
-  fi
+  # No secure timestamp, as Xcode signs iOS and watchOS bundles: App Store Connect rejects an ipa
+  # whose embedded watch framework carries one (ITMS-90034, blamed on the host app).
+  TS_FLAG="--timestamp=none"
 
   # Sign inside-out: nested frameworks first, then the app bundle.
   if [ -d "$APP/Frameworks" ]; then
@@ -138,5 +145,9 @@ fi
 # $OUT_ZIP is execroot-relative; the action's cwd is the execroot, so do NOT cd
 # (that would resolve $OUT_ZIP against the DerivedData dir). --keepParent makes the
 # archive root the .app itself even when $APP is an absolute path.
+# Extended attributes (com.apple.provenance and the like) would travel as AppleDouble "._*"
+# sidecars in the zip; the host unzips them into the sealed bundles as unsigned files, and
+# App Store Connect then rejects the whole ipa (ITMS-90034, blamed on the host app).
+xattr -cr "$APP"
 rm -f "$OUT_ZIP"
-/usr/bin/ditto -c -k --keepParent "$APP" "$OUT_ZIP"
+/usr/bin/ditto -c -k --norsrc --noextattr --noqtn --keepParent "$APP" "$OUT_ZIP"
