@@ -399,7 +399,9 @@ extension ChatControllerImpl {
             }
         case let .openChatInfo(expandAvatar, section):
             if PaiChat.isBot(self.presentationInterfaceState.renderedPeer?.peer), #available(iOS 16.0, *) {
-                self.effectiveNavigationController?.pushViewController(PaiSettingsController(context: self.context))
+                let settings = PaiSettingsController(context: self.context)
+                settings.openProjects = { [weak self] in self?.interfaceInteraction?.openPai?() }
+                self.effectiveNavigationController?.pushViewController(settings)
                 return
             }
             let _ = self.presentVoiceMessageDiscardAlert(action: { [weak self] in

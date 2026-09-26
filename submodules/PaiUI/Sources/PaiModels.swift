@@ -165,7 +165,14 @@ public struct PaiContextItem: Decodable, Identifiable {
     public let surfaces: [String]
     public let project: String?
     public let body: String?
+    public let tools: [Tool]?
     public var id: String { "\(kind)/\(name)/\(project ?? "")" }
+
+    public struct Tool: Decodable, Identifiable {
+        public let name: String
+        public let description: String?
+        public var id: String { name }
+    }
     /// A tool server's body is one tool a line.
     public var lines: [String] { (body ?? "").split(separator: "\n").map(String.init).filter { !$0.isEmpty } }
 }

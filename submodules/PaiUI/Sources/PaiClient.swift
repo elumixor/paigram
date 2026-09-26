@@ -96,6 +96,11 @@ public final class PaiClient {
     public func usage() async throws -> PaiUsage { try await call(PaiUsage.self, "/usage") }
     public func health() async throws -> PaiHealth { try await call(PaiHealth.self, "/health") }
 
+    /// Saves an editable context item (a memory, an instruction file, a skill) under its listed name.
+    public func saveContext(name: String, text: String) async throws -> PaiContextItem {
+        try await call(PaiContextItem.self, "/context", method: "PUT", body: ["name": name, "text": text])
+    }
+
     // MARK: Events
 
     /// `GET /events?follow=1`; yields one decoded event per `data:` line, until cancelled or the server hangs up.
