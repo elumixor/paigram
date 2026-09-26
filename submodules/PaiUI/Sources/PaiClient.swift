@@ -90,6 +90,12 @@ public final class PaiClient {
 
     public func telegramInfo() async throws -> PaiTelegramInfo { try await call(PaiTelegramInfo.self, "/m/telegram/info") }
 
+    // MARK: Settings
+
+    public func context() async throws -> PaiContext { try await call(PaiContext.self, "/context") }
+    public func usage() async throws -> PaiUsage { try await call(PaiUsage.self, "/usage") }
+    public func health() async throws -> PaiHealth { try await call(PaiHealth.self, "/health") }
+
     // MARK: Events
 
     /// `GET /events?follow=1`; yields one decoded event per `data:` line, until cancelled or the server hangs up.

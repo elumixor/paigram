@@ -154,3 +154,53 @@ extension JSONValue: Encodable {
         }
     }
 }
+
+/// One thing a session is given: an instruction, a memory file, a skill, or an MCP server with its tools.
+public struct PaiContextItem: Decodable, Identifiable {
+    public let kind: String
+    public let name: String
+    public let description: String
+    public let source: String
+    public let editable: Bool
+    public let surfaces: [String]
+    public let project: String?
+    public let body: String?
+    public var id: String { "\(kind)/\(name)/\(project ?? "")" }
+    /// A tool server's body is one tool a line.
+    public var lines: [String] { (body ?? "").split(separator: "\n").map(String.init).filter { !$0.isEmpty } }
+}
+
+public struct PaiContext: Decodable {
+    public struct Session: Decodable {
+        public let kind: String
+        public let model: String
+        public let at: String
+    }
+    public let items: [PaiContextItem]
+    public let sessions: [Session]?
+}
+
+public struct PaiUsageWindow: Decodable, Identifiable {
+    public let name: String
+    public let percent: Double
+    public let resetsAt: String?
+    public let length: Double
+    public var id: String { name }
+}
+
+public struct PaiUsage: Decodable {
+    public let windows: [PaiUsageWindow]
+    public let costUsd: Double?
+    public let error: String?
+    public let via: String?
+}
+
+public struct PaiHealth: Decodable {
+    public struct Host: Decodable {
+        public let hostname: String
+        public let publicUrl: String?
+    }
+    public let version: String
+    public let uptime: Double
+    public let host: Host
+}

@@ -2,6 +2,7 @@ import Foundation
 import UIKit
 import SwiftSignalKit
 import Display
+import PaiUI
 import AsyncDisplayKit
 import TelegramCore
 import SafariServices
@@ -397,6 +398,10 @@ extension ChatControllerImpl {
                 })
             }
         case let .openChatInfo(expandAvatar, section):
+            if PaiChat.isBot(self.presentationInterfaceState.renderedPeer?.peer), #available(iOS 16.0, *) {
+                self.effectiveNavigationController?.pushViewController(PaiSettingsController(context: self.context))
+                return
+            }
             let _ = self.presentVoiceMessageDiscardAlert(action: { [weak self] in
                 guard let self else {
                     return

@@ -6,6 +6,7 @@ import TelegramPresentationData
 import AccountContext
 import ChatPresentationInterfaceState
 import ChatNavigationButton
+import PaiUI
 
 func leftNavigationButtonForChatInterfaceState(_ presentationInterfaceState: ChatPresentationInterfaceState, subject: ChatControllerSubject?, strings: PresentationStrings, currentButton: ChatNavigationButton?, target: Any?, selector: Selector?) -> ChatNavigationButton? {
     if let _ = presentationInterfaceState.interfaceState.selectionState {
@@ -98,6 +99,11 @@ func rightNavigationButtonForChatInterfaceState(context: AccountContext, present
             buttonItem.accessibilityLabel = strings.Common_Cancel
             return ChatNavigationButton(action: .cancelMessageSelection, buttonItem: buttonItem)
         }
+    }
+    
+    // The pai bot's chat shows its avatar like any other chat; the tap opens the Pai settings.
+    if PaiChat.isBot(presentationInterfaceState.renderedPeer?.peer), presentationInterfaceState.search == nil, case .standard(.default) = presentationInterfaceState.mode {
+        return chatInfoNavigationButton
     }
     
     if case let .replyThread(message) = presentationInterfaceState.chatLocation, message.peerId == context.account.peerId {
