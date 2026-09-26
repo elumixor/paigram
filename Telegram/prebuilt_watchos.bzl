@@ -76,6 +76,8 @@ def _apple_prebuilt_watchos_application_impl(ctx):
             # $(PRODUCT_BUNDLE_IDENTIFIER:base). Keeps the build dynamic across hosts with
             # no post-build plist mutation (xcodebuild bakes, the worker signs once).
             ctx.attr.bundle_id,
+            # Shown on the watch; empty keeps the snapshot's name.
+            ctx.attr.display_name,
         ],
         inputs = inputs,
         outputs = [archive, infoplist],
@@ -121,6 +123,7 @@ apple_prebuilt_watchos_application = rule(
     attrs = {
         "bundle_id": attr.string(default = "ph.telegra.Telegraph.watchkitapp"),
         "bundle_name": attr.string(default = "tgwatch Watch App"),
+        "display_name": attr.string(default = ""),
         "minimum_os_version": attr.string(default = "26.0"),
         "srcs": attr.label(
             default = "//Telegram/WatchApp:sources",

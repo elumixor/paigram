@@ -1,6 +1,7 @@
 /**
- * `bun run sim [--no-build]`: build Paigram for the simulator, install it on a booted (or the first
+ * `bun run sim [--no-build] [--extensions]`: build Paigram for the simulator, install it on a booted (or the first
  * available) iPhone, launch it. Uses the repo's fake codesigning, so the bundle id is Telegram's.
+ * Extensions (share, notifications, widget, intents) are left out unless `--extensions`: they add minutes to every build.
  */
 import { $ } from "bun";
 import { mkdtempSync } from "node:fs";
@@ -11,6 +12,7 @@ const root = new URL("..", import.meta.url).pathname;
 const config = `${root}build-system/paigram-sim.json`;
 const bundleId = "ph.telegra.Telegraph";
 const skipBuild = process.argv.includes("--no-build");
+const extensions = process.argv.includes("--extensions") ? "False" : "True";
 
 if (!(await Bun.file(config).exists())) throw new Error(`${config} is missing: copy build-system/paigram.example.json and fill in the api keys`);
 
@@ -23,7 +25,7 @@ const installedVersion = Math.floor(Date.now() / 60_000);
 
 if (!skipBuild) {
   await writeSecrets();
-  await $`python3 build-system/Make/Make.py --overrideXcodeVersion --cacheDir=${process.env.HOME}/telegram-bazel-cache --bazelArguments=--//Telegram:disableExtensions=True build --configurationPath=${config} --codesigningInformationPath=build-system/fake-codesigning --buildNumber=${buildNumber} --configuration=debug_sim_arm64`.cwd(root);
+  await $`python3 build-system/Make/Make.py --overrideXcodeVersion --cacheDir=${process.env.HOME}/telegram-bazel-cache --bazelArguments=--//Telegram:disableExtensions=${extensions} build --configurationPath=${config} --codesigningInformationPath=build-system/fake-codesigning --buildNumber=${buildNumber} --configuration=debug_sim_arm64`.cwd(root);
 }
 
 const devices = (await $`xcrun simctl list devices available -j`.json()) as { devices: Record<string, { udid: string; name: string; state: string }[]> };
