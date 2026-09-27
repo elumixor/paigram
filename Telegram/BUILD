@@ -1242,7 +1242,8 @@ ios_extension(
         ":AppNameInfoPlist",
     ],
     minimum_os_version = minimum_os_version, # maintain the same minimum OS version across extensions
-    ipa_post_processor = ":SetMinOsVersionWidgetExtension",
+    # Paigram: the 14.0 patch below lies once the binary is built for 15.0; App Store Connect rejects it (90208).
+    #ipa_post_processor = ":SetMinOsVersionWidgetExtension",
     #provides_main = True,
     provisioning_profile = select({
         ":disableProvisioningProfilesSetting": None,
