@@ -18,11 +18,12 @@ const skipUpload = process.argv.includes("--no-upload");
 
 const { bundle_id: bundleId, api_id: apiId, api_hash: apiHash } = (await Bun.file(config).json()) as { bundle_id: string; api_id: string; api_hash: string };
 
-/** Build numbers must only go up; the minute of the upload is unique enough for one person. */
-function buildNumber(): number {
-  const d = new Date();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return Number(`${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}`);
+/** Build numbers only have to go up within a version: one past the highest App Store Connect has for it, so a new version starts at 1. */
+async function buildNumber(version: string): Promise<number> {
+  const app = (await ascGet(`/apps?filter[bundleId]=${bundleId}`)).data[0];
+  if (!app) throw new Error(`no App Store Connect app for ${bundleId}; create it once at appstoreconnect.apple.com`);
+  const builds = (await ascGet(`/builds?filter[app]=${app.id}&filter[preReleaseVersion.version]=${version}&limit=50`)).data;
+  return Math.max(0, ...builds.map((b: any) => Number(b.attributes.version) || 0)) + 1;
 }
 
 async function build(number: number) {
@@ -61,8 +62,8 @@ async function bumpVersion() {
 }
 
 /** `--no-build` uploads the ipa as it is: its build number is read back, and the profiles it embeds stay untouched. */
-const number = skipBuild ? Number(await $`unzip -p ${root}bazel-bin/Telegram/Telegram.ipa Payload/Telegram.app/Info.plist | plutil -extract CFBundleVersion raw -o - -`.text()) : buildNumber();
 const version = skipBuild ? (await Bun.file(`${root}versions.json`).json()).app : await bumpVersion();
+const number = skipBuild ? Number(await $`unzip -p ${root}bazel-bin/Telegram/Telegram.ipa Payload/Telegram.app/Info.plist | plutil -extract CFBundleVersion raw -o - -`.text()) : await buildNumber(version);
 if (!skipBuild) {
   await provision();
   await build(number);
