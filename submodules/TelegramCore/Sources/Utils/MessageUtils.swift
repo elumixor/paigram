@@ -345,7 +345,24 @@ func locallyRenderedMessage(message: StoreMessage, peers: AccumulatedPeers, asso
 }
 
 public extension Message {
+    /// Paigram: the pai bot repeats what the user typed in a terminal, marked `kind: "user"` in its trailing
+    /// link (PaiUI's PaiTrailer, pai's src/protocol/rich.ts); those are shown as the user's own messages.
+    var isPaiEcho: Bool {
+        guard self.flags.contains(.Incoming), self.text.hasSuffix("\u{00B7}"),
+              let entity = self.textEntitiesAttribute?.entities.last(where: { if case .TextUrl = $0.type { return true } else { return false } }),
+              case let .TextUrl(url) = entity.type,
+              let payload = url.components(separatedBy: "/m/").last, payload != url else { return false }
+        var base64 = payload.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        while base64.count % 4 != 0 { base64 += "=" }
+        guard let data = Data(base64Encoded: base64),
+              let meta = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+        return meta["v"] as? Int == 1 && meta["kind"] as? String == "user"
+    }
+
     func effectivelyIncoming(_ accountPeerId: PeerId) -> Bool {
+        if self.isPaiEcho {
+            return false
+        }
         if self.id.peerId == accountPeerId {
             if let sourceAuthorInfo = self.sourceAuthorInfo {
                 if sourceAuthorInfo.originalOutgoing {
