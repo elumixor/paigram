@@ -17,15 +17,19 @@ const git = (args: string[]) => $`git ${args}`.cwd(root).quiet();
 await git(["fetch", "-q", "origin"]);
 const branch = (await git(["rev-parse", "--abbrev-ref", "HEAD"]).text()).trim();
 const upstream = `origin/${branch === "HEAD" ? "master" : branch}`;
-const dirty = async (against?: string) =>
-  (await $`git diff --quiet --ignore-submodules=all ${against ? [against] : ["HEAD"]} --`.cwd(root).nothrow().quiet()).exitCode !== 0 ||
+const dirty = async () =>
+  (await $`git diff --quiet --ignore-submodules=all HEAD --`.cwd(root).nothrow().quiet()).exitCode !== 0 ||
   (await git(["ls-files", "--others", "--exclude-standard", "--", "scripts", "submodules/PaiUI", "Telegram", "versions.json"]).text()).trim() !== "";
 
 const behind = Number((await git(["rev-list", "--count", `HEAD..${upstream}`]).text()).trim());
 if (behind > 0) {
-  if (await dirty(upstream)) throw new Error(`HEAD is ${behind} behind ${upstream} and the files differ from it too: commit and push from where the work was done first`);
+  // The index moves with HEAD (the files stay), so the comparison sees every file origin has.
+  const before = (await git(["rev-parse", "HEAD"]).text()).trim();
+  await git(["reset", "-q", upstream]);
+  const differs = await dirty();
+  if (differs || dryRun) await git(["reset", "-q", before]);
+  if (differs) throw new Error(`HEAD is ${behind} behind ${upstream} and the files differ from it too: commit and push from where the work was done first`);
   console.log(`HEAD was ${behind} behind ${upstream}; the files match it, so HEAD moves there`);
-  if (!dryRun) await git(["reset", "-q", upstream]);
 } else if (await dirty()) {
   throw new Error("uncommitted changes: what is not committed and pushed would not be in the build");
 }
