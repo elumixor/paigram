@@ -9,6 +9,14 @@ public struct PaiRichMeta: Decodable, Equatable {
         public let detail: String?
     }
 
+    /// One row of a folded run of events.
+    public struct Event: Decodable, Equatable {
+        public let event: String
+        public let text: String
+        public let icon: String?
+        public let agent: String?
+    }
+
     public let v: Int
     public let kind: String
     public let session: String
@@ -18,9 +26,30 @@ public struct PaiRichMeta: Decodable, Equatable {
     public let state: String?
     public let tool: String?
     public let startedAt: Double?
+    /// Rows from the message log: the agent a row is about, its name, where it sits (`pai › Hiring`).
+    public let agent: String?
+    public let agentName: String?
+    public let breadcrumb: String?
+    /// An event row: what happened and its SF Symbol; `events` is a folded run of them.
+    public let event: String?
+    public let icon: String?
+    public let items: [Event]?
+    /// A delegation card: the agent's status now (idle, queued, working, waiting, closed).
+    public let status: String?
+    /// An ask: its id, the options, the answer once given; asks and notices carry a priority.
+    public let askId: Int?
+    public let options: [String]?
+    public let answer: String?
+    public let priority: String?
+    /// The forum topic the agent's chat is in.
+    public let thread: Int64?
 
     public static let version = 1
     public var isStatus: Bool { kind == "status" }
+    /// A service row: one event, or a folded run of them.
+    public var isEvent: Bool { kind == "event" || kind == "events" }
+    /// A card that leads into an agent's chat: work handed to it, or what it said back.
+    public var isCard: Bool { kind == "delegation" || kind == "report" }
     /// A process coming up with a turn to answer; one revived with nothing to do is not busy.
     public var isBusy: Bool { state == "busy" || (state == "starting" && startedAt != nil) }
     public var isWaiting: Bool { state == "waiting" }

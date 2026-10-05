@@ -2,6 +2,8 @@ import Foundation
 
 public struct PaiTelegramInfo: Decodable {
     public let botUsername: String
+    /// The forum topic pai's own chat is in.
+    public let mainThread: Int64?
 }
 
 public struct PaiClientError: LocalizedError {
@@ -89,6 +91,26 @@ public final class PaiClient {
     }
 
     public func telegramInfo() async throws -> PaiTelegramInfo { try await call(PaiTelegramInfo.self, "/m/telegram/info") }
+
+    // MARK: Agents
+
+    public func agents() async throws -> [PaiAgent] { try await call([PaiAgent].self, "/agents") }
+
+    /// One agent's chat, oldest first: the latest `limit` rows, or the ones after `after`.
+    public func messages(agent slug: String, after: Int? = nil, limit: Int = 100) async throws -> [PaiLogMessage] {
+        var query = ["agent": slug, "limit": String(limit)]
+        if let after { query["after"] = String(after) }
+        return try await call([PaiLogMessage].self, "/messages", query: query)
+    }
+
+    /// The user writes to an agent directly; pai is told.
+    public func message(agent slug: String, text: String) async throws {
+        _ = try await call(JSONValue.self, "/agents/\(slug)/message", method: "POST", body: ["text": text])
+    }
+
+    public func answer(ask id: Int, text: String) async throws {
+        _ = try await call(JSONValue.self, "/asks/\(id)/answer", method: "POST", body: ["text": text])
+    }
 
     // MARK: Settings
 
