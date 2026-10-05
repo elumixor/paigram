@@ -34,11 +34,12 @@ async function upload() {
   await $`xcrun altool --upload-app -f ${root}bazel-bin/Telegram/Telegram.ipa -t ios --apiKey ${asc.keyId} --apiIssuer ${asc.issuerId}`;
 }
 
-async function waitProcessed(number: number) {
+/** Build numbers restart at 1 for every version, so the build is looked up by both. */
+async function waitProcessed(version: string, number: number) {
   const app = (await ascGet(`/apps?filter[bundleId]=${bundleId}`)).data[0];
   if (!app) throw new Error(`no App Store Connect app for ${bundleId}; create it once at appstoreconnect.apple.com`);
   for (let i = 0; i < 60; i++) {
-    const builds = (await ascGet(`/builds?filter[app]=${app.id}&filter[version]=${number}&limit=1`)).data;
+    const builds = (await ascGet(`/builds?filter[app]=${app.id}&filter[version]=${number}&filter[preReleaseVersion.version]=${version}&limit=1`)).data;
     const state = builds[0]?.attributes.processingState;
     if (state === "VALID") return builds[0];
     if (state === "FAILED" || state === "INVALID") throw new Error(`build ${number} ${state}`);
@@ -57,6 +58,6 @@ if (!skipBuild) {
 }
 if (!skipUpload) {
   await upload();
-  const build = await waitProcessed(number);
+  const build = await waitProcessed(version, number);
   console.log(`v${version} build ${number} is on TestFlight (${build.id})`);
 }
