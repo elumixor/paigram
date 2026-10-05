@@ -121,6 +121,16 @@ public enum PaiToolSummary {
         return false
     }
 
+    /// `send_to_thread`'s target, when its own summary (`"<server:name> <first string argument>"`, see
+    /// `summarizeTool` in `pai/src/domain/session.ts`) parses as one: a thread's short id is six lowercase hex
+    /// characters, the same shape `start_thread`'s own notice carries in its link text (`PaiThreadLink`).
+    public static func followUpTarget(_ tool: PaiRichMeta.Tool) -> String? {
+        guard tool.name.hasSuffix("__send_to_thread"), let detail = tool.detail else { return nil }
+        let parts = detail.split(separator: " ", maxSplits: 1)
+        guard parts.count == 2, parts[1].range(of: "^[0-9a-f]{6}$", options: .regularExpression) != nil else { return nil }
+        return String(parts[1])
+    }
+
     private static func group(_ tool: PaiRichMeta.Tool) -> Group {
         if isHousekeeping(tool) { return .housekeeping }
         switch tool.name {
@@ -136,6 +146,7 @@ public enum PaiToolSummary {
     }
 
     public static func line(_ tools: [PaiRichMeta.Tool]) -> String {
+        if tools.count == 1, let shortId = followUpTarget(tools[0]) { return "Sent more work to \(shortId)" }
         var counts: [Group: Int] = [:]
         for tool in tools { counts[group(tool), default: 0] += 1 }
         let parts = Group.allCases.compactMap { g in counts[g].map { g.phrase($0) } }
@@ -154,12 +165,13 @@ public enum PaiToolSummary {
         case .pagesRead: return "doc.richtext"
         case .agents: return "person.2"
         case .housekeeping: return "gearshape.2.fill"
-        case .other: return "puzzlepiece"
+        case .other: return followUpTarget(tool) != nil ? "paperplane.fill" : "puzzlepiece"
         }
     }
 
     /// What a row says: the detail without the tool name repeated.
     public static func title(_ tool: PaiRichMeta.Tool) -> String {
+        if let shortId = followUpTarget(tool) { return "Sent more work to \(shortId)" }
         guard let detail = tool.detail, !detail.isEmpty else { return tool.name }
         if detail.hasPrefix(tool.name + " ") { return String(detail.dropFirst(tool.name.count + 1)) }
         return detail
