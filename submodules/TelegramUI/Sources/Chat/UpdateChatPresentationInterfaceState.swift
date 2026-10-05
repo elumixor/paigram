@@ -523,7 +523,7 @@ func updateChatPresentationInterfaceStateImpl(
             strings: selfController.presentationData.strings,
             dateTimeFormat: selfController.presentationData.dateTimeFormat,
             nameDisplayOrder: selfController.presentationData.nameDisplayOrder,
-            content: chatTitleContent,
+            content: paiTitleContent(selfController.presentationInterfaceState, base: chatTitleContent) ?? chatTitleContent,
             transition: titleTransition,
             ignoreParentTransitionRequests: true
         )

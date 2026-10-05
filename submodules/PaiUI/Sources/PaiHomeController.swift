@@ -22,11 +22,13 @@ public final class PaiHomeController: PaiHostedController {
     public var openAgent: ((String) -> Void)?
     /// Set by the chat too: back to it, on the view where the next message starts a thread in the project.
     public var newThread: ((PaiProject?) -> Void)?
+    /// Set by the chat too: the agent tree, pushed over this screen.
+    public var openTree: (() -> Void)?
 
     public override init(context: AccountContext) {
         super.init(context: context)
         if #available(iOS 16.0, *) {
-            self.host(PaiRootView(store: PaiHost.store, open: { [weak self] session in self?.open(session) }, openAgent: { [weak self] agent in self?.openAgent?(agent.slug) }, newThread: { [weak self] project in self?.newThread?(project) }, close: { [weak self] in self?.dismiss() }))
+            self.host(PaiRootView(store: PaiHost.store, open: { [weak self] session in self?.open(session) }, openAgent: { [weak self] agent in self?.openAgent?(agent.slug) }, newThread: { [weak self] project in self?.newThread?(project) }, openTree: { [weak self] in self?.openTree?() }, close: { [weak self] in self?.dismiss() }))
         } else {
             self.host(Text("Pai needs iOS 16 or newer").foregroundColor(.secondary))
         }
@@ -62,10 +64,11 @@ struct PaiRootView: View {
     let open: (PaiSession) -> Void
     let openAgent: (PaiAgent) -> Void
     let newThread: (PaiProject?) -> Void
+    let openTree: () -> Void
     let close: () -> Void
 
     var body: some View {
-        HomeView(open: open, openAgent: openAgent, newThread: newThread, close: close).environmentObject(store)
+        HomeView(open: open, openAgent: openAgent, newThread: newThread, openTree: openTree, close: close).environmentObject(store)
     }
 }
 

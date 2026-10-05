@@ -1834,8 +1834,10 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
             shouldDisplayMenuButton = true
         } else if case .webView = interfaceState.botMenuButton {
             shouldDisplayMenuButton = true
-        } else if PaiChat.isBot(interfaceState.renderedPeer?.peer) {
-            shouldDisplayMenuButton = true
+        }
+        // pai's Projects open from the chat's title, so its chat has no menu button at all.
+        if PaiChat.isBot(interfaceState.renderedPeer?.peer) {
+            shouldDisplayMenuButton = false
         }
         
         var displaySendAsAvatarButton = false

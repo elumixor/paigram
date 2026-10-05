@@ -4872,6 +4872,9 @@ extension ChatControllerImpl {
             home.openAgent = { [weak self] slug in
                 self?.openPaiAgent(slug: slug, thread: nil)
             }
+            home.openTree = { [weak self] in
+                self?.openPaiTree()
+            }
             home.newThread = { [weak self, weak navigationController] project in
                 guard let self, let navigationController else {
                     return

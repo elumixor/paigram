@@ -82,6 +82,27 @@ extension PaiChat {
     /// Posted on the main thread when the agent list changes.
     public static let agentsChanged = Notification.Name("pai.agentsChanged")
 
+    /// Posted on the main thread when `usage` changes.
+    public static let usageChanged = Notification.Name("pai.usageChanged")
+    private static let usageKey = "pai.usageSummary"
+
+    /// The subscription's windows and what sessions cost, one line under the chat's title: "Session 4% · Weekly 7% · $27.35".
+    public static var usage: String? {
+        get { UserDefaults.standard.string(forKey: usageKey) }
+        set {
+            guard newValue != usage else { return }
+            UserDefaults.standard.set(newValue, forKey: usageKey)
+            DispatchQueue.main.async { NotificationCenter.default.post(name: usageChanged, object: nil) }
+        }
+    }
+
+    public static func usageLine(_ usage: PaiUsage) -> String? {
+        // The model-scoped weeklies are in Settings; the title keeps the two that gate every session.
+        let windows = usage.windows.prefix(2).map { "\($0.name) \(Int($0.percent.rounded()))%" }
+        let parts = windows + (usage.costUsd.map { [String(format: "$%.2f", $0)] } ?? [])
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
     /// The last agent list seen, readable from any queue: chat nodes lay out off the main thread.
     public static var agents: [PaiAgent] {
         get {

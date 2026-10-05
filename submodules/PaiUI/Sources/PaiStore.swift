@@ -101,6 +101,9 @@ public final class PaiStore: ObservableObject {
         Task { [client] in
             if let mainThread = try? await client.telegramInfo().mainThread { PaiChat.mainThreadId = mainThread }
         }
+        Task { [client] in
+            if let usage = try? await client.usage() { PaiChat.usage = PaiChat.usageLine(usage) }
+        }
         do {
             async let tasks = client.tasks()
             async let projects = client.projects()

@@ -11,6 +11,7 @@ import UIKit
 
 private let iconSize: CGFloat = 18.0
 private let rowHeight: CGFloat = 26.0
+private let clockSize: CGFloat = 12.0
 private let outerInsets = UIEdgeInsets(top: 3.0, left: 0.0, bottom: 3.0, right: 8.0)
 private let dotsGap: CGFloat = 5.0
 /// A row where pai tended its own setup (memory, staff, routines, its task list) rather than the task at hand.
@@ -71,13 +72,14 @@ private func haloed(_ node: ASDisplayNode, color: UIColor) {
 ///
 /// Above the bubble: "Used 3 tools" for a finished turn (a tap opens the timeline), or the spark with the
 /// current tool and the elapsed time while a turn runs (its tools so far open the same way). Below the
-/// bubble: "Baked for 5s · done 11:11". A status card is nothing but the line above; no bubble, no pill.
+/// bubble: a clock and "5s". A status card is nothing but the line above; no bubble, no pill.
 public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleContentNode {
     /// Where the bubble ends, in this node's coordinates; the item node sets it before layout applies.
     public var bubbleBottom: CGFloat = 0.0
 
     private let summaryNode = TextNode()
     private let footerNode = TextNode()
+    private let clockNode = ASImageNode()
     private let sparkNode = SparkNode()
     private let lineNode = ASDisplayNode()
     private let stopNode = ASImageNode()
@@ -90,6 +92,9 @@ public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleConten
         super.init()
         self.addSubnode(self.summaryNode)
         self.addSubnode(self.footerNode)
+        self.clockNode.displaysAsynchronously = false
+        self.clockNode.isLayerBacked = true
+        self.addSubnode(self.clockNode)
         self.addSubnode(self.sparkNode)
         self.addSubnode(self.lineNode)
         self.stopNode.displaysAsynchronously = false
@@ -140,7 +145,8 @@ public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleConten
             let allHousekeeping = !isStatus && !tools.isEmpty && tools.allSatisfy(PaiToolSummary.isHousekeeping)
             let soleFollowUp = !isStatus && tools.count == 1 ? PaiToolSummary.followUpTarget(tools[0]) : nil
             let summaryColor = soleFollowUp != nil ? accentColor : allHousekeeping ? housekeepingColor : textColor
-            let footerText = isStatus ? "" : Self.footerText(meta, timestamp: item.message.timestamp)
+            let footerText = isStatus ? "" : Self.footerText(meta)
+            let clockWidth: CGFloat = footerText.isEmpty ? 0.0 : clockSize + 3.0
             let sparkWidth = showsActivity ? SparkNode.width + dotsGap : 0.0
             // A running session can be interrupted from its own status line; a finished one has nothing to stop.
             let canStop = showsActivity
@@ -170,7 +176,7 @@ public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleConten
                 let headerHeight = hasHeader ? max(summaryLayout.size.height, showsActivity ? 18.0 : 0.0) : 0.0
                 let rowsHeight = rowLayouts.isEmpty ? 0.0 : 6.0 + CGFloat(rowLayouts.count) * rowHeight
                 let aboveHeight = hasHeader ? outerInsets.top + headerHeight + rowsHeight + outerInsets.bottom : 0.0
-                let size = CGSize(width: leftInset + max(headerWidth, rowsWidth, footerLayout.size.width) + outerInsets.right, height: aboveHeight + belowHeight)
+                let size = CGSize(width: leftInset + max(headerWidth, rowsWidth, clockWidth + footerLayout.size.width) + outerInsets.right, height: aboveHeight + belowHeight)
 
                 return (size.width, { _ in
                     return (size, { [weak self] _, _, _ in
@@ -185,8 +191,13 @@ public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleConten
 
                         let footerNode = footerApply()
                         footerNode.isHidden = footerText.isEmpty
-                        footerNode.frame = CGRect(origin: CGPoint(x: leftInset, y: strongSelf.bubbleBottom + footerGap), size: footerLayout.size)
+                        footerNode.frame = CGRect(origin: CGPoint(x: leftInset + clockWidth, y: strongSelf.bubbleBottom + footerGap), size: footerLayout.size)
                         haloed(footerNode, color: haloColor)
+                        strongSelf.clockNode.isHidden = footerText.isEmpty
+                        if !footerText.isEmpty {
+                            strongSelf.clockNode.image = UIImage(systemName: "clock", withConfiguration: UIImage.SymbolConfiguration(pointSize: clockSize - 1.0, weight: .medium))?.withTintColor(textColor, renderingMode: .alwaysOriginal)
+                            strongSelf.clockNode.frame = CGRect(x: leftInset, y: footerNode.frame.midY - clockSize / 2.0, width: clockSize, height: clockSize)
+                        }
 
                         strongSelf.sparkNode.isHidden = !showsActivity
                         if showsActivity {
@@ -257,13 +268,10 @@ public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleConten
         return "Using \(tool)"
     }
 
-    private static func footerText(_ meta: PaiRichMeta?, timestamp: Int32) -> String {
+    /// How long the turn took; when it finished is the bubble's own timestamp.
+    private static func footerText(_ meta: PaiRichMeta?) -> String {
         guard let durationMs = meta?.durationMs else { return "" }
-        let formatter = DateFormatter()
-        formatter.timeStyle = .short
-        formatter.dateStyle = .none
-        let at = formatter.string(from: Date(timeIntervalSince1970: TimeInterval(timestamp)))
-        return "Baked for \(Self.duration(durationMs)) · done \(at)"
+        return "\(max(1, Int(durationMs / 1000)))s"
     }
 
     private static func duration(_ ms: Double) -> String {
