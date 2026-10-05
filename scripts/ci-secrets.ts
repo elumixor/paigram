@@ -108,6 +108,12 @@ async function modulus(pem: string, kind: "certificate" | "key", workdir: string
 }
 
 /**
+ * `security` writes and reads .p12 files with RC2/3DES, which OpenSSL 3 only speaks with `-legacy`;
+ * LibreSSL (/usr/bin/openssl) speaks it by default and knows no such flag.
+ */
+const legacy = (await $`openssl version`.text()).startsWith("OpenSSL 3") ? ["-legacy"] : [];
+
+/**
  * The whole keychain's identities in PEM, so the chosen one can be picked out of them: `security
  * export` cannot be pointed at a single identity. macOS asks for the login password before it hands
  * over a private key — that prompt is expected.
@@ -116,7 +122,7 @@ async function exportedPem(keychain: string, workdir: string): Promise<string> {
   const bundle = `${workdir}/identities.p12`;
   const intermediate = randomPassword();
   await $`security export -k ${keychain} -t identities -f pkcs12 -P ${intermediate} -o ${bundle}`;
-  return await $`openssl pkcs12 -in ${bundle} -passin env:INTERMEDIATE -nodes`.env({ ...process.env, INTERMEDIATE: intermediate }).text();
+  return await $`openssl pkcs12 ${legacy} -in ${bundle} -passin env:INTERMEDIATE -nodes`.env({ ...process.env, INTERMEDIATE: intermediate }).text();
 }
 
 /** The chosen identity alone, as a .p12 encrypted with `password`. */
@@ -139,7 +145,7 @@ async function distributionP12(identity: Identity, keychain: string, workdir: st
   const p12Path = `${workdir}/distribution.p12`;
   await Bun.write(certificatePath, certificate);
   await Bun.write(keyPath, key);
-  await $`openssl pkcs12 -export -inkey ${keyPath} -in ${certificatePath} -name ${identity.name} -passout env:EXPORT -out ${p12Path}`.env({ ...process.env, EXPORT: password });
+  await $`openssl pkcs12 -export ${legacy} -inkey ${keyPath} -in ${certificatePath} -name ${identity.name} -passout env:EXPORT -out ${p12Path}`.env({ ...process.env, EXPORT: password });
   return Buffer.from(await Bun.file(p12Path).arrayBuffer()).toString("base64");
 }
 
