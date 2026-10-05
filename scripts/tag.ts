@@ -11,6 +11,7 @@ if (status.trim()) throw new Error("versions.json has uncommitted changes; commi
 
 const version = await bumpVersion(process.argv.includes("--minor"));
 const tag = `ios-v${version}`;
-await $`git tag ${tag}`.cwd(root);
+// Annotated: `--follow-tags` leaves lightweight tags behind.
+await $`git tag -a ${tag} -m ${`Paigram v${version}`}`.cwd(root);
 await $`git push --follow-tags`.cwd(root);
 console.log(`pushed ${tag}; the TestFlight workflow builds and uploads it`);
