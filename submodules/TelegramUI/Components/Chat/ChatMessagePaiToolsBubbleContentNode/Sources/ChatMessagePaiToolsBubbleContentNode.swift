@@ -13,6 +13,8 @@ private let iconSize: CGFloat = 18.0
 private let rowHeight: CGFloat = 26.0
 private let outerInsets = UIEdgeInsets(top: 3.0, left: 0.0, bottom: 3.0, right: 8.0)
 private let dotsGap: CGFloat = 5.0
+/// A row where pai tended its own setup (memory, staff, routines, its task list) rather than the task at hand.
+private let housekeepingColor = UIColor(red: 0.55, green: 0.35, blue: 0.95, alpha: 1.0)
 
 /// A row of the expanded timeline: the tool's icon and what it did.
 private final class ToolRowNode: ASDisplayNode {
@@ -131,6 +133,9 @@ public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleConten
                 showsActivity = false
                 summaryText = PaiToolSummary.line(tools)
             }
+            // A turn that was entirely pai tending its own setup reads that way even collapsed, not as plain work.
+            let allHousekeeping = !isStatus && !tools.isEmpty && tools.allSatisfy(PaiToolSummary.isHousekeeping)
+            let summaryColor = allHousekeeping ? housekeepingColor : textColor
             let footerText = isStatus ? "" : Self.footerText(meta, timestamp: item.message.timestamp)
             let sparkWidth = showsActivity ? SparkNode.width + dotsGap : 0.0
             // A running session can be interrupted from its own status line; a finished one has nothing to stop.
@@ -144,13 +149,14 @@ public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleConten
 
             return (contentProperties, nil, CGFloat.greatestFiniteMagnitude, { constrainedSize, _ in
                 let maxTextWidth = max(1.0, constrainedSize.width - leftInset - sparkWidth)
-                let (summaryLayout, summaryApply) = makeSummaryLayout(TextNodeLayoutArguments(attributedString: NSAttributedString(string: summaryText, font: font, textColor: textColor), backgroundColor: nil, maximumNumberOfLines: 2, truncationType: .end, constrainedSize: CGSize(width: maxTextWidth, height: CGFloat.greatestFiniteMagnitude), alignment: .natural, cutout: nil, insets: UIEdgeInsets()))
+                let (summaryLayout, summaryApply) = makeSummaryLayout(TextNodeLayoutArguments(attributedString: NSAttributedString(string: summaryText, font: font, textColor: summaryColor), backgroundColor: nil, maximumNumberOfLines: 2, truncationType: .end, constrainedSize: CGSize(width: maxTextWidth, height: CGFloat.greatestFiniteMagnitude), alignment: .natural, cutout: nil, insets: UIEdgeInsets()))
                 let (footerLayout, footerApply) = makeFooterLayout(TextNodeLayoutArguments(attributedString: NSAttributedString(string: footerText, font: font, textColor: textColor), backgroundColor: nil, maximumNumberOfLines: 1, truncationType: .end, constrainedSize: CGSize(width: max(1.0, constrainedSize.width), height: CGFloat.greatestFiniteMagnitude), alignment: .natural, cutout: nil, insets: UIEdgeInsets()))
 
                 var rowLayouts: [(TextNodeLayout, () -> TextNode)] = []
                 if expanded {
                     for (index, tool) in tools.enumerated() where index < makeRowLayouts.count {
-                        rowLayouts.append(makeRowLayouts[index](TextNodeLayoutArguments(attributedString: NSAttributedString(string: PaiToolSummary.title(tool), font: smallFont, textColor: textColor), backgroundColor: nil, maximumNumberOfLines: 1, truncationType: .middle, constrainedSize: CGSize(width: max(1.0, maxTextWidth - iconSize - 8.0), height: rowHeight), alignment: .natural, cutout: nil, insets: UIEdgeInsets())))
+                        let rowColor = PaiToolSummary.isHousekeeping(tool) ? housekeepingColor : textColor
+                        rowLayouts.append(makeRowLayouts[index](TextNodeLayoutArguments(attributedString: NSAttributedString(string: PaiToolSummary.title(tool), font: smallFont, textColor: rowColor), backgroundColor: nil, maximumNumberOfLines: 1, truncationType: .middle, constrainedSize: CGSize(width: max(1.0, maxTextWidth - iconSize - 8.0), height: rowHeight), alignment: .natural, cutout: nil, insets: UIEdgeInsets())))
                     }
                 }
 
@@ -201,7 +207,8 @@ public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleConten
                         for (index, (rowLayout, rowApply)) in rowLayouts.enumerated() {
                             let row = strongSelf.rowNodes[index]
                             row.frame = CGRect(x: leftInset, y: y, width: size.width - leftInset, height: rowHeight)
-                            row.iconNode.image = UIImage(systemName: PaiToolSummary.symbol(tools[index]), withConfiguration: UIImage.SymbolConfiguration(pointSize: 12.0, weight: .regular))?.withTintColor(textColor, renderingMode: .alwaysOriginal)
+                            let rowColor = PaiToolSummary.isHousekeeping(tools[index]) ? housekeepingColor : textColor
+                            row.iconNode.image = UIImage(systemName: PaiToolSummary.symbol(tools[index]), withConfiguration: UIImage.SymbolConfiguration(pointSize: 12.0, weight: .regular))?.withTintColor(rowColor, renderingMode: .alwaysOriginal)
                             row.iconNode.frame = CGRect(x: 0.0, y: (rowHeight - iconSize) / 2.0, width: iconSize, height: iconSize)
                             let textNode = rowApply()
                             textNode.frame = CGRect(origin: CGPoint(x: iconSize + 8.0, y: (rowHeight - rowLayout.size.height) / 2.0), size: rowLayout.size)

@@ -89,7 +89,7 @@ public struct PaiTrailer: Equatable {
 /// One line that says what a turn did, the way a person would put it.
 public enum PaiToolSummary {
     private enum Group: Int, CaseIterable {
-        case commands, filesRead, filesChanged, codeSearch, webSearch, pagesRead, agents, other
+        case commands, filesRead, filesChanged, codeSearch, webSearch, pagesRead, agents, housekeeping, other
 
         func phrase(_ n: Int) -> String {
             switch self {
@@ -100,12 +100,29 @@ public enum PaiToolSummary {
             case .webSearch: return "searched the web"
             case .pagesRead: return n == 1 ? "read a page" : "read \(n) pages"
             case .agents: return n == 1 ? "ran an agent" : "ran \(n) agents"
+            case .housekeeping: return n == 1 ? "updated its own setup" : "made \(n) changes to its own setup"
             case .other: return n == 1 ? "used a tool" : "used \(n) tools"
             }
         }
     }
 
+    /// Tools pai uses on itself rather than on the user's behalf: memory, staff (agents, routines), its task list.
+    private static let housekeepingMcpTools: Set<String> = [
+        "mcp__pai__create_agent", "mcp__pai__close_agent", "mcp__pai__configure_agent", "mcp__pai__spawn_subagent",
+        "mcp__pai__routine_add", "mcp__pai__routine_update", "mcp__pai__routine_remove",
+        "mcp__pai__task_add", "mcp__pai__task_update",
+        "mcp__pai__set_quiet_hours", "mcp__pai__mute", "mcp__pai__set_pin",
+    ]
+
+    /// Whether a tool call is pai tending itself (memory, staff, routines, its task list) rather than the task at hand.
+    public static func isHousekeeping(_ tool: PaiRichMeta.Tool) -> Bool {
+        if housekeepingMcpTools.contains(tool.name) { return true }
+        if tool.name == "Write" || tool.name == "Edit", let detail = tool.detail, detail.localizedCaseInsensitiveContains("/memory/") { return true }
+        return false
+    }
+
     private static func group(_ tool: PaiRichMeta.Tool) -> Group {
+        if isHousekeeping(tool) { return .housekeeping }
         switch tool.name {
         case "Bash": return .commands
         case "Read": return .filesRead
@@ -136,6 +153,7 @@ public enum PaiToolSummary {
         case .webSearch: return "globe"
         case .pagesRead: return "doc.richtext"
         case .agents: return "person.2"
+        case .housekeeping: return "gearshape.2.fill"
         case .other: return "puzzlepiece"
         }
     }
