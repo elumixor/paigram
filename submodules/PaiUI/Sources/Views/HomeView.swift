@@ -7,6 +7,7 @@ struct HomeView: View {
     let open: (PaiSession) -> Void
     let openAgent: (PaiAgent) -> Void
     let newThread: (PaiProject?) -> Void
+    let openTree: () -> Void
     let close: () -> Void
     @EnvironmentObject private var store: PaiStore
     @EnvironmentObject private var insets: PaiInsets
@@ -75,7 +76,10 @@ struct HomeView: View {
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) { Button(action: close) { Image(systemName: "chevron.left") } }
                     ToolbarItem(placement: .topBarTrailing) {
-                        if let error = store.connectionError { Image(systemName: "bolt.slash").foregroundStyle(.red).help(error) }
+                        HStack {
+                            if let error = store.connectionError { Image(systemName: "bolt.slash").foregroundStyle(.red).help(error) }
+                            Button(action: openTree) { Image(systemName: "point.3.connected.trianglepath.dotted") }
+                        }
                     }
                 }
                 .safeAreaInset(edge: .bottom) { bottomBar }

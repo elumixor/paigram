@@ -11,6 +11,7 @@ import AlertUI
 import PresentationDataUtils
 import OverlayStatusController
 import PaiUI
+import ChatTitleView
 
 /// A topic of the pai bot's chat as a chat location; the same shape `updateChatLocationThread` builds.
 private func paiThread(peerId: PeerId, threadId: Int64) -> ChatReplyThreadMessage {
@@ -125,125 +126,28 @@ extension ChatControllerImpl {
     }
 }
 
-/// The breadcrumb over an agent's topic (pai › Hiring › Screener); over the main topic, "pai" alone, plus the
-/// project picked for the next thread when one is; nil anywhere outside the bot's chat.
-func paiBreadcrumbPanel(_ interfaceState: ChatPresentationInterfaceState, open: @escaping (String) -> Void) -> AnyComponent<Empty>? {
-    guard PaiChat.isBot(interfaceState.renderedPeer?.peer) else {
+/// The pai bot's chat titles itself with where it is: "pai › Hiring › Screener" over an agent's topic, "pai" over
+/// the main one, "pai › <topic>" over a plain thread; under it, the subscription's usage. Tapping it opens Projects.
+/// nil anywhere outside the bot's chat, which keeps Telegram's own title.
+func paiTitleContent(_ interfaceState: ChatPresentationInterfaceState, base: ChatTitleContent) -> ChatTitleContent? {
+    guard PaiChat.isBot(interfaceState.renderedPeer?.peer), case .standard(.default) = interfaceState.mode else {
         return nil
     }
-    if let agent = PaiChat.agent(thread: interfaceState.chatLocation.threadId), !agent.isPai {
-        var crumbs = PaiChat.chain(to: agent.slug).map { PaiBreadcrumbPanelComponent.Crumb(slug: $0.slug, name: $0.name) }
-        if crumbs.first?.slug != PaiChat.paiSlug {
-            crumbs.insert(PaiBreadcrumbPanelComponent.Crumb(slug: PaiChat.paiSlug, name: "pai"), at: 0)
+    let threadId = interfaceState.chatLocation.threadId
+    var crumbs: [String]
+    if let agent = PaiChat.agent(thread: threadId), !agent.isPai {
+        crumbs = PaiChat.chain(to: agent.slug).map(\.name)
+        if PaiChat.chain(to: agent.slug).first?.slug != PaiChat.paiSlug {
+            crumbs.insert("pai", at: 0)
         }
-        return AnyComponent(PaiBreadcrumbPanelComponent(theme: interfaceState.theme, crumbs: crumbs, open: open))
+    } else if threadId == nil {
+        crumbs = ["pai", PaiChat.pendingProject?.slug ?? "New thread"]
+    } else if threadId == PaiChat.mainThreadId {
+        crumbs = ["pai"]
+    } else if case let .peer(_, customTitle?, _, _, _, _, _, _, _) = base {
+        crumbs = ["pai", customTitle]
+    } else {
+        crumbs = ["pai"]
     }
-    let onMainTopic = interfaceState.chatLocation.threadId == nil || interfaceState.chatLocation.threadId == PaiChat.mainThreadId
-    guard onMainTopic else {
-        return nil
-    }
-    var crumbs = [PaiBreadcrumbPanelComponent.Crumb(slug: PaiChat.paiSlug, name: "pai")]
-    if let project = PaiChat.pendingProject {
-        crumbs.append(PaiBreadcrumbPanelComponent.Crumb(slug: project.slug, name: project.slug))
-    }
-    return AnyComponent(PaiBreadcrumbPanelComponent(theme: interfaceState.theme, crumbs: crumbs, open: open))
-}
-
-/// A row of crumbs under the chat's bar; every level above this one is a button back up to it.
-final class PaiBreadcrumbPanelComponent: Component {
-    struct Crumb: Equatable {
-        let slug: String
-        let name: String
-    }
-
-    let theme: PresentationTheme
-    let crumbs: [Crumb]
-    let open: (String) -> Void
-
-    init(theme: PresentationTheme, crumbs: [Crumb], open: @escaping (String) -> Void) {
-        self.theme = theme
-        self.crumbs = crumbs
-        self.open = open
-    }
-
-    static func ==(lhs: PaiBreadcrumbPanelComponent, rhs: PaiBreadcrumbPanelComponent) -> Bool {
-        return lhs.theme === rhs.theme && lhs.crumbs == rhs.crumbs
-    }
-
-    final class View: UIView {
-        private let scrollView = UIScrollView()
-        private var items: [UIView] = []
-        private var component: PaiBreadcrumbPanelComponent?
-
-        override init(frame: CGRect) {
-            super.init(frame: frame)
-            self.scrollView.showsHorizontalScrollIndicator = false
-            self.scrollView.alwaysBounceHorizontal = false
-            self.addSubview(self.scrollView)
-        }
-
-        required init?(coder: NSCoder) {
-            fatalError("init(coder:) has not been implemented")
-        }
-
-        @objc private func crumbPressed(_ sender: UIButton) {
-            guard let component = self.component, sender.tag < component.crumbs.count else {
-                return
-            }
-            component.open(component.crumbs[sender.tag].slug)
-        }
-
-        func update(component: PaiBreadcrumbPanelComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
-            let previous = self.component
-            self.component = component
-            let size = CGSize(width: availableSize.width, height: 40.0)
-            self.scrollView.frame = CGRect(origin: CGPoint(), size: size)
-            if let previous, previous == component {
-                return size
-            }
-
-            for item in self.items {
-                item.removeFromSuperview()
-            }
-            self.items.removeAll()
-
-            let bar = component.theme.rootController.navigationBar
-            let chevron = UIImage(systemName: "chevron.right", withConfiguration: UIImage.SymbolConfiguration(pointSize: 10.0, weight: .semibold))?.withTintColor(bar.secondaryTextColor, renderingMode: .alwaysOriginal)
-            var x: CGFloat = 14.0
-            for (index, crumb) in component.crumbs.enumerated() {
-                if index > 0, let chevron {
-                    let view = UIImageView(image: chevron)
-                    view.frame = CGRect(origin: CGPoint(x: x, y: floor((size.height - chevron.size.height) / 2.0)), size: chevron.size)
-                    self.scrollView.addSubview(view)
-                    self.items.append(view)
-                    x += chevron.size.width + 6.0
-                }
-                let isCurrent = index == component.crumbs.count - 1
-                let button = UIButton(type: .system)
-                button.tag = index
-                button.setTitle(crumb.name, for: .normal)
-                button.titleLabel?.font = isCurrent ? Font.semibold(15.0) : Font.regular(15.0)
-                button.setTitleColor(isCurrent ? bar.primaryTextColor : bar.accentTextColor, for: .normal)
-                button.isUserInteractionEnabled = !isCurrent
-                button.addTarget(self, action: #selector(self.crumbPressed(_:)), for: .touchUpInside)
-                button.sizeToFit()
-                button.frame = CGRect(x: x, y: 0.0, width: button.bounds.width, height: size.height)
-                self.scrollView.addSubview(button)
-                self.items.append(button)
-                x += button.bounds.width + 6.0
-            }
-            self.scrollView.contentSize = CGSize(width: x + 8.0, height: size.height)
-            // The current level is the one that matters; when the trail is long it is the end that shows.
-            self.scrollView.contentOffset = CGPoint(x: max(0.0, self.scrollView.contentSize.width - size.width), y: 0.0)
-            return size
-        }
-    }
-
-    func makeView() -> View {
-        return View(frame: CGRect())
-    }
-
-    func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
-        return view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
-    }
+    return .custom(title: [ChatTitleContent.TitleTextItem(id: AnyHashable(0), content: .text(crumbs.joined(separator: " › ")))], subtitle: PaiChat.usage, isEnabled: true)
 }

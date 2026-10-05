@@ -304,6 +304,7 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
     var chatInfoNavigationButton: ChatNavigationButton?
     var paiAgentsObserver: NSObjectProtocol?
     var paiProjectObserver: NSObjectProtocol?
+    var paiUsageObserver: NSObjectProtocol?
 
     var moreBarButton: MoreHeaderButton
     var moreInfoNavigationButton: ChatNavigationButton?
@@ -7004,6 +7005,9 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
         if let paiProjectObserver = self.paiProjectObserver {
             NotificationCenter.default.removeObserver(paiProjectObserver)
         }
+        if let paiUsageObserver = self.paiUsageObserver {
+            NotificationCenter.default.removeObserver(paiUsageObserver)
+        }
         if let paiAgentsObserver = self.paiAgentsObserver {
             NotificationCenter.default.removeObserver(paiAgentsObserver)
         }
@@ -7714,17 +7718,17 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
         let wasAppearedBefore = self.didAppear
         self.didAppear = true
         
-        // The pai bot's chat keeps its activity feed alive while open; a new agent list redraws the breadcrumb.
+        // The pai bot's chat keeps its activity feed alive while open; a new agent list, project or usage redraws the title.
         if !wasAppearedBefore, PaiChat.isBot(self.presentationInterfaceState.renderedPeer?.peer) {
             if #available(iOS 16.0, *) {
                 PaiHost.store.start()
             }
-            self.paiAgentsObserver = NotificationCenter.default.addObserver(forName: PaiChat.agentsChanged, object: nil, queue: .main) { [weak self] _ in
-                self?.requestLayout(transition: .immediate)
+            let redrawTitle: (Notification) -> Void = { [weak self] _ in
+                self?.updateChatPresentationInterfaceState(animated: false, interactive: false, { $0 })
             }
-            self.paiProjectObserver = NotificationCenter.default.addObserver(forName: PaiChat.projectChanged, object: nil, queue: .main) { [weak self] _ in
-                self?.requestLayout(transition: .immediate)
-            }
+            self.paiAgentsObserver = NotificationCenter.default.addObserver(forName: PaiChat.agentsChanged, object: nil, queue: .main, using: redrawTitle)
+            self.paiProjectObserver = NotificationCenter.default.addObserver(forName: PaiChat.projectChanged, object: nil, queue: .main, using: redrawTitle)
+            self.paiUsageObserver = NotificationCenter.default.addObserver(forName: PaiChat.usageChanged, object: nil, queue: .main, using: redrawTitle)
         }
         
         self.chatDisplayNode.historyNode.experimentalSnapScrollToItem = false

@@ -46,18 +46,35 @@ final class PaiSettingsStore: ObservableObject {
     @MainActor func load() async {
         isLoading = context == nil
         defer { isLoading = false }
-        async let context = client.context()
-        async let usage = client.usage()
-        async let health = client.health()
-        do {
-            self.health = try await health
-            self.context = try await context
-            self.usage = try await usage
-            error = nil
-        } catch is CancellationError {
-        } catch {
-            self.error = error.localizedDescription
+        // Each on its own: one call failing must not hide what the others brought back.
+        let client = self.client
+        async let health = attempt { try await client.health() }
+        async let context = attempt { try await client.context() }
+        async let usage = attempt { try await client.usage() }
+        var failures: [Error] = []
+        switch await health {
+        case let .success(value): self.health = value
+        case let .failure(error): failures.append(error)
         }
+        switch await context {
+        case let .success(value): self.context = value
+        case let .failure(error): failures.append(error)
+        }
+        switch await usage {
+        case let .success(value):
+            self.usage = value
+            PaiChat.usage = PaiChat.usageLine(value)
+        case let .failure(error): failures.append(error)
+        }
+        error = failures.first { !($0 is CancellationError) }?.localizedDescription
+    }
+}
+
+private func attempt<T>(_ body: () async throws -> T) async -> Result<T, Error> {
+    do {
+        return .success(try await body())
+    } catch {
+        return .failure(error)
     }
 }
 

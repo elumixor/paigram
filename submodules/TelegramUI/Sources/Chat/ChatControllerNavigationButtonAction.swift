@@ -398,10 +398,10 @@ extension ChatControllerImpl {
                 })
             }
         case let .openChatInfo(expandAvatar, section):
-            // The pai bot's title opens the agent tree; its avatar the settings.
+            // The pai bot's title (its breadcrumb) opens Projects, every agent and thread; its avatar the settings.
             if PaiChat.isBot(self.presentationInterfaceState.renderedPeer?.peer), #available(iOS 16.0, *) {
                 if !expandAvatar {
-                    self.openPaiTree()
+                    self.interfaceInteraction?.openPai?()
                     return
                 }
                 let settings = PaiSettingsController(context: self.context)
