@@ -1443,6 +1443,12 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
                 footerPanels.append(panel)
             }
         }
+        // pai's topic in its bot chat: the subscription's limits as bars, a tap into pai's settings.
+        if !hideTopPanels, self.chatPresentationInterfaceState.search == nil, let usage = paiUsagePanel(self.chatPresentationInterfaceState, open: { [weak self] in
+            self?.controller?.openPaiSettings()
+        }) {
+            headerPanels.append(HeaderPanelContainerComponent.Panel(key: "paiUsage", orderIndex: 0, component: usage))
+        }
         if !hideTopPanels, self.chatPresentationInterfaceState.search == nil, let mediaPlayback = self.controller?.globalControlPanelsContextState?.mediaPlayback {
             if let playlistLocation = mediaPlayback.playlistLocation as? PeerMessagesPlaylistLocation, case let .custom(_, _, _, _, hidePanel) = playlistLocation, hidePanel {
                 

@@ -65,18 +65,6 @@ extension ChatControllerImpl {
         navigationController.setViewControllers(Array(stack.prefix((parentIndex ?? selfIndex) + 1)) + [chat], animated: true)
     }
 
-    /// The agent tree, from the chat's title: every agent with its status, a tap into its chat.
-    func openPaiTree() {
-        guard #available(iOS 16.0, *), let navigationController = self.effectiveNavigationController else {
-            return
-        }
-        let tree = PaiAgentTreeController(context: self.context)
-        tree.openAgent = { [weak self] slug in
-            self?.openPaiAgent(slug: slug, thread: nil)
-        }
-        navigationController.pushViewController(tree)
-    }
-
     /// A thread named only by its short id (a reply's "started […]" link): always pushed as a fresh chat,
     /// never a switch — unlike an agent's topic, a plain thread has no place of its own in the nav stack yet.
     func openPaiThread(shortId: String) {
@@ -117,6 +105,14 @@ extension ChatControllerImpl {
         }
     }
 
+    /// pai's settings: status, usage, what its sessions are given.
+    func openPaiSettings() {
+        guard #available(iOS 16.0, *) else { return }
+        let settings = PaiSettingsController(context: self.context)
+        settings.openProjects = { [weak self] in self?.interfaceInteraction?.openPai?() }
+        self.effectiveNavigationController?.pushViewController(settings)
+    }
+
     /// Interrupts the session a busy status card shows; the card updates once the daemon reports it stopped.
     func stopPaiSession(_ session: String) {
         guard #available(iOS 16.0, *) else { return }
@@ -127,7 +123,7 @@ extension ChatControllerImpl {
 }
 
 /// The pai bot's chat titles itself with where it is: "pai › Hiring › Screener" over an agent's topic, "pai" over
-/// the main one, "pai › <topic>" over a plain thread; under it, the subscription's usage. Tapping it opens Projects.
+/// the main one, "pai › <topic>" over a plain thread. Tapping it opens the hub.
 /// nil anywhere outside the bot's chat, which keeps Telegram's own title.
 func paiTitleContent(_ interfaceState: ChatPresentationInterfaceState, base: ChatTitleContent) -> ChatTitleContent? {
     guard PaiChat.isBot(interfaceState.renderedPeer?.peer), case .standard(.default) = interfaceState.mode else {
@@ -149,5 +145,141 @@ func paiTitleContent(_ interfaceState: ChatPresentationInterfaceState, base: Cha
     } else {
         crumbs = ["pai"]
     }
-    return .custom(title: [ChatTitleContent.TitleTextItem(id: AnyHashable(0), content: .text(crumbs.joined(separator: " › ")))], subtitle: PaiChat.usage, isEnabled: true)
+    return .custom(title: [ChatTitleContent.TitleTextItem(id: AnyHashable(0), content: .text(crumbs.joined(separator: " › ")))], subtitle: nil, isEnabled: true)
+}
+
+/// The subscription's limits as bars under the bot chat's title, over pai's own topic: how much of the session
+/// window and of the week is spent, and what the sessions cost. nil anywhere else.
+func paiUsagePanel(_ interfaceState: ChatPresentationInterfaceState, open: @escaping () -> Void) -> AnyComponent<Empty>? {
+    guard PaiChat.isBot(interfaceState.renderedPeer?.peer), case .standard(.default) = interfaceState.mode, let usage = PaiChat.usage, !usage.windows.isEmpty else {
+        return nil
+    }
+    let threadId = interfaceState.chatLocation.threadId
+    guard threadId == nil || threadId == PaiChat.mainThreadId else {
+        return nil
+    }
+    return AnyComponent(PaiUsagePanelComponent(theme: interfaceState.theme, windows: Array(usage.windows.prefix(2)), cost: usage.costUsd, open: open))
+}
+
+final class PaiUsagePanelComponent: Component {
+    let theme: PresentationTheme
+    let windows: [PaiUsageWindow]
+    let cost: Double?
+    let open: () -> Void
+
+    init(theme: PresentationTheme, windows: [PaiUsageWindow], cost: Double?, open: @escaping () -> Void) {
+        self.theme = theme
+        self.windows = windows
+        self.cost = cost
+        self.open = open
+    }
+
+    static func ==(lhs: PaiUsagePanelComponent, rhs: PaiUsagePanelComponent) -> Bool {
+        return lhs.theme === rhs.theme && lhs.windows == rhs.windows && lhs.cost == rhs.cost
+    }
+
+    /// One window: its name, a bar filled to how much is used (amber past 80%, red past 95%), the percentage.
+    private final class Meter: UIView {
+        let label = UILabel()
+        let track = UIView()
+        let fill = UIView()
+        let value = UILabel()
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            self.track.layer.cornerRadius = 2.5
+            self.fill.layer.cornerRadius = 2.5
+            self.track.addSubview(self.fill)
+            for view in [self.label, self.track, self.value] {
+                self.addSubview(view)
+            }
+        }
+
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
+        }
+
+        func update(window: PaiUsageWindow, theme: PresentationTheme, width: CGFloat, height: CGFloat) {
+            let bar = theme.rootController.navigationBar
+            let percent = max(0.0, min(100.0, window.percent))
+            self.label.text = window.name
+            self.label.font = Font.medium(12.0)
+            self.label.textColor = bar.secondaryTextColor
+            self.value.text = "\(Int(percent.rounded()))%"
+            self.value.font = Font.with(size: 12.0, design: .regular, weight: .semibold, traits: .monospacedNumbers)
+            self.value.textColor = bar.primaryTextColor
+            self.track.backgroundColor = bar.secondaryTextColor.withAlphaComponent(0.2)
+            self.fill.backgroundColor = percent >= 95.0 ? UIColor.systemRed : percent >= 80.0 ? UIColor.systemOrange : bar.accentTextColor
+            self.label.sizeToFit()
+            self.value.sizeToFit()
+            let valueWidth = max(self.value.bounds.width, 30.0)
+            self.label.frame = CGRect(x: 0.0, y: floor((height - self.label.bounds.height) / 2.0), width: self.label.bounds.width, height: self.label.bounds.height)
+            let trackX = self.label.frame.maxX + 6.0
+            let trackWidth = max(20.0, width - trackX - valueWidth - 4.0)
+            self.track.frame = CGRect(x: trackX, y: floor((height - 5.0) / 2.0), width: trackWidth, height: 5.0)
+            self.fill.frame = CGRect(x: 0.0, y: 0.0, width: max(5.0, trackWidth * CGFloat(percent / 100.0)), height: 5.0)
+            self.value.frame = CGRect(x: self.track.frame.maxX + 4.0, y: floor((height - self.value.bounds.height) / 2.0), width: valueWidth, height: self.value.bounds.height)
+        }
+    }
+
+    final class View: UIView {
+        private var meters: [Meter] = []
+        private let costLabel = UILabel()
+        private var component: PaiUsagePanelComponent?
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            self.costLabel.textAlignment = .right
+            self.addSubview(self.costLabel)
+            self.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(self.tapped)))
+        }
+
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
+        }
+
+        @objc private func tapped() {
+            self.component?.open()
+        }
+
+        func update(component: PaiUsagePanelComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
+            self.component = component
+            let size = CGSize(width: availableSize.width, height: 34.0)
+            let bar = component.theme.rootController.navigationBar
+            let inset: CGFloat = 16.0
+
+            self.costLabel.text = component.cost.map { String(format: "$%.2f", $0) }
+            self.costLabel.font = Font.with(size: 12.0, design: .regular, weight: .semibold, traits: .monospacedNumbers)
+            self.costLabel.textColor = bar.secondaryTextColor
+            self.costLabel.sizeToFit()
+            let costWidth = component.cost == nil ? 0.0 : self.costLabel.bounds.width + 12.0
+            self.costLabel.frame = CGRect(x: size.width - inset - self.costLabel.bounds.width, y: floor((size.height - self.costLabel.bounds.height) / 2.0), width: self.costLabel.bounds.width, height: self.costLabel.bounds.height)
+
+            while self.meters.count < component.windows.count {
+                let meter = Meter()
+                self.addSubview(meter)
+                self.meters.append(meter)
+            }
+            while self.meters.count > component.windows.count {
+                self.meters.removeLast().removeFromSuperview()
+            }
+            let gap: CGFloat = 14.0
+            let count = CGFloat(max(1, component.windows.count))
+            let meterWidth = floor((size.width - inset * 2.0 - costWidth - gap * (count - 1.0)) / count)
+            for (index, window) in component.windows.enumerated() {
+                let meter = self.meters[index]
+                meter.frame = CGRect(x: inset + CGFloat(index) * (meterWidth + gap), y: 0.0, width: meterWidth, height: size.height)
+                meter.update(window: window, theme: component.theme, width: meterWidth, height: size.height)
+            }
+            return size
+        }
+    }
+
+    func makeView() -> View {
+        return View(frame: CGRect())
+    }
+
+    func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
+        return view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
+    }
 }

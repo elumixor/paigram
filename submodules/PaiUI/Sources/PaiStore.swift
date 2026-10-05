@@ -102,7 +102,7 @@ public final class PaiStore: ObservableObject {
             if let mainThread = try? await client.telegramInfo().mainThread { PaiChat.mainThreadId = mainThread }
         }
         Task { [client] in
-            if let usage = try? await client.usage() { PaiChat.usage = PaiChat.usageLine(usage) }
+            if let usage = try? await client.usage() { PaiChat.usage = usage }
         }
         do {
             async let tasks = client.tasks()
@@ -147,6 +147,7 @@ public final class PaiStore: ObservableObject {
             sessions = sessions.map { $0.sessionId == id ? $0.withTool(summary) : $0 }
         }
         if Self.refreshingKinds.contains(event.kind) { refresh() }
+        if event.kind != "session.delta" { NotificationCenter.default.post(name: PaiChat.changed, object: nil) }
     }
 
     // MARK: Agents

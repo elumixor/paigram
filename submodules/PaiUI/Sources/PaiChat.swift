@@ -84,23 +84,18 @@ extension PaiChat {
 
     /// Posted on the main thread when `usage` changes.
     public static let usageChanged = Notification.Name("pai.usageChanged")
-    private static let usageKey = "pai.usageSummary"
+    /// Posted on the main thread when anything the daemon tracks moved: an agent, a task, an ask, a turn.
+    public static let changed = Notification.Name("pai.changed")
+    private static let usageKey = "pai.usage"
 
-    /// The subscription's windows and what sessions cost, one line under the chat's title: "Session 4% · Weekly 7% · $27.35".
-    public static var usage: String? {
-        get { UserDefaults.standard.string(forKey: usageKey) }
+    /// The subscription's windows and what the sessions cost, last seen; the chat draws them as bars under its title.
+    public static var usage: PaiUsage? {
+        get { UserDefaults.standard.data(forKey: usageKey).flatMap { try? JSONDecoder().decode(PaiUsage.self, from: $0) } }
         set {
             guard newValue != usage else { return }
-            UserDefaults.standard.set(newValue, forKey: usageKey)
+            UserDefaults.standard.set(newValue.flatMap { try? JSONEncoder().encode($0) }, forKey: usageKey)
             DispatchQueue.main.async { NotificationCenter.default.post(name: usageChanged, object: nil) }
         }
-    }
-
-    public static func usageLine(_ usage: PaiUsage) -> String? {
-        // The model-scoped weeklies are in Settings; the title keeps the two that gate every session.
-        let windows = usage.windows.prefix(2).map { "\($0.name) \(Int($0.percent.rounded()))%" }
-        let parts = windows + (usage.costUsd.map { [String(format: "$%.2f", $0)] } ?? [])
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     /// The last agent list seen, readable from any queue: chat nodes lay out off the main thread.

@@ -65,6 +65,78 @@ public struct PaiThread: Decodable {
 public struct PaiTasks: Decodable {
     public let live: [PaiSession]
     public let recent: [PaiSession]
+    /// The task list; a daemon from before it had one sends none.
+    public let items: [PaiTaskItem]?
+}
+
+/// One task on the user's list (`GET /tasks`): who owns it, where it stands, what is next.
+public struct PaiTaskItem: Codable, Identifiable, Equatable {
+    public let id: Int
+    public var title: String
+    public let parentId: Int?
+    public var owner: String
+    /// inbox, active, waiting_user, waiting_other, scheduled, done, dropped.
+    public var status: String
+    public var nextAction: String?
+    public var due: String?
+    public let source: String?
+    public var notes: String?
+    public let createdAt: Double
+    public var updatedAt: Double
+
+    public var isOpen: Bool { status != "done" && status != "dropped" }
+    public var isOverdue: Bool {
+        guard let due, isOpen else { return false }
+        return due < String(ISO8601DateFormatter().string(from: Date()).prefix(10))
+    }
+}
+
+/// Something waiting on the user (`GET /needs`): an agent's ask or a session's open question, answered alike.
+public struct PaiNeed: Codable, Identifiable, Equatable {
+    /// "ask" or "question".
+    public let kind: String
+    public let id: String
+    public let askId: Int?
+    public let session: String?
+    public let from: String
+    public let question: String
+    public let options: [String]
+    public let freeText: Bool?
+    public let priority: String?
+    public let createdAt: Double
+}
+
+/// A routine (`GET /routines`): a schedule or an event, and what it does then.
+public struct PaiRoutine: Codable, Identifiable, Equatable {
+    public let id: Int
+    public let name: String
+    public let event: String
+    public let schedule: String
+    /// notify, turn, wake, triage, task.
+    public let action: String
+    public let agent: String
+    public let template: String
+    public let owner: String
+    public var enabled: Bool
+    public let runs: Int?
+    public let lastRun: Double?
+
+    public var isScheduled: Bool { !schedule.isEmpty }
+}
+
+/// A plain thread an agent started, listed under it in the tree.
+public struct PaiAgentThread: Codable, Identifiable, Equatable {
+    public let sessionId: String
+    public let shortId: String
+    public let title: String
+    public let project: String?
+    public let state: String
+    public let threadId: Int64?
+    public let lastActivity: Double
+    public let costUsd: Double?
+
+    public var id: String { sessionId }
+    public var isRunning: Bool { state == "busy" || state == "starting" }
 }
 
 public struct PaiProject: Codable, Identifiable, Equatable {
@@ -187,7 +259,7 @@ public struct PaiContext: Decodable {
     public let sessions: [Session]?
 }
 
-public struct PaiUsageWindow: Decodable, Identifiable {
+public struct PaiUsageWindow: Codable, Identifiable, Equatable {
     public let name: String
     public let percent: Double
     public let resetsAt: String?
@@ -195,7 +267,7 @@ public struct PaiUsageWindow: Decodable, Identifiable {
     public var id: String { name }
 }
 
-public struct PaiUsage: Decodable {
+public struct PaiUsage: Codable, Equatable {
     public let windows: [PaiUsageWindow]
     public let costUsd: Double?
     public let error: String?
@@ -231,8 +303,16 @@ public struct PaiAgent: Codable, Identifiable, Equatable {
     public let breadcrumb: String?
     public let openTasks: Int?
     public let queued: Int?
+    public var threads: [PaiAgentThread]? = nil
+    /// Its session now, when it has one: pai's tells whether pai itself is mid-turn.
+    public var session: SessionState? = nil
+
+    public struct SessionState: Codable, Equatable {
+        public let state: String
+    }
 
     public var id: String { slug }
+    public var isBusy: Bool { status == "working" || status == "queued" || session?.state == "busy" }
     public var isPai: Bool { slug == PaiChat.paiSlug }
     public var isClosed: Bool { status == "closed" }
     public var briefLine: String { (brief ?? "").split(separator: "\n").first.map(String.init)?.paiPlain ?? "" }
