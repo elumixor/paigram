@@ -7723,6 +7723,9 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
             if #available(iOS 16.0, *) {
                 PaiHost.store.start()
             }
+            if let peerId = self.chatLocation.peerId {
+                PaiNotificationAnswer.writeConfig(basePath: self.context.sharedContext.basePath, botUserId: peerId.id._internalGetInt64Value())
+            }
             let redrawTitle: (Notification) -> Void = { [weak self] _ in
                 self?.updateChatPresentationInterfaceState(animated: false, interactive: false, { $0 })
                 self?.requestLayout(transition: .immediate)
