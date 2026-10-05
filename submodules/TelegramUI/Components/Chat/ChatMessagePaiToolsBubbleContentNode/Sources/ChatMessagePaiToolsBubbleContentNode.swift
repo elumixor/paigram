@@ -118,6 +118,9 @@ public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleConten
             let isStatus = meta?.isStatus ?? false
             let theme = item.presentationData.theme.theme
             let textColor = theme.chat.message.incoming.primaryTextColor.withAlphaComponent(0.75)
+            // A row that leads somewhere (a follow-up into another thread) gets the bubble's own accent,
+            // not the dimmed status tint — real contrast, the way a delegation card's title reads.
+            let accentColor = theme.chat.message.incoming.accentTextColor
             let haloColor = theme.chat.message.incoming.bubble.withWallpaper.fill.first ?? theme.list.plainBackgroundColor
             let baseSize = item.presentationData.messageFont.pointSize
             let font = Font.regular(floor(baseSize * 14.0 / 17.0))
@@ -135,7 +138,8 @@ public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleConten
             }
             // A turn that was entirely pai tending its own setup reads that way even collapsed, not as plain work.
             let allHousekeeping = !isStatus && !tools.isEmpty && tools.allSatisfy(PaiToolSummary.isHousekeeping)
-            let summaryColor = allHousekeeping ? housekeepingColor : textColor
+            let soleFollowUp = !isStatus && tools.count == 1 ? PaiToolSummary.followUpTarget(tools[0]) : nil
+            let summaryColor = soleFollowUp != nil ? accentColor : allHousekeeping ? housekeepingColor : textColor
             let footerText = isStatus ? "" : Self.footerText(meta, timestamp: item.message.timestamp)
             let sparkWidth = showsActivity ? SparkNode.width + dotsGap : 0.0
             // A running session can be interrupted from its own status line; a finished one has nothing to stop.
@@ -155,7 +159,7 @@ public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleConten
                 var rowLayouts: [(TextNodeLayout, () -> TextNode)] = []
                 if expanded {
                     for (index, tool) in tools.enumerated() where index < makeRowLayouts.count {
-                        let rowColor = PaiToolSummary.isHousekeeping(tool) ? housekeepingColor : textColor
+                        let rowColor = PaiToolSummary.followUpTarget(tool) != nil ? accentColor : PaiToolSummary.isHousekeeping(tool) ? housekeepingColor : textColor
                         rowLayouts.append(makeRowLayouts[index](TextNodeLayoutArguments(attributedString: NSAttributedString(string: PaiToolSummary.title(tool), font: smallFont, textColor: rowColor), backgroundColor: nil, maximumNumberOfLines: 1, truncationType: .middle, constrainedSize: CGSize(width: max(1.0, maxTextWidth - iconSize - 8.0), height: rowHeight), alignment: .natural, cutout: nil, insets: UIEdgeInsets())))
                     }
                 }
@@ -207,7 +211,7 @@ public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleConten
                         for (index, (rowLayout, rowApply)) in rowLayouts.enumerated() {
                             let row = strongSelf.rowNodes[index]
                             row.frame = CGRect(x: leftInset, y: y, width: size.width - leftInset, height: rowHeight)
-                            let rowColor = PaiToolSummary.isHousekeeping(tools[index]) ? housekeepingColor : textColor
+                            let rowColor = PaiToolSummary.followUpTarget(tools[index]) != nil ? accentColor : PaiToolSummary.isHousekeeping(tools[index]) ? housekeepingColor : textColor
                             row.iconNode.image = UIImage(systemName: PaiToolSummary.symbol(tools[index]), withConfiguration: UIImage.SymbolConfiguration(pointSize: 12.0, weight: .regular))?.withTintColor(rowColor, renderingMode: .alwaysOriginal)
                             row.iconNode.frame = CGRect(x: 0.0, y: (rowHeight - iconSize) / 2.0, width: iconSize, height: iconSize)
                             let textNode = rowApply()
@@ -314,7 +318,23 @@ public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleConten
                 item?.controllerInteraction.stopPaiSession?(meta.session)
             }))
         }
-        guard point.y <= self.headerHeight, !(meta.tools ?? []).isEmpty else {
+        let tools = meta.tools ?? []
+        // A send_to_thread row — expanded, or the whole header when it is the turn's only tool — leads
+        // into that thread, the way a delegation card does, instead of toggling the timeline.
+        if self.expanded {
+            for (index, row) in self.rowNodes.enumerated() where index < tools.count && !row.isHidden {
+                if row.frame.contains(point), let shortId = PaiToolSummary.followUpTarget(tools[index]) {
+                    return ChatMessageBubbleContentTapAction(content: .custom({ [weak item] in
+                        item?.controllerInteraction.openPaiThread?(shortId)
+                    }))
+                }
+            }
+        } else if point.y <= self.headerHeight, tools.count == 1, let shortId = PaiToolSummary.followUpTarget(tools[0]) {
+            return ChatMessageBubbleContentTapAction(content: .custom({ [weak item] in
+                item?.controllerInteraction.openPaiThread?(shortId)
+            }))
+        }
+        guard point.y <= self.headerHeight, !tools.isEmpty else {
             return ChatMessageBubbleContentTapAction(content: .none)
         }
         return ChatMessageBubbleContentTapAction(content: .custom({ [weak self] in
