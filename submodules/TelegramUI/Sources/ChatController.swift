@@ -303,7 +303,8 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
     var secondaryRightNavigationButton: ChatNavigationButton?
     var chatInfoNavigationButton: ChatNavigationButton?
     var paiAgentsObserver: NSObjectProtocol?
-    
+    var paiProjectObserver: NSObjectProtocol?
+
     var moreBarButton: MoreHeaderButton
     var moreInfoNavigationButton: ChatNavigationButton?
     
@@ -5954,7 +5955,17 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
         controllerInteraction.openPaiAgent = { [weak self] slug, thread in
             self?.openPaiAgent(slug: slug, thread: thread)
         }
-        
+
+        // A reply's "started […]" link, by the short id it carries in its own text.
+        controllerInteraction.openPaiThread = { [weak self] shortId in
+            self?.openPaiThread(shortId: shortId)
+        }
+
+        // The stop control on a busy status card.
+        controllerInteraction.stopPaiSession = { [weak self] session in
+            self?.stopPaiSession(session)
+        }
+
         self.controllerInteraction = controllerInteraction
         
         self.navigationBar?.allowsCustomTransition = { [weak self] in
@@ -6990,6 +7001,9 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
         let _ = ChatControllerCount.modify { value in
             return value - 1
         }
+        if let paiProjectObserver = self.paiProjectObserver {
+            NotificationCenter.default.removeObserver(paiProjectObserver)
+        }
         if let paiAgentsObserver = self.paiAgentsObserver {
             NotificationCenter.default.removeObserver(paiAgentsObserver)
         }
@@ -7706,6 +7720,9 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
                 PaiHost.store.start()
             }
             self.paiAgentsObserver = NotificationCenter.default.addObserver(forName: PaiChat.agentsChanged, object: nil, queue: .main) { [weak self] _ in
+                self?.requestLayout(transition: .immediate)
+            }
+            self.paiProjectObserver = NotificationCenter.default.addObserver(forName: PaiChat.projectChanged, object: nil, queue: .main) { [weak self] _ in
                 self?.requestLayout(transition: .immediate)
             }
         }

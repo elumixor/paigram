@@ -40,22 +40,47 @@ struct ProjectPickerView: View {
     let pick: (PaiProject?) -> Void
     let close: () -> Void
     @State private var query = ""
+    @State private var pinned = PaiChat.pinnedProjects
     @FocusState private var focused: Bool
     @EnvironmentObject private var insets: PaiInsets
 
+    /// Pinned projects first (in the order they were pinned), then the rest as the daemon listed them.
     private var matches: [PaiProject] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
-        return store.projects.filter { q.isEmpty || $0.slug.lowercased().contains(q) || ($0.summary ?? "").lowercased().contains(q) }
+        let filtered = store.projects.filter { q.isEmpty || $0.slug.lowercased().contains(q) || ($0.summary ?? "").lowercased().contains(q) }
+        return filtered.enumerated().sorted { a, b in
+            let pa = pinned.firstIndex(of: a.element.slug), pb = pinned.firstIndex(of: b.element.slug)
+            if let pa, let pb { return pa < pb }
+            if pa != nil || pb != nil { return pa != nil }
+            return a.offset < b.offset
+        }.map(\.element)
     }
 
     var body: some View {
         NavigationStack {
             List {
-                if query.isEmpty {
-                    row(symbol: PaiProjectIcon.general, title: "General", detail: "The assistant's own workspace", selected: PaiChat.pendingProject == nil) { pick(nil) }
-                }
-                ForEach(matches) { project in
-                    row(symbol: PaiProjectIcon.symbol(project), title: project.slug, detail: project.summary, selected: PaiChat.pendingProject?.slug == project.slug) { pick(project) }
+                if let error = store.connectionError, store.projects.isEmpty {
+                    ContentUnavailableCompat(symbol: "bolt.slash", title: "Not connected", detail: error)
+                } else {
+                    if query.isEmpty {
+                        row(symbol: PaiProjectIcon.general, title: "General", detail: "The assistant's own workspace", selected: PaiChat.pendingProject == nil) { pick(nil) }
+                    }
+                    if store.isLoading && store.projects.isEmpty {
+                        ForEach(0..<3, id: \.self) { _ in SkeletonRow() }
+                    } else if matches.isEmpty && !query.isEmpty {
+                        ContentUnavailableCompat(symbol: "magnifyingglass", title: "No matches", detail: "No project matches \u{201c}\(query)\u{201d}.")
+                    }
+                    ForEach(matches) { project in
+                        row(symbol: PaiProjectIcon.symbol(project), title: project.slug, detail: project.summary, selected: PaiChat.pendingProject?.slug == project.slug) { pick(project) }
+                            .contextMenu {
+                                Button {
+                                    pinned = pinned.contains(project.slug) ? pinned.filter { $0 != project.slug } : pinned + [project.slug]
+                                    PaiChat.pinnedProjects = pinned
+                                } label: {
+                                    Label(pinned.contains(project.slug) ? "Unpin" : "Pin", systemImage: pinned.contains(project.slug) ? "pin.slash" : "pin")
+                                }
+                            }
+                    }
                 }
             }
             .listStyle(.plain)
@@ -63,6 +88,9 @@ struct ProjectPickerView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button(action: close) { Image(systemName: "chevron.left") } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if let error = store.connectionError, !store.projects.isEmpty { Image(systemName: "bolt.slash").foregroundStyle(.red).help(error) }
+                }
             }
             .safeAreaInset(edge: .bottom) {
                 HStack(spacing: 6) {
@@ -83,6 +111,7 @@ struct ProjectPickerView: View {
         }
         .onAppear {
             store.start()
+            store.refresh()
             focused = true
         }
     }

@@ -78,6 +78,7 @@ public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleConten
     private let footerNode = TextNode()
     private let sparkNode = SparkNode()
     private let lineNode = ASDisplayNode()
+    private let stopNode = ASImageNode()
     private var rowNodes: [ToolRowNode] = []
     private var expanded = false
     private var timer: SwiftSignalKit.Timer?
@@ -89,6 +90,9 @@ public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleConten
         self.addSubnode(self.footerNode)
         self.addSubnode(self.sparkNode)
         self.addSubnode(self.lineNode)
+        self.stopNode.displaysAsynchronously = false
+        self.stopNode.isLayerBacked = true
+        self.addSubnode(self.stopNode)
     }
 
     required public init?(coder aDecoder: NSCoder) {
@@ -129,6 +133,9 @@ public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleConten
             }
             let footerText = isStatus ? "" : Self.footerText(meta, timestamp: item.message.timestamp)
             let sparkWidth = showsActivity ? SparkNode.width + dotsGap : 0.0
+            // A running session can be interrupted from its own status line; a finished one has nothing to stop.
+            let canStop = showsActivity
+            let stopWidth: CGFloat = canStop ? iconSize + dotsGap : 0.0
             let footerGap: CGFloat = 3.0
 
             let belowHeight: CGFloat = footerText.isEmpty ? 0.0 : footerGap + font.pointSize + 6.0
@@ -148,7 +155,7 @@ public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleConten
                 }
 
                 let hasHeader = !summaryText.isEmpty
-                let headerWidth = summaryLayout.size.width + sparkWidth
+                let headerWidth = summaryLayout.size.width + sparkWidth + stopWidth
                 let rowsWidth = rowLayouts.map { $0.0.size.width + iconSize + 8.0 }.max() ?? 0.0
                 let headerHeight = hasHeader ? max(summaryLayout.size.height, showsActivity ? 18.0 : 0.0) : 0.0
                 let rowsHeight = rowLayouts.isEmpty ? 0.0 : 6.0 + CGFloat(rowLayouts.count) * rowHeight
@@ -179,6 +186,14 @@ public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleConten
                             strongSelf.sparkNode.layer.removeAllAnimations()
                         }
                         strongSelf.updateTicking(meta: meta)
+
+                        strongSelf.stopNode.isHidden = !canStop
+                        if canStop {
+                            let stopColor = UIColor(red: 0.96, green: 0.29, blue: 0.27, alpha: 1.0)
+                            strongSelf.stopNode.image = UIImage(systemName: "stop.circle.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 15.0, weight: .regular))?.withTintColor(stopColor, renderingMode: .alwaysOriginal)
+                            strongSelf.stopNode.frame = CGRect(x: leftInset + sparkWidth + summaryLayout.size.width + dotsGap, y: outerInsets.top + (headerHeight - iconSize) / 2.0, width: iconSize, height: iconSize)
+                            haloed(strongSelf.stopNode, color: haloColor)
+                        }
 
                         strongSelf.lineNode.backgroundColor = textColor.withAlphaComponent(0.25)
                         strongSelf.lineNode.isHidden = rowLayouts.count < 2
@@ -284,7 +299,15 @@ public final class ChatMessagePaiToolsBubbleContentNode: ChatMessageBubbleConten
     }
 
     override public func tapActionAtPoint(_ point: CGPoint, gesture: TapLongTapOrDoubleTapGesture, isEstimating: Bool) -> ChatMessageBubbleContentTapAction {
-        guard self.bounds.contains(point), point.y <= self.headerHeight, let item = self.item, let meta = PaiTrailer.find(item.message)?.meta, !(meta.tools ?? []).isEmpty else {
+        guard self.bounds.contains(point), let item = self.item, let meta = PaiTrailer.find(item.message)?.meta else {
+            return ChatMessageBubbleContentTapAction(content: .none)
+        }
+        if !self.stopNode.isHidden, self.stopNode.frame.insetBy(dx: -6.0, dy: -6.0).contains(point) {
+            return ChatMessageBubbleContentTapAction(content: .custom({ [weak item] in
+                item?.controllerInteraction.stopPaiSession?(meta.session)
+            }))
+        }
+        guard point.y <= self.headerHeight, !(meta.tools ?? []).isEmpty else {
             return ChatMessageBubbleContentTapAction(content: .none)
         }
         return ChatMessageBubbleContentTapAction(content: .custom({ [weak self] in

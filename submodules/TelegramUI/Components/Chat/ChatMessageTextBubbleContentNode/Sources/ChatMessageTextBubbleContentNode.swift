@@ -1222,11 +1222,21 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
             } else if let url = attributes[NSAttributedString.Key(rawValue: TelegramTextAttributes.URL)] as? String {
                 var concealed = true
                 var urlRange: NSRange?
-                if let (attributeText, fullText, urlRangeValue) = self.textNode.textNode.attributeSubstringWithRange(name: TelegramTextAttributes.URL, index: index) {
+                var attributeText: String?
+                if let (text, fullText, urlRangeValue) = self.textNode.textNode.attributeSubstringWithRange(name: TelegramTextAttributes.URL, index: index) {
+                    attributeText = text
                     urlRange = urlRangeValue
-                    concealed = !doesUrlMatchText(url: url, text: attributeText, fullText: fullText)
+                    concealed = !doesUrlMatchText(url: url, text: text, fullText: fullText)
                 }
-                
+
+                // "started [… · 323f24]" — a reply mentioning a thread by its short id: into that
+                // thread's chat in the app, not out to whatever the bot happened to put in the link.
+                if let item = self.item, PaiChat.isBot(item.message.peers[item.message.id.peerId]), let attributeText, let shortId = PaiThreadLink.shortId(in: attributeText) {
+                    return ChatMessageBubbleContentTapAction(content: .custom({ [weak item] in
+                        item?.controllerInteraction.openPaiThread?(shortId)
+                    }), rects: rects, activate: makeActivate(urlRange))
+                }
+
                 var content: ChatMessageBubbleContentTapAction.Content
                 if url.hasPrefix("tel:") {
                     content = .phone(url.replacingOccurrences(of: "tel:", with: ""))

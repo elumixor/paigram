@@ -137,3 +137,17 @@ extension PaiChat {
         chain(to: slug).dropLast().contains { $0.slug == ancestor }
     }
 }
+
+/// A plain thread (`start_thread`, not an agent) named only by its short id, the way pai mentions one in a
+/// reply: "started [UI fixes · 323f24]" — a session id's first six hex characters (`Session.shortId`).
+public enum PaiThreadLink {
+    private static let pattern = try! NSRegularExpression(pattern: "\\s·\\s([0-9a-f]{6})$")
+
+    public static func shortId(in linkText: String) -> String? {
+        let text = linkText as NSString
+        guard let match = pattern.firstMatch(in: linkText, range: NSRange(location: 0, length: text.length)), match.range(at: 1).location != NSNotFound else {
+            return nil
+        }
+        return text.substring(with: match.range(at: 1))
+    }
+}
