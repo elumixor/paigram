@@ -217,7 +217,17 @@ struct AgentChatView: View {
                     if let error = store.connectionError {
                         Image(systemName: "bolt.slash").foregroundStyle(.red).help(error)
                     } else if let agent {
-                        AgentStatusIcon(status: agent.status).help(PaiAgentStatus.label(agent.status))
+                        HStack(spacing: 10) {
+                            AgentStatusIcon(status: agent.isBusy ? "working" : agent.status).help(PaiAgentStatus.label(agent.status))
+                            if agent.isBusy {
+                                StopButton {
+                                    Task {
+                                        try? await PaiClient().stop(agent: slug)
+                                        store.refreshAgents()
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
