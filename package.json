@@ -4,9 +4,16 @@
   "type": "module",
   "scripts": {
     "sim": "bun scripts/sim.ts",
-    "testflight": "bun scripts/testflight.ts"
+    "testflight": "bun scripts/testflight.ts",
+    "tag": "bun scripts/tag.ts",
+    "ci-secrets": "bun scripts/ci-secrets.ts",
+    "typecheck": "tsc"
   },
   "dependencies": {
     "jose": "^6.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.2",
+    "typescript": "^7.0.2"
   }
 }

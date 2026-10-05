@@ -1,0 +1,13 @@
+{
+	"include": ["scripts/**/*.ts"],
+	"compilerOptions": {
+		"target": "esnext",
+		"module": "preserve",
+		"moduleResolution": "bundler",
+		"types": ["bun"],
+		"strict": true,
+		"noEmit": true,
+		"allowImportingTsExtensions": true,
+		"skipLibCheck": true
+	}
+}

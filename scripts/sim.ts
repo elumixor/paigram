@@ -7,8 +7,8 @@ import { $ } from "bun";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { writeSecrets } from "./secrets.ts";
+import { root } from "./repo.ts";
 
-const root = new URL("..", import.meta.url).pathname;
 const config = `${root}build-system/paigram-sim.json`;
 const bundleId = "ph.telegra.Telegraph";
 const skipBuild = process.argv.includes("--no-build");
