@@ -14,17 +14,19 @@ public enum PaiHost {
     public static let store = PaiStore()
 }
 
-/// The Pai screen, opened from the bot's chat: threads by project, a new thread.
+/// The Pai screen, opened from the bot's chat: every thread and agent by recency, a new thread.
 public final class PaiHomeController: PaiHostedController {
     /// Set by the chat this screen was pushed from: it goes back there and switches to the topic.
     public var openThread: ((Int64) -> Void)?
+    /// Set by the chat too: an agent has no topic of its own to switch to, so it pushes a screen instead.
+    public var openAgent: ((String) -> Void)?
     /// Set by the chat too: back to it, on the view where the next message starts a thread in the project.
     public var newThread: ((PaiProject?) -> Void)?
 
     public override init(context: AccountContext) {
         super.init(context: context)
         if #available(iOS 16.0, *) {
-            self.host(PaiRootView(store: PaiHost.store, open: { [weak self] session in self?.open(session) }, newThread: { [weak self] project in self?.newThread?(project) }, close: { [weak self] in self?.dismiss() }))
+            self.host(PaiRootView(store: PaiHost.store, open: { [weak self] session in self?.open(session) }, openAgent: { [weak self] agent in self?.openAgent?(agent.slug) }, newThread: { [weak self] project in self?.newThread?(project) }, close: { [weak self] in self?.dismiss() }))
         } else {
             self.host(Text("Pai needs iOS 16 or newer").foregroundColor(.secondary))
         }
@@ -58,11 +60,12 @@ public final class PaiHomeController: PaiHostedController {
 struct PaiRootView: View {
     @ObservedObject var store: PaiStore
     let open: (PaiSession) -> Void
+    let openAgent: (PaiAgent) -> Void
     let newThread: (PaiProject?) -> Void
     let close: () -> Void
 
     var body: some View {
-        HomeView(open: open, newThread: newThread, close: close).environmentObject(store)
+        HomeView(open: open, openAgent: openAgent, newThread: newThread, close: close).environmentObject(store)
     }
 }
 
