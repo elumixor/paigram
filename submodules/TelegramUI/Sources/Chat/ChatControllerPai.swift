@@ -125,8 +125,8 @@ extension ChatControllerImpl {
     }
 }
 
-/// The breadcrumb over an agent's topic (pai › Hiring › Screener); over the main topic, just "pai" and the
-/// project picked for the next thread, when one is; nil anywhere else.
+/// The breadcrumb over an agent's topic (pai › Hiring › Screener); over the main topic, "pai" alone, plus the
+/// project picked for the next thread when one is; nil anywhere outside the bot's chat.
 func paiBreadcrumbPanel(_ interfaceState: ChatPresentationInterfaceState, open: @escaping (String) -> Void) -> AnyComponent<Empty>? {
     guard PaiChat.isBot(interfaceState.renderedPeer?.peer) else {
         return nil
@@ -139,10 +139,13 @@ func paiBreadcrumbPanel(_ interfaceState: ChatPresentationInterfaceState, open: 
         return AnyComponent(PaiBreadcrumbPanelComponent(theme: interfaceState.theme, crumbs: crumbs, open: open))
     }
     let onMainTopic = interfaceState.chatLocation.threadId == nil || interfaceState.chatLocation.threadId == PaiChat.mainThreadId
-    guard onMainTopic, let project = PaiChat.pendingProject else {
+    guard onMainTopic else {
         return nil
     }
-    let crumbs = [PaiBreadcrumbPanelComponent.Crumb(slug: PaiChat.paiSlug, name: "pai"), PaiBreadcrumbPanelComponent.Crumb(slug: project.slug, name: project.slug)]
+    var crumbs = [PaiBreadcrumbPanelComponent.Crumb(slug: PaiChat.paiSlug, name: "pai")]
+    if let project = PaiChat.pendingProject {
+        crumbs.append(PaiBreadcrumbPanelComponent.Crumb(slug: project.slug, name: project.slug))
+    }
     return AnyComponent(PaiBreadcrumbPanelComponent(theme: interfaceState.theme, crumbs: crumbs, open: open))
 }
 
