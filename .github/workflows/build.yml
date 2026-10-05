@@ -1,9 +1,9 @@
 name: CI
 
+# Upstream Telegram's CI: a full Bazel build with fake codesigning, producing an unsigned ipa on a
+# GitHub release. Manual only — it costs a macOS runner's hours and Paigram ships through
+# .github/workflows/testflight.yml instead.
 on:
-  push:
-    branches: [ master ]
-
   workflow_dispatch:
 
 jobs:

@@ -1,20 +1,19 @@
 /**
- * `bun run testflight [--no-build] [--no-upload] [--minor]`: a patch (or minor) version bump committed to versions.json, fresh App Store provisioning profiles for the
+ * `bun run testflight [--no-build] [--no-upload] [--no-bump] [--minor]`: a patch (or minor) version bump committed to versions.json, fresh App Store provisioning profiles for the
  * app, its extensions and the watch app (scripts/provision.ts), a release build for devices with
  * every extension and the watch app embedded, the ipa uploaded to App Store Connect, then a wait until
  * TestFlight has processed it. Needs `.env` (ASC_KEY_ID, ASC_ISSUER_ID, TEAM_ID) and
- * `build-system/paigram.json`.
+ * `build-system/paigram.json`. CI builds a version that is already tagged, so they pass `--no-bump`.
  */
 import { $ } from "bun";
 import { asc, ascGet } from "./asc.ts";
 import { provision } from "./provision.ts";
 import { writeSecrets } from "./secrets.ts";
+import { bumpVersion, codesigningPath as codesigning, configPath as config, readVersions, root } from "./repo.ts";
 
-const root = new URL("..", import.meta.url).pathname;
-const config = `${root}build-system/paigram.json`;
-const codesigning = `${root}build-system/paigram-codesigning`;
 const skipBuild = process.argv.includes("--no-build");
 const skipUpload = process.argv.includes("--no-upload");
+const skipBump = skipBuild || process.argv.includes("--no-bump");
 
 const { bundle_id: bundleId, api_id: apiId, api_hash: apiHash } = (await Bun.file(config).json()) as { bundle_id: string; api_id: string; api_hash: string };
 
@@ -49,20 +48,8 @@ async function waitProcessed(number: number) {
   throw new Error("TestFlight did not finish processing in 30 minutes");
 }
 
-/** Every upload is a new patch version (`--minor` bumps the minor), recorded in versions.json and committed, so TestFlight tells builds apart. */
-async function bumpVersion() {
-  const file = Bun.file(`${root}versions.json`);
-  const versions = await file.json();
-  const [major, minor, patch] = String(versions.app).split(".").map(Number);
-  versions.app = process.argv.includes("--minor") ? `${major}.${minor + 1}.0` : `${major}.${minor}.${patch + 1}`;
-  await Bun.write(file, `${JSON.stringify(versions, null, 4)}\n`);
-  await $`git commit -qm ${`Paigram v${versions.app}`} -- versions.json`.cwd(root);
-  console.log(`version ${versions.app}`);
-  return versions.app as string;
-}
-
 /** `--no-build` uploads the ipa as it is: its build number is read back, and the profiles it embeds stay untouched. */
-const version = skipBuild ? (await Bun.file(`${root}versions.json`).json()).app : await bumpVersion();
+const version = skipBump ? (await readVersions()).app : await bumpVersion(process.argv.includes("--minor"));
 const number = skipBuild ? Number(await $`unzip -p ${root}bazel-bin/Telegram/Telegram.ipa Payload/Telegram.app/Info.plist | plutil -extract CFBundleVersion raw -o - -`.text()) : await buildNumber(version);
 if (!skipBuild) {
   await provision();

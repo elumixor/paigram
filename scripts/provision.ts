@@ -8,10 +8,7 @@
  */
 import { mkdirSync } from "node:fs";
 import { asc, ascDelete, ascGet, ascPost } from "./asc.ts";
-
-const root = new URL("..", import.meta.url).pathname;
-const config = `${root}build-system/paigram.json`;
-const codesigning = `${root}build-system/paigram-codesigning`;
+import { codesigningPath as codesigning, configPath as config } from "./repo.ts";
 
 const { bundle_id: bundleId, team_id: teamId, enable_siri: siri } = (await Bun.file(config).json()) as { bundle_id: string; team_id: string; enable_siri: boolean };
 if (teamId !== asc.teamId) throw new Error(`team_id in paigram.json (${teamId}) differs from TEAM_ID in .env (${asc.teamId})`);
