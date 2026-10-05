@@ -12,21 +12,21 @@ extension Font {
     static let paiMonoSmall = Font.system(.caption, design: .monospaced)
 }
 
-/// The state dot: filled and breathing while running, amber ring while waiting, hollow when dead.
+/// The state dot: filled and breathing while busy, amber ring while waiting on you, hollow otherwise —
+/// a thread's or an agent's activity read the same way.
 @available(iOS 16.0, *)
 struct StateDot: View {
-    let session: PaiSession
+    let waiting: Bool
+    let busy: Bool
 
     var body: some View {
         Group {
-            if session.isWaiting {
+            if waiting {
                 Circle().strokeBorder(Color.paiWaiting, lineWidth: 2.5)
-            } else if session.isRunning {
+            } else if busy {
                 Circle().fill(Color.accentColor).modifier(Breathing())
-            } else if session.state == .idle {
-                Circle().fill(Color.paiIdle)
             } else {
-                Circle().strokeBorder(Color.paiIdle, lineWidth: 1.5)
+                Circle().fill(Color.paiIdle)
             }
         }
         .frame(width: 10, height: 10)

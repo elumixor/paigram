@@ -4869,6 +4869,9 @@ extension ChatControllerImpl {
                 let _ = navigationController.popToViewController(self, animated: true)
                 self.updateChatLocationThread(threadId: threadId, animationDirection: nil)
             }
+            home.openAgent = { [weak self] slug in
+                self?.openPaiAgent(slug: slug, thread: nil)
+            }
             home.newThread = { [weak self, weak navigationController] project in
                 guard let self, let navigationController else {
                     return
