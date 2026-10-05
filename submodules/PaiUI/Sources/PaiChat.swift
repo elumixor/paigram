@@ -84,6 +84,30 @@ extension PaiChat {
 
     /// Posted on the main thread when `usage` changes.
     public static let usageChanged = Notification.Name("pai.usageChanged")
+    /// Posted on the main thread when `needs` changes.
+    public static let needsChanged = Notification.Name("pai.needsChanged")
+    private static let needsLock = NSLock()
+    private static var needsValue: [PaiNeed] = []
+
+    /// What waits on the user's decision now: the chat's title counts them, the hub lists them, agents wear a badge.
+    public static var needs: [PaiNeed] {
+        get {
+            needsLock.lock()
+            defer { needsLock.unlock() }
+            return needsValue
+        }
+        set {
+            needsLock.lock()
+            let changed = needsValue != newValue
+            needsValue = newValue
+            needsLock.unlock()
+            if changed { DispatchQueue.main.async { NotificationCenter.default.post(name: needsChanged, object: nil) } }
+        }
+    }
+
+    /// How many decisions an agent waits on.
+    public static func needs(of slug: String) -> Int { needs.filter { $0.agent == slug }.count }
+
     /// Posted on the main thread when anything the daemon tracks moved: an agent, a task, an ask, a turn.
     public static let changed = Notification.Name("pai.changed")
     private static let usageKey = "pai.usage"

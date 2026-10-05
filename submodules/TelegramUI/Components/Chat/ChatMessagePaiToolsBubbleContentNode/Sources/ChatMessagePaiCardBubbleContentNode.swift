@@ -74,7 +74,7 @@ public final class ChatMessagePaiCardBubbleContentNode: ChatMessageBubbleContent
                 let insets = layoutConstants.text.bubbleInsets
                 let maxWidth = max(1.0, constrainedSize.width - insets.left - insets.right - chevronWidth)
 
-                let status = isDelegation ? (meta?.status ?? PaiChat.agent(meta?.agent)?.status) : nil
+                let status = isDelegation ? PaiAgentStatus.effective(agent: meta?.agent, posted: meta?.status) : nil
                 let statusColor: UIColor
                 switch status {
                 case "working": statusColor = colors.accentTextColor

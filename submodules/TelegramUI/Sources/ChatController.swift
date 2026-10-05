@@ -305,6 +305,9 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
     var paiAgentsObserver: NSObjectProtocol?
     var paiProjectObserver: NSObjectProtocol?
     var paiUsageObserver: NSObjectProtocol?
+    var paiNeedsObserver: NSObjectProtocol?
+    let paiUsageNode = PaiUsageRingNode()
+    var paiUsageNavigationButton: ChatNavigationButton?
 
     var moreBarButton: MoreHeaderButton
     var moreInfoNavigationButton: ChatNavigationButton?
@@ -6349,6 +6352,12 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
         chatInfoButtonItem.target = self
         chatInfoButtonItem.action = #selector(self.rightNavigationButtonAction)
         self.chatInfoNavigationButton = ChatNavigationButton(action: .openChatInfo(expandAvatar: true, section: nil), buttonItem: chatInfoButtonItem)
+        // Only the pai bot's chat shows it (rightNavigationButtonForChatInterfaceState); it costs nothing elsewhere.
+        let paiUsageItem = UIBarButtonItem(customDisplayNode: self.paiUsageNode)!
+        paiUsageItem.target = self
+        paiUsageItem.action = #selector(self.rightNavigationButtonAction)
+        self.paiUsageNavigationButton = ChatNavigationButton(action: .openChatInfo(expandAvatar: true, section: nil), buttonItem: paiUsageItem)
+        self.paiUsageNode.update(usage: PaiChat.usage, theme: self.presentationData.theme)
         
         self.moreBarButton.setContent(.more(MoreHeaderButton.optionsCircleImage(color: self.presentationData.theme.rootController.navigationBar.buttonColor)))
         self.moreInfoNavigationButton = ChatNavigationButton(action: .toggleInfoPanel, buttonItem: UIBarButtonItem(customDisplayNode: self.moreBarButton)!)
@@ -7007,6 +7016,9 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
         }
         if let paiUsageObserver = self.paiUsageObserver {
             NotificationCenter.default.removeObserver(paiUsageObserver)
+        }
+        if let paiNeedsObserver = self.paiNeedsObserver {
+            NotificationCenter.default.removeObserver(paiNeedsObserver)
         }
         if let paiAgentsObserver = self.paiAgentsObserver {
             NotificationCenter.default.removeObserver(paiAgentsObserver)
@@ -7727,12 +7739,15 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
                 PaiNotificationAnswer.writeConfig(basePath: self.context.sharedContext.basePath, botUserId: peerId.id._internalGetInt64Value())
             }
             let redrawTitle: (Notification) -> Void = { [weak self] _ in
-                self?.updateChatPresentationInterfaceState(animated: false, interactive: false, { $0 })
-                self?.requestLayout(transition: .immediate)
+                guard let self else { return }
+                self.paiUsageNode.update(usage: PaiChat.usage, theme: self.presentationData.theme)
+                self.updateChatPresentationInterfaceState(animated: false, interactive: false, { $0 })
+                self.requestLayout(transition: .immediate)
             }
             self.paiAgentsObserver = NotificationCenter.default.addObserver(forName: PaiChat.agentsChanged, object: nil, queue: .main, using: redrawTitle)
             self.paiProjectObserver = NotificationCenter.default.addObserver(forName: PaiChat.projectChanged, object: nil, queue: .main, using: redrawTitle)
             self.paiUsageObserver = NotificationCenter.default.addObserver(forName: PaiChat.usageChanged, object: nil, queue: .main, using: redrawTitle)
+            self.paiNeedsObserver = NotificationCenter.default.addObserver(forName: PaiChat.needsChanged, object: nil, queue: .main, using: redrawTitle)
         }
         
         self.chatDisplayNode.historyNode.experimentalSnapScrollToItem = false
