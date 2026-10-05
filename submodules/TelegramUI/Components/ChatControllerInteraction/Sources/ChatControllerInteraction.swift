@@ -330,6 +330,8 @@ public final class ChatControllerInteraction: ChatControllerInteractionProtocol 
     public var canPlayMedia: Bool = false
     /// The pai bot's chat: the New Thread card offers the project the thread starts in.
     public var selectPaiProject: (() -> Void)?
+    /// The pai bot's chat: an agent's chat, by its slug or its topic (an event row, a delegation or report card).
+    public var openPaiAgent: ((String?, Int64?) -> Void)?
     public var hiddenMedia: [EngineMessage.Id: [EngineRawMedia]] = [:]
     public var expandedTranslationMessageStableIds: Set<UInt32> = Set()
     public var selectionState: ChatInterfaceSelectionState?

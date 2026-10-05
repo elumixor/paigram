@@ -376,6 +376,39 @@ func chatHistoryEntriesForView(
         }
     }
     
+    // pai's service rows in a topic: a run of consecutive events shows as one row, the run's last, folded.
+    if isPaiBot, location.threadId != nil {
+        var folded: [MessageId: [PaiEventLine]] = [:]
+        var single: [MessageId] = []
+        var dropped = Set<Int>()
+        var run: [(index: Int, message: Message, lines: [PaiEventLine])] = []
+        let closeRun = {
+            if let last = run.last {
+                if run.count > 1 {
+                    folded[last.message.id] = run.flatMap(\.lines)
+                    for row in run.dropLast() {
+                        dropped.insert(row.index)
+                    }
+                } else {
+                    single.append(last.message.id)
+                }
+            }
+            run.removeAll()
+        }
+        for (index, entry) in entries.enumerated() {
+            if case let .MessageEntry(message, _, _, _, _, _) = entry, let lines = PaiEventFold.lines(message) {
+                run.append((index, message, lines))
+            } else {
+                closeRun()
+            }
+        }
+        closeRun()
+        PaiEventFold.update(folded, single: single)
+        if !dropped.isEmpty {
+            entries = entries.enumerated().filter { !dropped.contains($0.offset) }.map(\.element)
+        }
+    }
+    
     let insertPendingProcessingMessage: ([Message], Int) -> Void = { messages, index in
         let serviceMessage = Message(
             stableId: UInt32.max - messages[0].stableId,

@@ -58,3 +58,82 @@ extension PaiChat {
         prefixPattern.firstMatch(in: text, range: NSRange(location: 0, length: (text as NSString).length))?.range.length ?? 0
     }
 }
+
+// MARK: pai and its agents
+
+extension PaiChat {
+    /// pai's own slug in the agent tree; its chat is the bot chat's main topic.
+    public static let paiSlug = "pai"
+
+    private static let mainThreadKey = "pai.mainThreadId"
+    private static let agentsKey = "pai.agents"
+    private static let agentsLock = NSLock()
+    private static var agentsValue: [PaiAgent]?
+
+    /// The topic pai's chat is in (`/m/telegram/info`), so the bot chat opens there without asking first.
+    public static var mainThreadId: Int64? {
+        get {
+            let value = UserDefaults.standard.object(forKey: mainThreadKey) as? Int64
+            return value == 0 ? nil : value
+        }
+        set { UserDefaults.standard.set(newValue ?? 0, forKey: mainThreadKey) }
+    }
+
+    /// Posted on the main thread when the agent list changes.
+    public static let agentsChanged = Notification.Name("pai.agentsChanged")
+
+    /// The last agent list seen, readable from any queue: chat nodes lay out off the main thread.
+    public static var agents: [PaiAgent] {
+        get {
+            agentsLock.lock()
+            defer { agentsLock.unlock() }
+            if let agentsValue { return agentsValue }
+            let cached = UserDefaults.standard.data(forKey: agentsKey).flatMap { try? JSONDecoder().decode([PaiAgent].self, from: $0) } ?? []
+            agentsValue = cached
+            return cached
+        }
+        set {
+            agentsLock.lock()
+            let changed = agentsValue != newValue
+            agentsValue = newValue
+            agentsLock.unlock()
+            guard changed else { return }
+            if let data = try? JSONEncoder().encode(newValue) { UserDefaults.standard.set(data, forKey: agentsKey) }
+            DispatchQueue.main.async { NotificationCenter.default.post(name: agentsChanged, object: nil) }
+        }
+    }
+
+    public static func agent(_ slug: String?) -> PaiAgent? {
+        guard let slug else { return nil }
+        return agents.first { $0.slug == slug }
+    }
+
+    /// The agent whose chat a topic is; the main topic is pai's even before pai has a row.
+    public static func agent(thread: Int64?) -> PaiAgent? {
+        guard let thread else { return nil }
+        if let agent = agents.first(where: { $0.threadId == thread }) { return agent }
+        return thread == mainThreadId ? agent(paiSlug) : nil
+    }
+
+    /// The topic an agent's chat is in: its own, pai's main one; nil for a sub-agent, whose chat is in the app.
+    public static func thread(of slug: String) -> Int64? {
+        if slug == paiSlug { return mainThreadId ?? agent(slug)?.threadId }
+        return agent(slug)?.threadId
+    }
+
+    /// From pai down to the agent: what the breadcrumb shows. Unknown agents are just themselves.
+    public static func chain(to slug: String) -> [PaiAgent] {
+        var chain: [PaiAgent] = []
+        var current = agent(slug)
+        while let a = current, !chain.contains(where: { $0.slug == a.slug }) {
+            chain.insert(a, at: 0)
+            current = agent(a.parent)
+        }
+        return chain
+    }
+
+    /// Whether `ancestor` sits above `slug` in the tree.
+    public static func isAncestor(_ ancestor: String, of slug: String) -> Bool {
+        chain(to: slug).dropLast().contains { $0.slug == ancestor }
+    }
+}

@@ -23,8 +23,8 @@ import ChatMessageNotificationItem
 import FaceScanScreen
 
 public func navigateToChatControllerImpl(_ params: NavigateToChatControllerParams) {
-    // The pai bot's chat opens straight on the thread it was on last time; no switch after the fact.
-    if case let .peer(peer) = params.chatLocation, PaiChat.isBot(peer._asPeer()), let threadId = PaiChat.lastThreadId {
+    // The pai bot's chat opens straight on pai's own topic (the last thread before pai's is known); no switch after the fact.
+    if case let .peer(peer) = params.chatLocation, PaiChat.isBot(peer._asPeer()), let threadId = PaiChat.mainThreadId ?? PaiChat.lastThreadId {
         let thread = ChatReplyThreadMessage(peerId: peer.id, threadId: threadId, channelMessageId: nil, isChannelPost: false, isForumPost: true, isMonoforumPost: false, maxMessage: nil, maxReadIncomingMessageId: nil, maxReadOutgoingMessageId: nil, unreadCount: 0, initialFilledHoles: IndexSet(), initialAnchor: .automatic, isNotAvailable: false)
         navigateToChatControllerImpl(params.with(chatLocation: .replyThread(thread)))
         return

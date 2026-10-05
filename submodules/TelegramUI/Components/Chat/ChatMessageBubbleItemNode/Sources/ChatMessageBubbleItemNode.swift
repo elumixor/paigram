@@ -348,8 +348,15 @@ private func contentNodeMessagesAndClassesForItem(_ item: ChatMessageItem) -> ([
         }
                 
         // A pai bot message: its tool metadata gets a node of its own above the text, and a status card is nothing but that node.
+        // Rows from pai's message log are nothing but their own node: an event is a service row, a delegation or report a card.
         let paiTrailer = PaiTrailer.find(message)
-        if let paiTrailer, paiTrailer.meta.isStatus || !(paiTrailer.meta.tools ?? []).isEmpty || paiTrailer.meta.durationMs != nil {
+        if let paiTrailer, paiTrailer.meta.isEvent || paiTrailer.meta.isCard {
+            result.removeAll(where: { $0.0.id == message.id })
+            result.append((message, paiTrailer.meta.isEvent ? ChatMessagePaiEventBubbleContentNode.self : ChatMessagePaiCardBubbleContentNode.self, itemAttributes, BubbleItemAttributes(isAttachment: false, neighborType: .text, neighborSpacing: .default)))
+            needReactions = false
+            isAction = paiTrailer.meta.isEvent
+            continue
+        } else if let paiTrailer, paiTrailer.meta.isStatus || !(paiTrailer.meta.tools ?? []).isEmpty || paiTrailer.meta.durationMs != nil {
             result.append((message, ChatMessagePaiToolsBubbleContentNode.self, itemAttributes, BubbleItemAttributes(isAttachment: false, neighborType: .text, neighborSpacing: .default)))
             needReactions = false
             if paiTrailer.meta.isStatus {
@@ -7212,7 +7219,12 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
                             case .none:
                                 break
                             case .reply:
-                                item.controllerInteraction.setupReply(item.message.id)
+                                // A pai card leads into its agent's chat: swiping it left goes in instead of replying.
+                                if let meta = PaiTrailer.find(item.message)?.meta, meta.isCard, meta.agent != nil || meta.thread != nil, let openPaiAgent = item.controllerInteraction.openPaiAgent {
+                                    openPaiAgent(meta.agent, meta.thread)
+                                } else {
+                                    item.controllerInteraction.setupReply(item.message.id)
+                                }
                             }
                         }
                     }

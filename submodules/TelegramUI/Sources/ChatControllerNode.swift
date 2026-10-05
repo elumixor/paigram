@@ -1443,6 +1443,12 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
                 footerPanels.append(panel)
             }
         }
+        // An agent's topic in the pai bot's chat: where it sits under pai, each level a way back up.
+        if !hideTopPanels, self.chatPresentationInterfaceState.search == nil, let breadcrumb = paiBreadcrumbPanel(self.chatPresentationInterfaceState, open: { [weak self] slug in
+            self?.controller?.openPaiAgent(slug: slug, thread: nil)
+        }) {
+            headerPanels.append(HeaderPanelContainerComponent.Panel(key: "paiBreadcrumb", orderIndex: 0, component: breadcrumb))
+        }
         if !hideTopPanels, self.chatPresentationInterfaceState.search == nil, let mediaPlayback = self.controller?.globalControlPanelsContextState?.mediaPlayback {
             if let playlistLocation = mediaPlayback.playlistLocation as? PeerMessagesPlaylistLocation, case let .custom(_, _, _, _, hidePanel) = playlistLocation, hidePanel {
                 

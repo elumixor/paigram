@@ -302,6 +302,7 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
     var rightNavigationButton: ChatNavigationButton?
     var secondaryRightNavigationButton: ChatNavigationButton?
     var chatInfoNavigationButton: ChatNavigationButton?
+    var paiAgentsObserver: NSObjectProtocol?
     
     var moreBarButton: MoreHeaderButton
     var moreInfoNavigationButton: ChatNavigationButton?
@@ -5949,6 +5950,11 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
             }
         }
         
+        // The pai bot's event rows and agent cards: into that agent's chat.
+        controllerInteraction.openPaiAgent = { [weak self] slug, thread in
+            self?.openPaiAgent(slug: slug, thread: thread)
+        }
+        
         self.controllerInteraction = controllerInteraction
         
         self.navigationBar?.allowsCustomTransition = { [weak self] in
@@ -6984,6 +6990,9 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
         let _ = ChatControllerCount.modify { value in
             return value - 1
         }
+        if let paiAgentsObserver = self.paiAgentsObserver {
+            NotificationCenter.default.removeObserver(paiAgentsObserver)
+        }
 
         self.richTextCheckboxCompletionObserver?.dispose()
         for (_, timer) in self.richTextCheckboxDebounceTimers {
@@ -7691,10 +7700,13 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
         let wasAppearedBefore = self.didAppear
         self.didAppear = true
         
-        // The pai bot's chat keeps its activity feed alive while open.
+        // The pai bot's chat keeps its activity feed alive while open; a new agent list redraws the breadcrumb.
         if !wasAppearedBefore, PaiChat.isBot(self.presentationInterfaceState.renderedPeer?.peer) {
             if #available(iOS 16.0, *) {
                 PaiHost.store.start()
+            }
+            self.paiAgentsObserver = NotificationCenter.default.addObserver(forName: PaiChat.agentsChanged, object: nil, queue: .main) { [weak self] _ in
+                self?.requestLayout(transition: .immediate)
             }
         }
         
