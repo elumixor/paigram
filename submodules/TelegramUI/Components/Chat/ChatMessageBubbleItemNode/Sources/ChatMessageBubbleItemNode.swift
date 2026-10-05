@@ -5136,18 +5136,17 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
         var shouldClipOnTransitions = true
         var contentNodeIndex = 0
         for (relativeFrame, properties, useContentOrigin, apply) in contentNodeFramesPropertiesAndApply {
-            apply(animation, synchronousLoads, applyInfo)
-            
             if contentNodeIndex >= strongSelf.contentNodes.count {
+                apply(animation, synchronousLoads, applyInfo)
                 break
             }
-            
+
             let contentNode = strongSelf.contentNodes[contentNodeIndex]
-            
+
             if contentNode.disablesClipping {
                 shouldClipOnTransitions = false
             }
-            
+
             var effectiveContentOriginX = contentOrigin.x
             var effectiveContentOriginY = useContentOrigin ? contentOrigin.y : 0.0
             if properties.isDetached {
@@ -5155,12 +5154,15 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
                 effectiveContentOriginX = contentNode is ChatMessagePaiToolsBubbleContentNode ? contentOrigin.x + layoutConstants.text.bubbleInsets.left : floorToScreenPixels((layout.size.width - relativeFrame.width) / 2.0)
                 effectiveContentOriginY = layoutInsets.top
             }
-            
+
             let contentNodeFrame = relativeFrame.offsetBy(dx: effectiveContentOriginX, dy: effectiveContentOriginY)
+            // Must land before `apply`: it lays out the footer this frame, from this same-pass value — a
+            // stale (or default-zero) bubbleBottom here is what let the footer draw into the next bubble.
             if let paiNode = contentNode as? ChatMessagePaiToolsBubbleContentNode {
                 paiNode.bubbleBottom = backgroundFrame.maxY - contentNodeFrame.minY
             }
-            
+            apply(animation, synchronousLoads, applyInfo)
+
             if case let .System(duration, _) = animation {
                 var animateFrame = false
                 var animateAlpha = false
