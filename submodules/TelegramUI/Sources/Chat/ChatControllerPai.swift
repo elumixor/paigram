@@ -7,6 +7,9 @@ import TelegramCore
 import TelegramPresentationData
 import AccountContext
 import ChatPresentationInterfaceState
+import AlertUI
+import PresentationDataUtils
+import OverlayStatusController
 import PaiUI
 
 /// A topic of the pai bot's chat as a chat location; the same shape `updateChatLocationThread` builds.
@@ -72,17 +75,74 @@ extension ChatControllerImpl {
         }
         navigationController.pushViewController(tree)
     }
+
+    /// A thread named only by its short id (a reply's "started […]" link): always pushed as a fresh chat,
+    /// never a switch — unlike an agent's topic, a plain thread has no place of its own in the nav stack yet.
+    func openPaiThread(shortId: String) {
+        guard #available(iOS 16.0, *), let navigationController = self.effectiveNavigationController, let peerId = self.chatLocation.peerId else {
+            return
+        }
+        let stack = navigationController.viewControllers
+        let selfIndex = stack.firstIndex(where: { $0 === self }) ?? stack.count - 1
+
+        let statusController = OverlayStatusController(theme: self.presentationData.theme, type: .loading(cancelled: nil))
+        self.present(statusController, in: .window(.root))
+
+        let client = PaiClient()
+        Task { @MainActor [weak self, weak navigationController, weak statusController] in
+            defer { statusController?.dismiss() }
+            for attempt in 0..<20 {
+                guard let tasks = try? await client.tasks() else { continue }
+                if let session = (tasks.live + tasks.recent).first(where: { $0.shortId == shortId }) {
+                    if let threadId = session.threadId {
+                        guard let self, let navigationController else { return }
+                        if let existing = stack.last(where: { ($0 as? ChatControllerImpl)?.chatLocation.peerId == peerId && ($0 as? ChatControllerImpl)?.chatLocation.threadId == threadId }) {
+                            let _ = navigationController.popToViewController(existing, animated: true)
+                            return
+                        }
+                        let controller = ChatControllerImpl(context: self.context, chatLocation: .replyThread(message: paiThread(peerId: peerId, threadId: threadId)))
+                        navigationController.setViewControllers(Array(stack.prefix(selfIndex + 1)) + [controller], animated: true)
+                        return
+                    }
+                    // Found but not yet given a topic: keep waiting, same as starting one from the New Thread card.
+                } else if attempt > 2 {
+                    // Not in the live/recent list at all — no point in the full 20 attempts.
+                    break
+                }
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            }
+            guard let self else { return }
+            self.present(textAlertController(context: self.context, title: nil, text: "Couldn't open that thread.", actions: [TextAlertAction(type: .defaultAction, title: "OK", action: {})]), in: .window(.root))
+        }
+    }
+
+    /// Interrupts the session a busy status card shows; the card updates once the daemon reports it stopped.
+    func stopPaiSession(_ session: String) {
+        guard #available(iOS 16.0, *) else { return }
+        Task {
+            try? await PaiClient().stop(session: session)
+        }
+    }
 }
 
-/// The breadcrumb over an agent's topic (pai › Hiring › Screener); nil anywhere else.
+/// The breadcrumb over an agent's topic (pai › Hiring › Screener); over the main topic, just "pai" and the
+/// project picked for the next thread, when one is; nil anywhere else.
 func paiBreadcrumbPanel(_ interfaceState: ChatPresentationInterfaceState, open: @escaping (String) -> Void) -> AnyComponent<Empty>? {
-    guard PaiChat.isBot(interfaceState.renderedPeer?.peer), let agent = PaiChat.agent(thread: interfaceState.chatLocation.threadId), !agent.isPai else {
+    guard PaiChat.isBot(interfaceState.renderedPeer?.peer) else {
         return nil
     }
-    var crumbs = PaiChat.chain(to: agent.slug).map { PaiBreadcrumbPanelComponent.Crumb(slug: $0.slug, name: $0.name) }
-    if crumbs.first?.slug != PaiChat.paiSlug {
-        crumbs.insert(PaiBreadcrumbPanelComponent.Crumb(slug: PaiChat.paiSlug, name: "pai"), at: 0)
+    if let agent = PaiChat.agent(thread: interfaceState.chatLocation.threadId), !agent.isPai {
+        var crumbs = PaiChat.chain(to: agent.slug).map { PaiBreadcrumbPanelComponent.Crumb(slug: $0.slug, name: $0.name) }
+        if crumbs.first?.slug != PaiChat.paiSlug {
+            crumbs.insert(PaiBreadcrumbPanelComponent.Crumb(slug: PaiChat.paiSlug, name: "pai"), at: 0)
+        }
+        return AnyComponent(PaiBreadcrumbPanelComponent(theme: interfaceState.theme, crumbs: crumbs, open: open))
     }
+    let onMainTopic = interfaceState.chatLocation.threadId == nil || interfaceState.chatLocation.threadId == PaiChat.mainThreadId
+    guard onMainTopic, let project = PaiChat.pendingProject else {
+        return nil
+    }
+    let crumbs = [PaiBreadcrumbPanelComponent.Crumb(slug: PaiChat.paiSlug, name: "pai"), PaiBreadcrumbPanelComponent.Crumb(slug: project.slug, name: project.slug)]
     return AnyComponent(PaiBreadcrumbPanelComponent(theme: interfaceState.theme, crumbs: crumbs, open: open))
 }
 

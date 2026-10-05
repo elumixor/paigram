@@ -332,6 +332,10 @@ public final class ChatControllerInteraction: ChatControllerInteractionProtocol 
     public var selectPaiProject: (() -> Void)?
     /// The pai bot's chat: an agent's chat, by its slug or its topic (an event row, a delegation or report card).
     public var openPaiAgent: ((String?, Int64?) -> Void)?
+    /// The pai bot's chat: a plain thread mentioned by its short id in a reply's link text — pushed as a chat in the app.
+    public var openPaiThread: ((String) -> Void)?
+    /// The pai bot's chat: interrupt the session a status card shows as busy, by its session id.
+    public var stopPaiSession: ((String) -> Void)?
     public var hiddenMedia: [EngineMessage.Id: [EngineRawMedia]] = [:]
     public var expandedTranslationMessageStableIds: Set<UInt32> = Set()
     public var selectionState: ChatInterfaceSelectionState?

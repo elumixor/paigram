@@ -234,7 +234,8 @@ struct SettingsRow: View {
     }
 }
 
-/// One limit window: the name, how much is used, when it resets.
+/// One limit window: a ring for how much of it is used (like the menu bar app's quota rings), the name,
+/// and when it resets.
 @available(iOS 16.0, *)
 private struct UsageRow: View {
     let window: PaiUsageWindow
@@ -245,25 +246,63 @@ private struct UsageRow: View {
         return f
     }()
 
+    private var resetDate: Date? {
+        guard let raw = window.resetsAt else { return nil }
+        return Self.iso.date(from: raw) ?? ISO8601DateFormatter().date(from: raw)
+    }
+
     private var resets: String? {
-        guard let raw = window.resetsAt, let date = Self.iso.date(from: raw) ?? ISO8601DateFormatter().date(from: raw) else { return nil }
-        let left = date.timeIntervalSinceNow
-        guard left > 0 else { return nil }
-        return "resets in \(SettingsView.duration(left))"
+        guard let date = resetDate, date.timeIntervalSinceNow > 0 else { return nil }
+        return "resets in \(SettingsView.duration(date.timeIntervalSinceNow))"
+    }
+
+    /// How much of the window's own length is still left before it resets, for the ring's outer arc.
+    private var timeRemainingFraction: Double? {
+        guard let date = resetDate, window.length > 0 else { return nil }
+        return min(max(date.timeIntervalSinceNow / window.length, 0), 1)
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
+        HStack(spacing: 12) {
+            UsageRing(percent: window.percent, timeRemainingFraction: timeRemainingFraction)
+            VStack(alignment: .leading, spacing: 2) {
                 Text(window.name)
-                Spacer()
-                Text("\(Int(window.percent))%").foregroundStyle(.secondary)
+                if let resets { Text(resets).font(.caption).foregroundStyle(.secondary) }
             }
-            ProgressView(value: min(max(window.percent, 0), 100), total: 100)
-                .tint(window.percent >= 90 ? .red : window.percent >= 70 ? .paiWaiting : .accentColor)
-            if let resets { Text(resets).font(.caption).foregroundStyle(.secondary) }
+            Spacer()
         }
         .padding(.vertical, 2)
+    }
+}
+
+/// Two concentric arcs, the way the menu bar app draws a quota: the thin outer one counts down the
+/// window's own time left, the thicker inner one is how much of it has been used.
+@available(iOS 16.0, *)
+private struct UsageRing: View {
+    let percent: Double
+    let timeRemainingFraction: Double?
+
+    private var usedFraction: Double { min(max(percent, 0), 100) / 100 }
+    private var color: Color { percent >= 90 ? .red : percent >= 70 ? .paiWaiting : .accentColor }
+
+    var body: some View {
+        ZStack {
+            if let timeRemainingFraction {
+                Circle().stroke(Color(.tertiarySystemFill), lineWidth: 2.5)
+                Circle()
+                    .trim(from: 0, to: timeRemainingFraction)
+                    .stroke(Color.secondary, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            }
+            Circle().stroke(Color(.tertiarySystemFill), lineWidth: 5).padding(5)
+            Circle()
+                .trim(from: 0, to: usedFraction)
+                .stroke(color, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .padding(5)
+            Text("\(Int(percent))%").font(.system(size: 11, weight: .semibold)).foregroundStyle(.primary)
+        }
+        .frame(width: 40, height: 40)
     }
 }
 
