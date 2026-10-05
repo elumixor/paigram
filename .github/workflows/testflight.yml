@@ -38,6 +38,11 @@ jobs:
             echo "::warning::Xcode $pinned is not installed on this runner; building with $app"
           fi
           sudo xcode-select -s "$app/Contents/Developer"
+          # dav1d's device crossfile hardcodes /Applications/Xcode.app; the cleanup below deletes
+          # whichever Xcode that symlink pointed at.
+          if [ -L /Applications/Xcode.app ] || [ ! -e /Applications/Xcode.app ]; then
+            sudo ln -sfn "$app" /Applications/Xcode.app
+          fi
           echo "XCODE_APP=$app" >> "$GITHUB_ENV"
           xcodebuild -version
 
