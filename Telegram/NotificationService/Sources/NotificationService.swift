@@ -2537,6 +2537,15 @@ private final class BoxedNotificationServiceHandler {
 }
 
 @available(iOSApplicationExtension 10.0, iOS 10.0, *)
+/// The app group's directory, where the app leaves `pai.json`.
+private func paiAppGroupPath() -> String? {
+    guard let appBundleIdentifier = Bundle.main.bundleIdentifier, let lastDotRange = appBundleIdentifier.range(of: ".", options: [.backwards]) else {
+        return nil
+    }
+    let baseAppBundleId = String(appBundleIdentifier[..<lastDotRange.lowerBound])
+    return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.\(baseAppBundleId)")?.path
+}
+
 @objc(NotificationService)
 final class NotificationService: UNNotificationServiceExtension {
     private var impl: QueueLocalObject<BoxedNotificationServiceHandler>?
@@ -2579,10 +2588,15 @@ final class NotificationService: UNNotificationServiceExtension {
                         
                         strongSelf.contentHandler = nil
                         
+                        let generated: UNNotificationContent?
                         if let content = content.with({ $0 }) {
-                            contentHandler(content.generate())
-                        } else if let initialContent = strongSelf.initialContent {
-                            contentHandler(initialContent)
+                            generated = content.generate()
+                        } else {
+                            generated = strongSelf.initialContent
+                        }
+                        if let generated {
+                            // A question from pai gets its answers as buttons; anything else passes through.
+                            PaiNotification.decorate(generated, appGroupPath: paiAppGroupPath(), completion: contentHandler)
                         }
                     } else {
                         Logger.shared.log("NotificationService \(episode)", "Attempted to repeatedly complete handling notification")

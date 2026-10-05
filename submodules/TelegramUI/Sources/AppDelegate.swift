@@ -1,4 +1,5 @@
 import UIKit
+import PaiUI
 import SwiftSignalKit
 import Display
 import TelegramCore
@@ -2838,6 +2839,13 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
     }
     
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
+        // A tap on one of pai's answer buttons (or the watch's): the answer goes to the box, no chat opens.
+        if PaiNotificationAnswer.handles(response.actionIdentifier) {
+            PaiNotificationAnswer.answer(actionIdentifier: response.actionIdentifier, userText: (response as? UNTextInputNotificationResponse)?.userText, userInfo: response.notification.request.content.userInfo, completion: {
+                DispatchQueue.main.async { completionHandler() }
+            })
+            return
+        }
         let _ = (accountIdFromNotification(response.notification, sharedContext: self.sharedContextPromise.get())
         |> deliverOnMainQueue).start(next: { accountId in
             if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
