@@ -98,6 +98,8 @@ public struct PaiNeed: Codable, Identifiable, Equatable {
     public let id: String
     public let askId: Int?
     public let session: String?
+    /// The agent asking, when it is one: its row in the tree shows that it waits on the user.
+    public let agent: String?
     public let from: String
     public let question: String
     public let options: [String]

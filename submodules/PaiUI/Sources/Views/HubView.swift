@@ -6,13 +6,14 @@ import SwiftUI
 final class PaiHubStore: ObservableObject {
     @Published private(set) var tasks: [PaiTaskItem] = []
     @Published private(set) var routines: [PaiRoutine] = []
-    @Published private(set) var needs: [PaiNeed] = []
+    @Published fileprivate(set) var needs: [PaiNeed] = PaiChat.needs
     @Published private(set) var loaded = false
     @Published var error: String?
     /// Memories, tools and skills come with the daemon's context, the same store Settings reads.
     let settings = PaiSettingsStore()
     private let client = PaiClient()
     private var observer: NSObjectProtocol?
+    private var needsObserver: NSObjectProtocol?
     private var reload: Task<Void, Never>?
 
     func start() {
@@ -20,6 +21,9 @@ final class PaiHubStore: ObservableObject {
             // Anything the daemon reports moving reloads the board a moment later, once a burst of events settles.
             observer = NotificationCenter.default.addObserver(forName: PaiChat.changed, object: nil, queue: .main) { [weak self] _ in
                 Task { @MainActor in self?.scheduleReload() }
+            }
+            needsObserver = NotificationCenter.default.addObserver(forName: PaiChat.needsChanged, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.needs = PaiChat.needs }
             }
         }
         Task {
@@ -30,6 +34,7 @@ final class PaiHubStore: ObservableObject {
 
     deinit {
         if let observer { NotificationCenter.default.removeObserver(observer) }
+        if let needsObserver { NotificationCenter.default.removeObserver(needsObserver) }
     }
 
     private func scheduleReload() {
@@ -48,7 +53,10 @@ final class PaiHubStore: ObservableObject {
         let (t, r, n) = await (tasks, routines, needs)
         if let t { self.tasks = t }
         if let r { self.routines = r }
-        if let n { self.needs = n }
+        if let n {
+            self.needs = n
+            PaiChat.needs = n
+        }
         loaded = true
     }
 
@@ -82,6 +90,7 @@ final class PaiHubStore: ObservableObject {
 
     func answer(_ need: PaiNeed, _ text: String) {
         needs.removeAll { $0.id == need.id }
+        PaiChat.needs = needs
         Task {
             do {
                 try await client.answer(need, text: text)
@@ -301,7 +310,7 @@ private struct AgentsPane: View {
                 ForEach(rows) { row in
                     switch row {
                     case let .agent(agent, depth):
-                        AgentRow(agent: agent, depth: depth, stop: { hub.stop(agent: agent) })
+                        AgentRow(agent: agent, depth: depth, waiting: hub.needs.filter { $0.agent == agent.slug }.count, stop: { hub.stop(agent: agent) })
                             .contentShape(Rectangle())
                             .onTapGesture { openAgent(agent) }
                             .swipeActions { if agent.isBusy { Button("Stop", role: .destructive) { hub.stop(agent: agent) } } }
@@ -438,6 +447,8 @@ struct FlowLayout: Layout {
 private struct AgentRow: View {
     let agent: PaiAgent
     let depth: Int
+    /// Decisions it waits on the user for.
+    let waiting: Int
     let stop: () -> Void
 
     var body: some View {
@@ -446,7 +457,7 @@ private struct AgentRow: View {
                 Image(systemName: "arrow.turn.down.right").font(.caption2).foregroundStyle(.quaternary)
                     .padding(.leading, CGFloat(depth - 1) * 18)
             }
-            AgentStatusIcon(status: agent.isBusy ? "working" : agent.status)
+            AgentStatusIcon(status: agent.isBusy ? "working" : waiting > 0 ? "waiting" : agent.status == "waiting" ? "idle" : agent.status)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
                     Text(agent.name).font(.callout.weight(depth == 0 ? .semibold : .medium)).lineLimit(1)
@@ -457,6 +468,11 @@ private struct AgentRow: View {
                 }
             }
             Spacer(minLength: 8)
+            if waiting > 0 {
+                Label("\(waiting)", systemImage: "hand.raised.fill").font(.caption.weight(.bold)).foregroundStyle(.white)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Color.paiWaiting, in: Capsule())
+            }
             if let open = agent.openTasks, open > 0 {
                 Label("\(open)", systemImage: "checklist").font(.caption).foregroundStyle(.secondary)
             }

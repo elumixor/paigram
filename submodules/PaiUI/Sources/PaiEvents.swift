@@ -47,10 +47,18 @@ public enum PaiEventIcon {
 
 /// How an agent's status reads: the symbol (shared with the event rows) and a word or two.
 public enum PaiAgentStatus {
+    /// What to show for an agent now: its live status over the one a message was posted with, and "waiting"
+    /// only while a decision of the user's is actually open — otherwise it is pai's to move on, not the user's.
+    public static func effective(agent slug: String?, posted: String?) -> String? {
+        let live = PaiChat.agent(slug)?.status ?? posted
+        if let slug, PaiChat.needs(of: slug) > 0 { return "waiting" }
+        return live == "waiting" ? "idle" : live
+    }
+
     public static func symbol(_ status: String?) -> String {
         switch status {
         case "working": return "bolt"
-        case "waiting": return "questionmark.bubble"
+        case "waiting": return "hand.raised.fill"
         case "queued": return "clock"
         case "closed": return "archivebox"
         default: return "moon.zzz"

@@ -77,7 +77,7 @@ func leftNavigationButtonForChatInterfaceState(_ presentationInterfaceState: Cha
     return nil
 }
 
-func rightNavigationButtonForChatInterfaceState(context: AccountContext, presentationInterfaceState: ChatPresentationInterfaceState, strings: PresentationStrings, currentButton: ChatNavigationButton?, target: Any?, selector: Selector?, chatInfoNavigationButton: ChatNavigationButton?, moreInfoNavigationButton: ChatNavigationButton?) -> ChatNavigationButton? {
+func rightNavigationButtonForChatInterfaceState(context: AccountContext, presentationInterfaceState: ChatPresentationInterfaceState, strings: PresentationStrings, currentButton: ChatNavigationButton?, target: Any?, selector: Selector?, chatInfoNavigationButton: ChatNavigationButton?, moreInfoNavigationButton: ChatNavigationButton?, paiUsageNavigationButton: ChatNavigationButton? = nil) -> ChatNavigationButton? {
     if case .standard(.previewing) = presentationInterfaceState.mode {
         return nil
     }
@@ -101,9 +101,9 @@ func rightNavigationButtonForChatInterfaceState(context: AccountContext, present
         }
     }
     
-    // The pai bot's chat shows its avatar like any other chat; the tap opens the Pai settings.
+    // The pai bot's chat shows its usage rings where the avatar would be; the tap opens the Pai settings.
     if PaiChat.isBot(presentationInterfaceState.renderedPeer?.peer), presentationInterfaceState.search == nil, case .standard(.default) = presentationInterfaceState.mode {
-        return chatInfoNavigationButton
+        return paiUsageNavigationButton ?? chatInfoNavigationButton
     }
     
     if case let .replyThread(message) = presentationInterfaceState.chatLocation, message.peerId == context.account.peerId {

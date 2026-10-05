@@ -218,7 +218,7 @@ struct AgentChatView: View {
                         Image(systemName: "bolt.slash").foregroundStyle(.red).help(error)
                     } else if let agent {
                         HStack(spacing: 10) {
-                            AgentStatusIcon(status: agent.isBusy ? "working" : agent.status).help(PaiAgentStatus.label(agent.status))
+                            AgentStatusIcon(status: agent.isBusy ? "working" : PaiAgentStatus.effective(agent: agent.slug, posted: agent.status)).help(PaiAgentStatus.label(agent.status))
                             if agent.isBusy {
                                 StopButton {
                                     Task {

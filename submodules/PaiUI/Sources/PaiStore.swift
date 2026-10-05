@@ -104,6 +104,7 @@ public final class PaiStore: ObservableObject {
         Task { [client] in
             if let usage = try? await client.usage() { PaiChat.usage = usage }
         }
+        refreshNeeds()
         do {
             async let tasks = client.tasks()
             async let projects = client.projects()
@@ -143,11 +144,26 @@ public final class PaiStore: ObservableObject {
             receive(message)
         }
         if event.kind.hasPrefix("agent.") { refreshAgents() }
+        if event.kind == "message.new" || event.kind == "session.question" || event.kind == "session.answer" || event.kind.hasPrefix("ask.") { refreshNeeds() }
         if event.kind == "session.tool", let id = event.sessionId, let summary = event.payload["summary"]?.string {
             sessions = sessions.map { $0.sessionId == id ? $0.withTool(summary) : $0 }
         }
         if Self.refreshingKinds.contains(event.kind) { refresh() }
         if event.kind != "session.delta" { NotificationCenter.default.post(name: PaiChat.changed, object: nil) }
+    }
+
+    // MARK: Decisions
+
+    private var needsTask: Task<Void, Never>?
+
+    /// What waits on the user, fetched again whenever a question opens or closes anywhere.
+    public func refreshNeeds() {
+        needsTask?.cancel()
+        needsTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: Self.refreshDebounce)
+            guard let self, !Task.isCancelled, let fetched = try? await self.client.needs() else { return }
+            PaiChat.needs = fetched
+        }
     }
 
     // MARK: Agents
