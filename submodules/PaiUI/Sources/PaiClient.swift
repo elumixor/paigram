@@ -114,6 +114,39 @@ public final class PaiClient {
 
     // MARK: Settings
 
+    /// Interrupts an agent's turn (and its sub-agents'); for pai, its one session.
+    public func stop(agent slug: String) async throws {
+        struct Stopped: Decodable { let stopped: [String]? }
+        _ = try await call(Stopped.self, "/agents/\(slug)/stop", method: "POST", body: [:])
+    }
+
+    public func needs() async throws -> [PaiNeed] { try await call([PaiNeed].self, "/needs") }
+
+    /// One tap on an option, or a typed answer: an ask goes to its agent, a question to its session.
+    public func answer(_ need: PaiNeed, text: String) async throws {
+        if let askId = need.askId {
+            try await answer(ask: askId, text: text)
+        } else if let session = need.session {
+            try await answer(session: session, text: text)
+        }
+    }
+
+    // MARK: Tasks and routines
+
+    public func taskItems(includeClosed: Bool = false) async throws -> [PaiTaskItem] {
+        try await call(PaiTasks.self, "/tasks", query: includeClosed ? ["all": "1"] : [:]).items ?? []
+    }
+
+    public func updateTask(_ id: Int, status: String) async throws -> PaiTaskItem {
+        try await call(PaiTaskItem.self, "/tasks/\(id)", method: "PATCH", body: ["status": status])
+    }
+
+    public func routines() async throws -> [PaiRoutine] { try await call([PaiRoutine].self, "/routines") }
+
+    public func setRoutine(_ id: Int, enabled: Bool) async throws -> PaiRoutine {
+        try await call(PaiRoutine.self, "/routines/\(id)", method: "PATCH", body: ["enabled": enabled])
+    }
+
     public func context() async throws -> PaiContext { try await call(PaiContext.self, "/context") }
     public func usage() async throws -> PaiUsage { try await call(PaiUsage.self, "/usage") }
     public func health() async throws -> PaiHealth { try await call(PaiHealth.self, "/health") }

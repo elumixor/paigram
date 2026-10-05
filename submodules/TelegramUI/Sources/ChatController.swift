@@ -7725,6 +7725,7 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
             }
             let redrawTitle: (Notification) -> Void = { [weak self] _ in
                 self?.updateChatPresentationInterfaceState(animated: false, interactive: false, { $0 })
+                self?.requestLayout(transition: .immediate)
             }
             self.paiAgentsObserver = NotificationCenter.default.addObserver(forName: PaiChat.agentsChanged, object: nil, queue: .main, using: redrawTitle)
             self.paiProjectObserver = NotificationCenter.default.addObserver(forName: PaiChat.projectChanged, object: nil, queue: .main, using: redrawTitle)

@@ -63,7 +63,7 @@ final class PaiSettingsStore: ObservableObject {
         switch await usage {
         case let .success(value):
             self.usage = value
-            PaiChat.usage = PaiChat.usageLine(value)
+            PaiChat.usage = value
         case let .failure(error): failures.append(error)
         }
         error = failures.first { !($0 is CancellationError) }?.localizedDescription
@@ -157,7 +157,7 @@ struct SettingsView: View {
         Section {
             Button(action: openProjects) {
                 HStack {
-                    SettingsRow(symbol: "circle.grid.2x2.fill", color: .green, title: "Projects", value: threadsValue)
+                    SettingsRow(symbol: "person.2.fill", color: .green, title: "Agents & tasks", value: threadsValue)
                     Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
                 }
             }
@@ -325,7 +325,7 @@ private struct UsageRing: View {
 
 /// Everything of one kind: tools expanding in place with what each does, the rest opening on their text.
 @available(iOS 16.0, *)
-private struct ContextListView: View {
+struct ContextListView: View {
     let kind: String
     let title: String
     @ObservedObject var settings: PaiSettingsStore
@@ -394,13 +394,13 @@ private struct ContextListView: View {
 }
 
 @available(iOS 16.0, *)
-private struct ContextItemRoute: Hashable {
+struct ContextItemRoute: Hashable {
     let id: String
 }
 
 /// The text of one instruction, memory or skill, rendered; an editable one opens in an editor and saves back.
 @available(iOS 16.0, *)
-private struct ContextDetailView: View {
+struct ContextDetailView: View {
     let id: String
     @ObservedObject var settings: PaiSettingsStore
     @State private var editing = false

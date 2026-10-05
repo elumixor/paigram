@@ -4861,29 +4861,18 @@ extension ChatControllerImpl {
             guard let self, let navigationController = self.navigationController as? NavigationController else {
                 return
             }
-            let home = PaiHomeController(context: self.context)
-            home.openThread = { [weak self, weak navigationController] threadId in
+            let hub = PaiHubController(context: self.context)
+            hub.openThread = { [weak self, weak navigationController] threadId in
                 guard let self, let navigationController else {
                     return
                 }
                 let _ = navigationController.popToViewController(self, animated: true)
                 self.updateChatLocationThread(threadId: threadId, animationDirection: nil)
             }
-            home.openAgent = { [weak self] slug in
+            hub.openAgent = { [weak self] slug in
                 self?.openPaiAgent(slug: slug, thread: nil)
             }
-            home.openTree = { [weak self] in
-                self?.openPaiTree()
-            }
-            home.newThread = { [weak self, weak navigationController] project in
-                guard let self, let navigationController else {
-                    return
-                }
-                PaiChat.pendingProject = project
-                let _ = navigationController.popToViewController(self, animated: true)
-                self.updateChatLocationThread(threadId: nil, animationDirection: nil)
-            }
-            navigationController.pushViewController(home)
+            navigationController.pushViewController(hub)
         }
         self.interfaceInteraction = interfaceInteraction
         

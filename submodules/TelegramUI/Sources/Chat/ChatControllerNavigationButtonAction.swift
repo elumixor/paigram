@@ -404,9 +404,7 @@ extension ChatControllerImpl {
                     self.interfaceInteraction?.openPai?()
                     return
                 }
-                let settings = PaiSettingsController(context: self.context)
-                settings.openProjects = { [weak self] in self?.interfaceInteraction?.openPai?() }
-                self.effectiveNavigationController?.pushViewController(settings)
+                self.openPaiSettings()
                 return
             }
             let _ = self.presentVoiceMessageDiscardAlert(action: { [weak self] in
