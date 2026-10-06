@@ -122,13 +122,16 @@ public final class PaiClient {
 
     public func needs() async throws -> [PaiNeed] { try await call([PaiNeed].self, "/needs") }
 
-    /// One tap on an option, or a typed answer: an ask goes to its agent, a question to its session.
+    /// One tap on an option, or a typed answer: the daemon routes it — an ask to its agent, a question to its
+    /// session, a task's Done or Drop to the list (anything else to whoever owns it).
     public func answer(_ need: PaiNeed, text: String) async throws {
-        if let askId = need.askId {
-            try await answer(ask: askId, text: text)
-        } else if let session = need.session {
-            try await answer(session: session, text: text)
-        }
+        try await answer(need: need.id, text: text)
+    }
+
+    public func answer(need id: String, text: String) async throws {
+        struct Answered: Decodable { let answered: Bool?; let error: String? }
+        let result = try await call(Answered.self, "/needs/answer", method: "POST", body: ["id": id, "text": text])
+        if result.answered == false { throw PaiClientError(message: result.error ?? "Nothing to answer") }
     }
 
     // MARK: Tasks and routines

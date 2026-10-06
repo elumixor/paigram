@@ -16,8 +16,6 @@ enum PaiNotification {
 
     private struct Need: Decodable {
         let id: String
-        let askId: Int?
-        let session: String?
         let question: String
         let options: [String]
         let freeText: Bool?
@@ -82,7 +80,7 @@ enum PaiNotification {
             }
             mutable.categoryIdentifier = identifier
             var info = mutable.userInfo
-            info["paiNeed"] = ["askId": need.askId ?? 0, "session": need.session ?? "", "options": need.options] as [String: Any]
+            info["paiNeed"] = ["id": need.id, "options": need.options] as [String: Any]
             mutable.userInfo = info
             // The category registers asynchronously; a moment lets the system know it before the banner shows.
             DispatchQueue.global().asyncAfter(deadline: .now() + 0.4) {

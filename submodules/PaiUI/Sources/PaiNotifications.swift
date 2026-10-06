@@ -36,15 +36,12 @@ public enum PaiNotificationAnswer {
             completion()
             return
         }
-        let askId = need["askId"] as? Int ?? 0
-        let session = need["session"] as? String ?? ""
+        guard let id = need["id"] as? String, !id.isEmpty else {
+            completion()
+            return
+        }
         Task {
-            let client = PaiClient()
-            if askId > 0 {
-                try? await client.answer(ask: askId, text: text)
-            } else if !session.isEmpty {
-                try? await client.answer(session: session, text: text)
-            }
+            try? await PaiClient().answer(need: id, text: text)
             completion()
         }
     }
