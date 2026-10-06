@@ -551,7 +551,8 @@ official_communication_notifications_fragment = """
 <key>com.apple.developer.usernotifications.communication</key>
 <true/>
 """
-communication_notifications_fragment = official_communication_notifications_fragment if telegram_bundle_id in official_bundle_ids else ""
+# Paigram: sender avatars in notifications for every bundle id (the App ID needs Communication Notifications).
+communication_notifications_fragment = official_communication_notifications_fragment
 
 official_notification_filtering_fragment = """
 <key>com.apple.developer.usernotifications.filtering</key>
@@ -1754,6 +1755,8 @@ apple_prebuilt_watchos_application(
         telegram_bundle_id = telegram_bundle_id,
     ),
     display_name = "Paigram",
+    # Rendered from Telegram-iOS/Telegram.icon by scripts/watch-icon.ts.
+    app_icon = "Telegram-iOS/WatchAppIcon.png",
     tags = ["manual"],
 )
 

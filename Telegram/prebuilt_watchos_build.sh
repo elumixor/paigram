@@ -26,9 +26,10 @@
 #                   derives WKCompanionAppBundleIdentifier from it via
 #                   $(PRODUCT_BUNDLE_IDENTIFIER:base), so no post-build plist patching.
 #   $11 display_name CFBundleDisplayName to show on the watch; empty => keep the project's.
+#   $12 app_icon     1024x1024 PNG replacing the snapshot's AppIcon; empty => keep the project's.
 set -euo pipefail
 
-SRC="$1"; OUT_ZIP="$2"; API_ID="$3"; API_HASH="$4"; IDENTITY="${5:-}"; PROFILE="${6:-}"; INFOPLIST_OUT="${7:-}"; VERSIONS_JSON="${8:-}"; BUILD_NUMBER="${9:-1}"; WATCH_BUNDLE_ID="${10:-}"; DISPLAY_NAME="${11:-}"
+SRC="$1"; OUT_ZIP="$2"; API_ID="$3"; API_HASH="$4"; IDENTITY="${5:-}"; PROFILE="${6:-}"; INFOPLIST_OUT="${7:-}"; VERSIONS_JSON="${8:-}"; BUILD_NUMBER="${9:-1}"; WATCH_BUNDLE_ID="${10:-}"; DISPLAY_NAME="${11:-}"; APP_ICON="${12:-}"
 
 if [ ! -e "$SRC/tgwatch.xcodeproj" ]; then
   echo "error: no tgwatch.xcodeproj at $SRC (re-sync the Telegram/WatchApp snapshot via tgwatch/tools/export-sources.sh)" >&2
@@ -51,6 +52,9 @@ trap 'rm -rf "$DD"' EXIT
 WORKSRC="$DD/src"
 mkdir -p "$WORKSRC"
 cp -R "$SRC/." "$WORKSRC/"
+if [ -n "$APP_ICON" ]; then
+  cp "$APP_ICON" "$WORKSRC/tgwatch Watch App/Assets.xcassets/AppIcon.appiconset/AppIcon.png"
+fi
 
 xcodebuild \
   -project "$WORKSRC/tgwatch.xcodeproj" \
