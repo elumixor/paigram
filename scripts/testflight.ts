@@ -1,5 +1,5 @@
 /**
- * `bun run testflight [--no-build] [--no-upload] [--no-bump] [--minor]`: a patch (or minor) version bump committed to versions.json, fresh App Store provisioning profiles for the
+ * `bun run testflight [--no-build] [--no-upload] [--no-bump] [--once] [--minor]`: a patch (or minor) version bump committed to versions.json, fresh App Store provisioning profiles for the
  * app, its extensions and the watch app (scripts/provision.ts), a release build for devices with
  * every extension and the watch app embedded, the ipa uploaded to App Store Connect, then a wait until
  * TestFlight has processed it. Needs `.env` (ASC_KEY_ID, ASC_ISSUER_ID, TEAM_ID) and
@@ -51,6 +51,11 @@ async function waitProcessed(version: string, number: number) {
 
 /** `--no-build` uploads the ipa as it is: its build number is read back, and the profiles it embeds stay untouched. */
 const version = skipBump ? (await readVersions()).app : await bumpVersion(process.argv.includes("--minor"));
+// A tag builds on two machines at once (this Mac and a GitHub runner); whichever comes second finds it done.
+if (process.argv.includes("--once") && (await buildNumber(version)) > 1) {
+  console.log(`v${version} is already on TestFlight; nothing to do`);
+  process.exit(0);
+}
 const number = skipBuild ? Number(await $`unzip -p ${root}bazel-bin/Telegram/Telegram.ipa Payload/Telegram.app/Info.plist | plutil -extract CFBundleVersion raw -o - -`.text()) : await buildNumber(version);
 if (!skipBuild) {
   await provision();
