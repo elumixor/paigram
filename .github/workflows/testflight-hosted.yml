@@ -1,0 +1,108 @@
+name: TestFlight (GitHub runner)
+
+# The same release on a GitHub macOS runner, for when the Mac that normally builds it is away. Started by
+# hand only (Actions → Run workflow): about 80 minutes from a cold cache.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: testflight
+  cancel-in-progress: false
+
+jobs:
+  testflight:
+    runs-on: macos-26
+    timeout-minutes: 330
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+
+      # versions.json pins the Xcode upstream tested; --overrideXcodeVersion (passed by
+      # scripts/testflight.ts) downgrades a mismatch to a warning, so a runner image that has moved
+      # on still builds instead of failing the release.
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          pinned=$(python3 -c 'import json;print(json.load(open("versions.json"))["xcode"])')
+          app="/Applications/Xcode_$pinned.app"
+          if [ ! -d "$app" ]; then
+            app=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+            echo "::warning::Xcode $pinned is not installed on this runner; building with $app"
+          fi
+          sudo xcode-select -s "$app/Contents/Developer"
+          # dav1d's device crossfile hardcodes /Applications/Xcode.app; the cleanup below deletes
+          # whichever Xcode that symlink pointed at.
+          if [ -L /Applications/Xcode.app ] || [ ! -e /Applications/Xcode.app ]; then
+            sudo ln -sfn "$app" /Applications/Xcode.app
+          fi
+          echo "XCODE_APP=$app" >> "$GITHUB_ENV"
+          xcodebuild -version
+
+      # The runner has 14 GB free and a dozen Xcodes; the build plus the Bazel cache does not fit
+      # next to them. Simulator runtimes go too — this is a device build.
+      - name: Free disk space
+        run: |
+          set -euo pipefail
+          for app in /Applications/Xcode_*.app; do
+            [ "$app" = "$XCODE_APP" ] || sudo rm -rf "$app"
+          done
+          sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes/* ~/Library/Developer/CoreSimulator/Caches
+          df -h /
+
+      - name: Restore Bazel cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/telegram-bazel-cache
+          key: bazel-${{ github.sha }}
+          restore-keys: bazel-
+
+      - name: Prepare signing and configuration
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          TEAM_ID: ${{ secrets.TEAM_ID }}
+          DIST_CERT_P12: ${{ secrets.DIST_CERT_P12 }}
+          DIST_CERT_P12_PASSWORD: ${{ secrets.DIST_CERT_P12_PASSWORD }}
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          PAI_BOX_URL: ${{ secrets.PAI_BOX_URL }}
+          PAI_BOX_TOKEN: ${{ secrets.PAI_BOX_TOKEN }}
+          PAI_BOT_USERNAME: ${{ secrets.PAI_BOT_USERNAME }}
+        run: bun scripts/ci.ts
+
+      # Provisioning profiles, the release build with every extension and the watch app, the upload,
+      # and the wait for TestFlight to finish processing — the same script a Mac runs. The version
+      # comes from the tagged versions.json, so nothing is bumped or committed here.
+      # Its own budget, under the job's: a job-level timeout cancels the remaining steps, and the
+      # Bazel cache is worth more than the minutes it takes to save.
+      - name: Build and upload to TestFlight
+        timeout-minutes: 285
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          TEAM_ID: ${{ secrets.TEAM_ID }}
+          PAI_BOX_URL: ${{ secrets.PAI_BOX_URL }}
+          PAI_BOX_TOKEN: ${{ secrets.PAI_BOX_TOKEN }}
+          PAI_BOT_USERNAME: ${{ secrets.PAI_BOT_USERNAME }}
+        run: bun run testflight --no-bump
+
+      # Saved even when the build failed: the work it did get through is what makes the next attempt
+      # survive the runner's time budget.
+      - name: Trim Bazel cache
+        if: always()
+        continue-on-error: true
+        run: bun scripts/trim-cache.ts "$HOME/telegram-bazel-cache" 8
+
+      - name: Save Bazel cache
+        if: always()
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ~/telegram-bazel-cache
+          key: bazel-${{ github.sha }}

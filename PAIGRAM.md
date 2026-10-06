@@ -15,7 +15,7 @@ Bazel builds, driven by Telegram's `build-system/Make/Make.py`. First time: `bun
 ```sh
 bun run sim [--no-build]          # simulator build, installed and launched on the newest iPhone simulator
 bun run ci-secrets                # once, on the Mac: fill the GitHub secrets CI needs from the box and the keychain
-bun run tag [--minor]             # bump the version, tag it `ios-vX.Y.Z` and push: CI builds and uploads to TestFlight
+bun run tag [--minor]             # bump the version, tag it `ios-vX.Y.Z` and push: this Mac (self-hosted runner) builds and uploads to TestFlight
 bun run testflight [--no-build] [--no-bump] [--minor]   # the same release from a Mac, locally: version bump, App Store profile via the API, release build, upload, wait
 bun run typecheck                 # the scripts
 ```
