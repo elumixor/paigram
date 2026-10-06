@@ -9,7 +9,7 @@
 			<string>INSendMessageIntent</string>
 			<key>IntentExamples</key>
 			<array>
-				<string>Enviar uma mensagem no Telegram para a Alice dizendo que eu chegarei lá em 15 minutos</string>
+				<string>Enviar uma mensagem no Paigram para a Alice dizendo que eu chegarei lá em 15 minutos</string>
 			</array>
 		</dict>
 		<dict>
@@ -17,7 +17,7 @@
 			<string>INSearchForMessagesIntent</string>
 			<key>IntentExamples</key>
 			<array>
-				<string>Mostrar as minhas mensagens do Telegram da Alice</string>
+				<string>Mostrar as minhas mensagens do Paigram da Alice</string>
 			</array>
 		</dict>
 		<dict>
@@ -25,7 +25,7 @@
 			<string>INSetMessageAttributeIntent</string>
 			<key>IntentExamples</key>
 			<array>
-				<string>Marcar as minhas mensagens do Telegram como lidas</string>
+				<string>Marcar as minhas mensagens do Paigram como lidas</string>
 			</array>
 		</dict>
 		<dict>
@@ -33,7 +33,7 @@
 			<string>INStartAudioCallIntent</string>
 			<key>IntentExamples</key>
 			<array>
-				<string>Ligar à Alice no Telegram</string>
+				<string>Ligar à Alice no Paigram</string>
 			</array>
 		</dict>
 		<dict>
@@ -41,7 +41,7 @@
 			<string>INSearchCallHistoryIntent</string>
 			<key>IntentExamples</key>
 			<array>
-				<string>Mostrar as minhas chamadas perdidas do Telegram</string>
+				<string>Mostrar as minhas chamadas perdidas do Paigram</string>
 			</array>
 		</dict>
 	</array>

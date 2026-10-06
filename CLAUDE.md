@@ -55,6 +55,8 @@ The sim ignores code signing, so the unsigned `Telegram_archive-root` bundle run
 
 ## TestFlight
 
+The app's display name is `Paigram`, hardcoded in `Telegram/BUILD`: `TelegramInfoPlist` for the app (`CFBundleDisplayName`/`CFBundleName`), the shared `AppNameInfoPlist` fragment for every extension, `display_name` on `TelegramWatchApp` for the watch app. Anything a user says to Siri or reads as the app's name has to match it, not upstream's "Telegram".
+
 Apple's "one or more issues" mail is warnings, not a rejection. `a9925897b9` added the Siri example phrases that caused 73 × ITMS-90626 through 0.2.5; the check on the next upload is that mail coming back clean, since no build verified the fix.
 
 ## Code Style Guidelines
