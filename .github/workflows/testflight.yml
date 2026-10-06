@@ -9,6 +9,11 @@ on:
     tags: ['ios-v*']
   workflow_dispatch:
 
+# Lets mac-release.ts cancel the GitHub runner's build of the same tag: the runner service has no gh login.
+permissions:
+  actions: write
+  contents: read
+
 concurrency:
   group: testflight
   cancel-in-progress: false
@@ -19,4 +24,6 @@ jobs:
     timeout-minutes: 180
     steps:
       - name: Build and upload from ~/dev/paigram
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: cd "$HOME/dev/paigram" && bun scripts/mac-release.ts "$GITHUB_REF_NAME"
