@@ -31,7 +31,7 @@ await $`bun run testflight --no-bump --once`.cwd(root);
 if (tag) {
   const runs = (await $`gh run list --repo elumixor/paigram --workflow testflight-hosted.yml --limit 20 --json databaseId,headBranch,status`.cwd(root).json()) as { databaseId: number; headBranch: string; status: string }[];
   for (const run of runs.filter((r) => r.headBranch === tag && r.status !== "completed")) {
-    await $`gh run cancel ${run.databaseId} --repo elumixor/paigram`.cwd(root).nothrow();
-    console.log(`cancelled the GitHub runner's build of ${tag} (run ${run.databaseId})`);
+    const { exitCode } = await $`gh run cancel ${run.databaseId} --repo elumixor/paigram`.cwd(root).nothrow();
+    console.log(exitCode === 0 ? `cancelled the GitHub runner's build of ${tag} (run ${run.databaseId})` : `could not cancel the GitHub runner's build of ${tag} (run ${run.databaseId})`);
   }
 }
