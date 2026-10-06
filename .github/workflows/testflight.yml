@@ -2,8 +2,8 @@ name: TestFlight
 
 # Push a tag (`bun run tag`, from this Mac, the box or pai's chat) and the build lands on the phone. It runs
 # on the developer's Mac as a self-hosted runner (label `paigram-mac`): free, and fast from its warm Bazel
-# cache. While the Mac sleeps the job waits in the queue. `testflight-hosted.yml` is the same release on a
-# GitHub runner, started by hand when the Mac is away.
+# cache. While the Mac sleeps the job waits in the queue, and the same tag's GitHub runner build
+# (`testflight-hosted.yml`) ships it instead; whichever finishes second does nothing.
 on:
   push:
     tags: ['ios-v*']

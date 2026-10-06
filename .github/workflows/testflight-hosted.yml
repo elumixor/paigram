@@ -1,12 +1,15 @@
 name: TestFlight (GitHub runner)
 
-# The same release on a GitHub macOS runner, for when the Mac that normally builds it is away. Started by
-# hand only (Actions → Run workflow): about 80 minutes from a cold cache.
+# The same release on a GitHub macOS runner (free for this public repo, ~80 minutes), started by every tag
+# alongside the Mac's (`testflight.yml`) so a release goes out even while that Mac is off. The Mac usually
+# finishes first and cancels this run; whichever comes second finds the version uploaded (`--once`).
 on:
+  push:
+    tags: ['ios-v*']
   workflow_dispatch:
 
 concurrency:
-  group: testflight
+  group: testflight-hosted
   cancel-in-progress: false
 
 jobs:
@@ -90,7 +93,7 @@ jobs:
           PAI_BOX_URL: ${{ secrets.PAI_BOX_URL }}
           PAI_BOX_TOKEN: ${{ secrets.PAI_BOX_TOKEN }}
           PAI_BOT_USERNAME: ${{ secrets.PAI_BOT_USERNAME }}
-        run: bun run testflight --no-bump
+        run: bun run testflight --no-bump --once
 
       # Saved even when the build failed: the work it did get through is what makes the next attempt
       # survive the runner's time budget.
