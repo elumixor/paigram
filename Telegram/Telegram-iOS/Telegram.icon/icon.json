@@ -1,122 +1,62 @@
 {
-  "fill" : "system-light",
-  "groups" : [
+  "fill": {
+    "linear-gradient": [
+      "display-p3:0.54000,0.30000,1.00000,1.00000",
+      "display-p3:0.17000,0.52000,1.00000,1.00000"
+    ],
+    "orientation": {
+      "start": {
+        "x": 0.5,
+        "y": 0
+      },
+      "stop": {
+        "x": 0.5,
+        "y": 1
+      }
+    }
+  },
+  "groups": [
     {
-      "blend-mode" : "normal",
-      "blur-material" : 1,
-      "layers" : [
+      "layers": [
         {
-          "blend-mode-specializations" : [
-            {
-              "value" : "normal"
-            },
-            {
-              "appearance" : "dark",
-              "value" : "normal"
-            }
-          ],
-          "fill-specializations" : [
-            {
-              "appearance" : "dark",
-              "value" : "automatic"
-            }
-          ],
-          "glass" : true,
-          "image-name" : "Plane.svg",
-          "name" : "Plane",
-          "position-specializations" : [
-            {
-              "idiom" : "watchOS",
-              "value" : {
-                "scale" : 1.35,
-                "translation-in-points" : [
-                  0,
-                  0
-                ]
-              }
-            }
-          ]
+          "glass": true,
+          "image-name": "Sparkle.svg",
+          "name": "Sparkle"
         },
         {
-          "blend-mode-specializations" : [
-            {
-              "value" : "normal"
-            },
-            {
-              "appearance" : "dark",
-              "value" : "normal"
-            }
-          ],
-          "fill-specializations" : [
-            {
-              "value" : {
-                "linear-gradient" : [
-                  "display-p3:0.36000,0.30000,0.92000,1.00000",
-                  "srgb:0.20000,0.14000,0.70000,1.00000"
-                ]
-              }
-            },
-            {
-              "appearance" : "dark",
-              "value" : {
-                "automatic-gradient" : "srgb:0.30000,0.22000,0.85000,1.00000"
-              }
-            }
-          ],
-          "glass" : true,
-          "hidden-specializations" : [
-            {
-              "value" : false
-            },
-            {
-              "idiom" : "watchOS",
-              "value" : false
-            }
-          ],
-          "image-name" : "Oval.svg",
-          "name" : "Oval",
-          "position-specializations" : [
-            {
-              "idiom" : "watchOS",
-              "value" : {
-                "scale" : 2,
-                "translation-in-points" : [
-                  0,
-                  0
-                ]
-              }
-            }
-          ]
+          "glass": true,
+          "image-name": "Bubble.svg",
+          "name": "Bubble"
         }
       ],
-      "lighting" : "combined",
-      "position-specializations" : [
+      "lighting": "combined",
+      "position-specializations": [
         {
-          "idiom" : "watchOS",
-          "value" : {
-            "scale" : 1,
-            "translation-in-points" : [
+          "idiom": "watchOS",
+          "value": {
+            "scale": 1.1,
+            "translation-in-points": [
               0,
               0
             ]
           }
         }
       ],
-      "shadow" : {
-        "kind" : "layer-color",
-        "opacity" : 1
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
       },
-      "specular" : true,
-      "translucency" : {
-        "enabled" : false,
-        "value" : 1
+      "specular": true,
+      "translucency": {
+        "enabled": true,
+        "value": 0.4
       }
     }
   ],
-  "supported-platforms" : {
-    "circles" : [
+  "supported-platforms": {
+    "circles": [
       "watchOS"
     ],
-    "squares" : "shared"
+    "squares": "shared"
   }
 }

@@ -14,6 +14,8 @@ const { bundle_id: bundleId, team_id: teamId, enable_siri: siri } = (await Bun.f
 if (teamId !== asc.teamId) throw new Error(`team_id in paigram.json (${teamId}) differs from TEAM_ID in .env (${asc.teamId})`);
 
 const appGroup = `group.${bundleId}`;
+/** Lets the notification service show the sender's photo; the API cannot enable it, only the portal. */
+const communication = "com.apple.developer.usernotifications.communication";
 
 /** Bundle id suffix, the profile file name Telegram's build expects (BuildConfiguration.py), the capabilities. */
 const targets: { suffix: string; file: string; name: string; capabilities: string[]; group: boolean }[] = [
@@ -82,14 +84,17 @@ export async function provision() {
   mkdirSync(`${codesigning}/certs`, { recursive: true });
   const cert = await distributionCertificate();
   const missingGroup: string[] = [];
+  let missingCommunication = false;
   for (const target of targets) {
     const identifier = bundleId + target.suffix;
     const bundle = await ensureBundleId(identifier, target.name);
     await ensureCapabilities(bundle, target.capabilities);
     const path = `${codesigning}/profiles/${target.file}.mobileprovision`;
     await Bun.write(path, await freshProfile(bundle, target.name, cert));
-    const groups = (await entitlements(path))["com.apple.security.application-groups"] as string[] | undefined;
+    const granted = await entitlements(path);
+    const groups = granted["com.apple.security.application-groups"] as string[] | undefined;
     if (target.group && !groups?.includes(appGroup)) missingGroup.push(identifier);
+    if (target.suffix === "" && !granted[communication]) missingCommunication = true;
     console.log(`profile ${target.file} (${identifier}) written`);
   }
   if (missingGroup.length) {
@@ -97,6 +102,13 @@ export async function provision() {
       `app group ${appGroup} is not attached to: ${missingGroup.join(", ")}.\n` +
         `The API cannot do it: open https://developer.apple.com/account/resources/identifiers/list, ` +
         `edit each id, App Groups → Configure → tick ${appGroup}, then run again.`,
+    );
+  }
+  if (missingCommunication) {
+    throw new Error(
+      `${bundleId} lacks Communication Notifications, which notifications need to show the sender's photo.\n` +
+        `The API cannot enable it: open https://developer.apple.com/account/resources/identifiers/list, ` +
+        `edit ${bundleId}, tick Communication Notifications, save, then run again.`,
     );
   }
 }

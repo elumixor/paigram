@@ -49,7 +49,7 @@ def _apple_prebuilt_watchos_application_impl(ctx):
     infoplist = ctx.actions.declare_file(ctx.label.name + "_Info.plist")
 
     # Track the in-repo snapshot so the watch build re-runs only when it changes.
-    inputs = [ctx.file._worker, ctx.file.versions_json] + ctx.files.srcs
+    inputs = [ctx.file._worker, ctx.file.versions_json] + ctx.files.srcs + ctx.files.app_icon
     exec_requirements = {
         "no-sandbox": "1",
         "no-remote": "1",
@@ -78,6 +78,8 @@ def _apple_prebuilt_watchos_application_impl(ctx):
             ctx.attr.bundle_id,
             # Shown on the watch; empty keeps the snapshot's name.
             ctx.attr.display_name,
+            # 1024px PNG replacing the snapshot's AppIcon; empty keeps the snapshot's icon.
+            ctx.file.app_icon.path if ctx.file.app_icon else "",
         ],
         inputs = inputs,
         outputs = [archive, infoplist],
@@ -124,6 +126,10 @@ apple_prebuilt_watchos_application = rule(
         "bundle_id": attr.string(default = "ph.telegra.Telegraph.watchkitapp"),
         "bundle_name": attr.string(default = "tgwatch Watch App"),
         "display_name": attr.string(default = ""),
+        "app_icon": attr.label(
+            allow_single_file = [".png"],
+            doc = "Opaque 1024x1024 PNG used as the watch app icon in place of the snapshot's.",
+        ),
         "minimum_os_version": attr.string(default = "26.0"),
         "srcs": attr.label(
             default = "//Telegram/WatchApp:sources",
