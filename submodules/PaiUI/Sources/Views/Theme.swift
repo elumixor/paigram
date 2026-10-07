@@ -99,4 +99,41 @@ extension String {
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespaces)
     }
+
+    /// The text with its links tappable: markdown links as written, and bare urls turned into
+    /// links first, since the system parser only reads the bracketed form. Anything that fails to
+    /// parse comes back as plain text rather than disappearing.
+    var paiLinked: AttributedString {
+        let source = Self.autolinked(self)
+        if let attributed = try? AttributedString(markdown: source, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) { return attributed }
+        return AttributedString(self)
+    }
+
+    /// Bare `https://…` runs rewritten as `[url](url)`, leaving the ones already inside a markdown link alone.
+    private static func autolinked(_ text: String) -> String {
+        let pattern = "(\\]\\()?(https?://[^\\s<>\")\\]]+)"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+        let full = NSRange(text.startIndex..., in: text)
+        var out = ""
+        var cursor = text.startIndex
+        for match in regex.matches(in: text, range: full) {
+            guard let range = Range(match.range, in: text), let urlRange = Range(match.range(at: 2), in: text) else { continue }
+            // `](` before it means the url is already a markdown link's target.
+            if match.range(at: 1).length > 0 { continue }
+            let url = String(text[urlRange])
+            let trimmed = url.trimmingTrailingPunctuation
+            // What was trimmed off the url (a full stop, a comma) is still part of the sentence.
+            out += String(text[cursor..<range.lowerBound]) + "[\(trimmed)](\(trimmed))" + String(url.dropFirst(trimmed.count))
+            cursor = range.upperBound
+        }
+        out += String(text[cursor...])
+        return out
+    }
+
+    /// A url at the end of a sentence keeps the sentence's full stop out of the link.
+    var trimmingTrailingPunctuation: String {
+        var copy = self
+        while let last = copy.last, ".,;:!?".contains(last) { copy.removeLast() }
+        return copy
+    }
 }

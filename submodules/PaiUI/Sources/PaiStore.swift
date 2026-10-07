@@ -135,7 +135,7 @@ public final class PaiStore: ObservableObject {
     }
 
     private static let refreshingKinds: Set<String> = [
-        "task.created", "session.started", "session.resumed", "session.turn_end", "session.exit",
+        "task.created", "task.added", "task.updated", "session.started", "session.resumed", "session.turn_end", "session.exit",
         "session.question", "session.answer", "session.input", "session.error",
     ]
 
@@ -144,7 +144,9 @@ public final class PaiStore: ObservableObject {
             receive(message)
         }
         if event.kind.hasPrefix("agent.") { refreshAgents() }
-        if event.kind == "message.new" || event.kind == "session.question" || event.kind == "session.answer" || event.kind.hasPrefix("ask.") { refreshNeeds() }
+        // A task waiting on the user is one of the decisions `/needs` serves, so a task that was
+        // finished anywhere — by him, by an agent, in conversation — has to take its card away.
+        if event.kind == "message.new" || event.kind == "session.question" || event.kind == "session.answer" || event.kind.hasPrefix("ask.") || event.kind.hasPrefix("task.") { refreshNeeds() }
         if event.kind == "session.tool", let id = event.sessionId, let summary = event.payload["summary"]?.string {
             sessions = sessions.map { $0.sessionId == id ? $0.withTool(summary) : $0 }
         }
