@@ -361,15 +361,25 @@ struct NeedCard: View {
                 Spacer()
                 Text(Date(timeIntervalSince1970: need.createdAt / 1000).paiAge).font(.caption2).foregroundStyle(.tertiary)
             }
-            Text(need.question.paiPlain).font(.callout)
-            if !need.options.isEmpty {
+            Text(need.question.paiLinked).font(.callout).tint(Color.accentColor)
+            if !need.options.isEmpty || need.url != nil {
                 FlowLayout(spacing: 6) {
+                    // What the card is asking him to go and do comes first; Done and Drop answer it afterwards.
+                    if let url = need.url {
+                        Link(destination: url) {
+                            Label("Open", systemImage: "arrow.up.right.square").font(.subheadline.weight(.medium))
+                                .padding(.horizontal, 12).padding(.vertical, 7)
+                                .foregroundStyle(Color.white)
+                                .background(Color.paiWaiting, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
                     ForEach(Array(need.options.enumerated()), id: \.offset) { index, option in
                         Button { answer(option) } label: {
                             Text(option).font(.subheadline.weight(.medium)).lineLimit(2)
                                 .padding(.horizontal, 12).padding(.vertical, 7)
-                                .foregroundStyle(index == 0 ? Color.white : Color.accentColor)
-                                .background(index == 0 ? Color.accentColor : Color.accentColor.opacity(0.12), in: Capsule())
+                                .foregroundStyle(index == 0 && need.url == nil ? Color.white : Color.accentColor)
+                                .background(index == 0 && need.url == nil ? Color.accentColor : Color.accentColor.opacity(0.12), in: Capsule())
                         }
                         .buttonStyle(.plain)
                     }
@@ -692,7 +702,8 @@ private struct TaskDetail: View {
             List {
                 Section {
                     Text(current.title).font(.headline)
-                    if let next = current.nextAction, !next.isEmpty { LabeledContent("Next", value: next) }
+                    // A finished task has nothing next: presenting one is how a list stops being trusted.
+                    if let next = current.nextAction, !next.isEmpty, current.isOpen { Text(next.paiLinked).font(.subheadline).tint(Color.accentColor) }
                     if let due = current.due { LabeledContent("Due", value: due) }
                 }
                 Section("Status") {

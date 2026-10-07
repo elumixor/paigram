@@ -105,7 +105,11 @@ public struct PaiNeed: Codable, Identifiable, Equatable {
     public let options: [String]
     public let freeText: Bool?
     public let priority: String?
+    /// The first link in its text, when there is one: the card opens it instead of making the user copy it out.
+    public let link: String?
     public let createdAt: Double
+
+    public var url: URL? { link.flatMap(URL.init(string:)) }
 }
 
 /// A routine (`GET /routines`): a schedule or an event, and what it does then.
