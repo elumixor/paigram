@@ -57,7 +57,7 @@ The sim ignores code signing, so the unsigned `Telegram_archive-root` bundle run
 
 The app's display name is `Paigram`, hardcoded in `Telegram/BUILD`: `TelegramInfoPlist` for the app (`CFBundleDisplayName`/`CFBundleName`), the shared `AppNameInfoPlist` fragment for every extension, `display_name` on `TelegramWatchApp` for the watch app. Anything a user says to Siri or reads as the app's name has to match it, not upstream's "Telegram".
 
-Apple's "one or more issues" mail is warnings, not a rejection. `a9925897b9` added the Siri example phrases that caused 73 × ITMS-90626 through 0.2.5; the check on the next upload is that mail coming back clean, since no build verified the fix.
+Apple's "one or more issues" mail is warnings, not a rejection. `a9925897b9` added the Siri example phrases that caused 73 × ITMS-90626 through 0.2.5; **0.2.6's mail came back with none of them**, so that fix is verified by the only thing that could verify it. What 0.2.6 (1) does carry is 2 × ITMS-91198 "Disallowed font": `AremacFS-Regular.otf` and `AremacFS-Semibold.otf` in `submodules/TelegramUI/Resources/Fonts/` are Apple's own SF Camera faces under a reversed name, registered in `UIAppFonts` (`Telegram/BUILD:1658`). Upstream's, not ours, and a warning only — the build completed processing and is on TestFlight. No Swift source names either font, so dropping the two plist entries and the two files is the candidate fix, but only a build can show the camera UI keeps its glyphs.
 
 ## Code Style Guidelines
 - **Naming**: PascalCase for types, camelCase for variables/methods
