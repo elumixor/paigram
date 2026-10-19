@@ -271,6 +271,23 @@ public struct PaiUsageWindow: Codable, Identifiable, Equatable {
     public let resetsAt: String?
     public let length: Double
     public var id: String { name }
+
+    /// The daemon passes microseconds ("…:00.351927+00:00"), which ISO8601DateFormatter does not read; they go first.
+    public var resetDate: Date? {
+        guard let raw = resetsAt else { return nil }
+        let trimmed = raw.replacingOccurrences(of: #"\.\d+"#, with: "", options: .regularExpression)
+        return ISO8601DateFormatter().date(from: trimmed)
+    }
+
+    /// Time to the reset, short: "2h14", "45m", "3d".
+    public var resetsIn: String? {
+        guard let date = resetDate else { return nil }
+        let seconds = Int(date.timeIntervalSinceNow)
+        guard seconds > 0 else { return nil }
+        if seconds < 3600 { return "\(max(1, seconds / 60))m" }
+        if seconds < 86_400 { return String(format: "%dh%02d", seconds / 3600, seconds % 3600 / 60) }
+        return "\(seconds / 86_400)d\(seconds % 86_400 / 3600 > 0 ? "\(seconds % 86_400 / 3600)h" : "")"
+    }
 }
 
 public struct PaiUsage: Codable, Equatable {
@@ -278,6 +295,12 @@ public struct PaiUsage: Codable, Equatable {
     public let costUsd: Double?
     public let error: String?
     public let via: String?
+
+    /// The window that runs out first: the session one, unless a weekly one is further along.
+    public var limiting: PaiUsageWindow? {
+        guard let session = windows.first else { return nil }
+        return windows.dropFirst().filter { $0.percent > session.percent }.max { $0.percent < $1.percent } ?? session
+    }
 }
 
 public struct PaiHealth: Decodable {

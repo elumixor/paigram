@@ -257,16 +257,7 @@ struct SettingsRow: View {
 private struct UsageRow: View {
     let window: PaiUsageWindow
 
-    private static let iso: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
-
-    private var resetDate: Date? {
-        guard let raw = window.resetsAt else { return nil }
-        return Self.iso.date(from: raw) ?? ISO8601DateFormatter().date(from: raw)
-    }
+    private var resetDate: Date? { window.resetDate }
 
     private var resets: String? {
         guard let date = resetDate, date.timeIntervalSinceNow > 0 else { return nil }
