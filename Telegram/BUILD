@@ -1653,11 +1653,6 @@ plist_fragment(
         <string>INSendMessageIntent</string>
         <string>RemindAboutChatIntent</string>
     </array>
-    <key>UIAppFonts</key>
-    <array>
-        <string>AremacFS-Regular.otf</string>
-        <string>AremacFS-Semibold.otf</string>
-    </array>
     <key>UIBackgroundModes</key>
     <array>
         <string>audio</string>
