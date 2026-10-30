@@ -23,7 +23,7 @@ jobs:
     runs-on: [self-hosted, paigram-mac]
     timeout-minutes: 180
     steps:
-      - name: Build and upload from ~/dev/paigram
+      - name: Build and upload from ~/dev/@desk/native/paigram-ios
         env:
           GH_TOKEN: ${{ github.token }}
-        run: cd "$HOME/dev/paigram" && bun scripts/mac-release.ts "$GITHUB_REF_NAME"
+        run: cd "$HOME/dev/@desk/native/paigram-ios" && bun scripts/mac-release.ts "$GITHUB_REF_NAME"

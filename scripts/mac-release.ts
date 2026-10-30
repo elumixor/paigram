@@ -2,7 +2,7 @@
  * `bun scripts/mac-release.ts [tag]`: what the TestFlight workflow runs on this Mac (a self-hosted runner,
  * `paigram-mac`), so a tag pushed from anywhere — this Mac, the box, pai's chat — builds here, from the warm
  * Bazel cache, in a third of a GitHub runner's time. The tag starts a GitHub runner too: when this Mac is
- * done first it cancels that one; when this Mac was asleep, it finds the version already uploaded and stops. It builds `~/dev/paigram` in place rather than a second checkout (this disk has no
+ * done first it cancels that one; when this Mac was asleep, it finds the version already uploaded and stops. It builds `~/dev/@desk/native/paigram-ios` in place rather than a second checkout (this disk has no
  * room for one), so it first checks that those files are exactly the tagged commit: the box and this Mac
  * share the tree, so they are whenever the tag was cut from it. Signing and the App Store Connect key are
  * this Mac's own (the login keychain, `.env`).
@@ -17,7 +17,7 @@ if (tag?.startsWith("ios-v")) {
   await git(["fetch", "-q", "origin", "tag", tag]);
   const changed = (await $`git diff --name-only --ignore-submodules=all ${tag} --`.cwd(root).nothrow().quiet().text()).trim();
   if (changed) {
-    throw new Error(`~/dev/paigram is not ${tag} — these files differ:\n${changed.split("\n").slice(0, 20).join("\n")}\nSync or commit first, then run the workflow again.`);
+    throw new Error(`~/dev/@desk/native/paigram-ios is not ${tag} — these files differ:\n${changed.split("\n").slice(0, 20).join("\n")}\nSync or commit first, then run the workflow again.`);
   }
   const { app } = await readVersions();
   if (`ios-v${app}` !== tag) throw new Error(`versions.json says ${app}, the tag is ${tag}`);
