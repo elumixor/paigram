@@ -485,6 +485,25 @@ public struct PresentationResourcesChatList {
         })
     }
     
+    /// An envelope before an email chat's title, where a secret chat has its lock.
+    public static func emailIcon(_ theme: PresentationTheme) -> UIImage? {
+        return theme.image(PresentationResourceKey.chatListEmailIcon.rawValue, { theme in
+            return generateImage(CGSize(width: 13.0, height: 10.0), rotatedContext: { size, context in
+                context.clear(CGRect(origin: CGPoint(), size: size))
+                context.setStrokeColor(theme.list.itemAccentColor.cgColor)
+                context.setLineWidth(1.32)
+                context.setLineJoin(.round)
+                let body = CGRect(origin: CGPoint(), size: size).insetBy(dx: 0.66, dy: 0.66)
+                context.addPath(UIBezierPath(roundedRect: body, cornerRadius: 1.5).cgPath)
+                context.strokePath()
+                context.move(to: CGPoint(x: body.minX + 0.5, y: body.minY + 0.5))
+                context.addLine(to: CGPoint(x: size.width / 2.0, y: size.height * 0.58))
+                context.addLine(to: CGPoint(x: body.maxX - 0.5, y: body.minY + 0.5))
+                context.strokePath()
+            })
+        })
+    }
+    
     public static func secretIcon(_ theme: PresentationTheme) -> UIImage? {
         return theme.image(PresentationResourceKey.chatListSecretIcon.rawValue, { theme in
             return generateImage(CGSize(width: 9.0, height: 12.0), rotatedContext: { size, context in

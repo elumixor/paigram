@@ -220,6 +220,9 @@ func settingsItems(data: PeerInfoScreenData?, context: AccountContext, presentat
     items[.shortcuts]!.append(PeerInfoScreenDisclosureItem(id: 4, text: presentationData.strings.Settings_ChatFolders, icon: PresentationResourcesSettings.chatFolders, action: {
         interaction.openSettings(.chatFolders)
     }))
+    items[.shortcuts]!.append(PeerInfoScreenDisclosureItem(id: 5, text: "Email", icon: PresentationResourcesSettings.email, action: {
+        interaction.openSettings(.email)
+    }))
     
     let notificationsWarning: Bool
     if let settings = data.globalSettings {

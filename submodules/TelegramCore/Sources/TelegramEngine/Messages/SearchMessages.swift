@@ -305,6 +305,41 @@ func _internal_getSearchMessageCount(account: Account, location: SearchMessagesL
     }
 }
 
+private func isChannelsScope(_ scope: TelegramSearchPeersScope) -> Bool {
+    if case .channels = scope {
+        return true
+    }
+    return false
+}
+
+/// What this device can find without Telegram's server: secret chats and email chats, by their text index.
+private func localSearchState(transaction: Transaction, query: String, tags: MessageTags?, minDate: Int32?, maxDate: Int32?) -> SearchMessagesPeerState {
+    var filteredMessages: [Message] = []
+    var readStates: [PeerId: CombinedPeerReadState] = [:]
+    var threadInfo: [MessageId: MessageHistoryThreadData] = [:]
+    for message in transaction.searchMessages(peerId: nil, query: query, tags: tags) {
+        if let minDate = minDate, message.timestamp < minDate {
+            continue
+        }
+        if let maxDate = maxDate, message.timestamp > maxDate {
+            continue
+        }
+        filteredMessages.append(message)
+        if let readState = transaction.getCombinedPeerReadState(message.id.peerId) {
+            readStates[message.id.peerId] = readState
+        }
+        for attribute in message.attributes {
+            if let attribute = attribute as? ReplyMessageAttribute, let threadMessageId = attribute.threadMessageId {
+                if let data = transaction.getMessageHistoryThreadInfo(peerId: message.id.peerId, threadId: Int64(threadMessageId.id))?.data.get(MessageHistoryThreadData.self) {
+                    threadInfo[message.id] = data
+                    break
+                }
+            }
+        }
+    }
+    return SearchMessagesPeerState(messages: filteredMessages, readStates: readStates, threadInfo: threadInfo, totalCount: Int32(filteredMessages.count), completed: true, nextRate: nil)
+}
+
 func _internal_searchMessages(account: Account, location: SearchMessagesLocation, query: String, state: SearchMessagesState?, centerId: MessageId?, limit: Int32 = 100) -> Signal<(SearchMessagesResult, SearchMessagesState), NoError> {
     if case let .peer(peerId, fromId, tags, reactions, threadId, minDate, maxDate) = location, fromId == nil, tags == nil, peerId == account.peerId, let reactions, let reaction = reactions.first, (minDate == nil || minDate == 0), (maxDate == nil || maxDate == 0) {
         return account.postbox.transaction { transaction -> (SearchMessagesResult, SearchMessagesState) in
@@ -336,8 +371,8 @@ func _internal_searchMessages(account: Account, location: SearchMessagesLocation
     let remoteSearchResult: Signal<(Api.messages.Messages?, Api.messages.Messages?), NoError>
     switch location {
         case let .peer(peerId, fromId, tags, reactions, threadId, minDate, maxDate):
-            if peerId.namespace == Namespaces.Peer.SecretChat {
-                return account.postbox.transaction { transaction -> (SearchMessagesResult, SearchMessagesState) in
+            if peerId.namespace == Namespaces.Peer.SecretChat || peerId.isEmail {
+                let local = account.postbox.transaction { transaction -> (SearchMessagesResult, SearchMessagesState) in
                     var readStates: [PeerId: CombinedPeerReadState] = [:]
                     var threadInfo: [MessageId: MessageHistoryThreadData] = [:]
                     if let readState = transaction.getCombinedPeerReadState(peerId) {
@@ -361,6 +396,11 @@ func _internal_searchMessages(account: Account, location: SearchMessagesLocation
                     
                     return (SearchMessagesResult(messages: result, readStates: readStates, threadInfo: threadInfo, totalCount: Int32(result.count), completed: true), SearchMessagesState(main: SearchMessagesPeerState(messages: [], readStates: [:], threadInfo: [:], totalCount: 0, completed: true, nextRate: nil), additional: nil))
                 }
+                // An email chat also asks Gmail, then searches again with what that stored.
+                if peerId.isEmail {
+                    return local |> then(emailBoxSearch(postbox: account.postbox, accountPeerId: account.peerId, query: query, peerId: peerId) |> mapToSignal { _ in local })
+                }
+                return local
             }
             
             let filter: Api.MessagesFilter = tags.flatMap { messageFilterForTagMask($0) } ?? .inputMessagesFilterEmpty
@@ -568,53 +608,19 @@ func _internal_searchMessages(account: Account, location: SearchMessagesLocation
             remoteSearchResult = combineLatest(peerMessages, .single(nil))
     }
     
-    return remoteSearchResult
+    let searchResult = remoteSearchResult
     |> mapToSignal { result, additionalResult -> Signal<(SearchMessagesResult, SearchMessagesState), NoError> in
         return account.postbox.transaction { transaction -> (SearchMessagesResult, SearchMessagesState) in
             var additional: SearchMessagesPeerState? = mergedState(transaction: transaction, seedConfiguration: account.postbox.seedConfiguration, accountPeerId: account.peerId, state: state?.additional, result: additionalResult)
             
             if state?.additional == nil {
                 switch location {
-                    case let .general(_, _, tags, minDate, maxDate, _, communityId):
-                        let secretMessages: [Message]
-                        if let _ = communityId {
-                            secretMessages = []
-                        } else if case let .general(scope, _, _, _, _, _, _) = location, case .channels = scope {
-                            secretMessages = []
+                    case let .general(scope, _, tags, minDate, maxDate, _, communityId):
+                        if communityId == nil, !isChannelsScope(scope) {
+                            additional = localSearchState(transaction: transaction, query: query, tags: tags, minDate: minDate, maxDate: maxDate)
                         } else {
-                            secretMessages = transaction.searchMessages(peerId: nil, query: query, tags: tags)
+                            additional = SearchMessagesPeerState(messages: [], readStates: [:], threadInfo: [:], totalCount: 0, completed: true, nextRate: nil)
                         }
-                        
-                        var filteredMessages: [Message] = []
-                        var readStates: [PeerId: CombinedPeerReadState] = [:]
-                        var threadInfo: [MessageId: MessageHistoryThreadData] = [:]
-                        for message in secretMessages {
-                            var match = true
-                            if let minDate = minDate, message.timestamp < minDate {
-                                match = false
-                            }
-                            if let maxDate = maxDate, message.timestamp > maxDate {
-                                match = false
-                            }
-                            if match {
-                                filteredMessages.append(message)
-                                if let readState = transaction.getCombinedPeerReadState(message.id.peerId) {
-                                    readStates[message.id.peerId] = readState
-                                }
-                                for attribute in message.attributes {
-                                    if let attribute = attribute as? ReplyMessageAttribute {
-                                        if let threadMessageId = attribute.threadMessageId {
-                                            let threadId = Int64(threadMessageId.id)
-                                            if let data = transaction.getMessageHistoryThreadInfo(peerId: message.id.peerId, threadId: threadId)?.data.get(MessageHistoryThreadData.self) {
-                                                threadInfo[message.id] = data
-                                                break
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        additional = SearchMessagesPeerState(messages: filteredMessages, readStates: readStates, threadInfo: threadInfo, totalCount: Int32(filteredMessages.count), completed: true, nextRate: nil)
                     default:
                         break
                 }
@@ -646,6 +652,21 @@ func _internal_searchMessages(account: Account, location: SearchMessagesLocation
             let updatedState = SearchMessagesState(main: mergedState(transaction: transaction, seedConfiguration: account.postbox.seedConfiguration, accountPeerId: account.peerId, state: state?.main, result: result) ?? SearchMessagesPeerState(messages: [], readStates: [:], threadInfo: [:], totalCount: 0, completed: true, nextRate: nil), additional: additional)
             return (mergedResult(updatedState), updatedState)
         }
+    }
+    // The first page of a search everywhere also asks Gmail: Telegram's results come first, mail found on the box after.
+    guard state == nil, case let .general(scope, _, tags, minDate, maxDate, _, communityId) = location, communityId == nil, !isChannelsScope(scope) else {
+        return searchResult
+    }
+    return searchResult
+    |> mapToSignal { first -> Signal<(SearchMessagesResult, SearchMessagesState), NoError> in
+        let withMail = emailBoxSearch(postbox: account.postbox, accountPeerId: account.peerId, query: query, peerId: nil)
+        |> mapToSignal { _ -> Signal<(SearchMessagesResult, SearchMessagesState), NoError> in
+            return account.postbox.transaction { transaction -> (SearchMessagesResult, SearchMessagesState) in
+                let updated = SearchMessagesState(main: first.1.main, additional: localSearchState(transaction: transaction, query: query, tags: tags, minDate: minDate, maxDate: maxDate))
+                return (mergedResult(updated), updated)
+            }
+        }
+        return .single(first) |> then(withMail)
     }
 }
 

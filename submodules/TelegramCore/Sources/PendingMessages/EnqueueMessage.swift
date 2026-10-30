@@ -570,6 +570,17 @@ private func opportunisticallyTransformOutgoingMedia(network: Network, postbox: 
 }
 
 public func enqueueMessages(account: Account, peerId: PeerId, messages: [EnqueueMessage]) -> Signal<[MessageId?], NoError> {
+    if peerId.isEmail {
+        return account.postbox.transaction { transaction -> [MessageId] in
+            return enqueueEmailMessages(transaction: transaction, accountPeerId: account.peerId, peerId: peerId, messages: messages)
+        }
+        |> map { ids -> [MessageId?] in
+            for id in ids {
+                let _ = sendEmailMessage(postbox: account.postbox, accountPeerId: account.peerId, messageId: id).startStandalone()
+            }
+            return ids
+        }
+    }
     let signal: Signal<[(Bool, EnqueueMessage)], NoError>
     if let transformOutgoingMessageMedia = account.transformOutgoingMessageMedia {
         signal = opportunisticallyTransformOutgoingMedia(network: account.network, postbox: account.postbox, transformOutgoingMessageMedia: transformOutgoingMessageMedia, messages: messages, userInteractive: true)
@@ -616,6 +627,12 @@ public func enqueueMessages(account: Account, peerId: PeerId, messages: [Enqueue
 }
 
 public func resendMessages(account: Account, messageIds: [MessageId]) -> Signal<Void, NoError> {
+    let emailIds = messageIds.filter { $0.peerId.isEmail }
+    if !emailIds.isEmpty {
+        let others = messageIds.filter { !$0.peerId.isEmail }
+        let email = resendEmailMessages(postbox: account.postbox, accountPeerId: account.peerId, messageIds: emailIds)
+        return others.isEmpty ? email : combineLatest(email, resendMessages(account: account, messageIds: others)) |> map { _ in Void() }
+    }
     return account.postbox.transaction { transaction -> Void in
         var removeMessageIds: [MessageId] = []
         for (peerId, ids) in messagesIdsGroupedByPeerId(messageIds) {

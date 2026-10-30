@@ -68,6 +68,7 @@ final class AccountTaskManager {
                 
                 if self.isMainApp {
                     tasks.add(managedSynchronizePeerReadStates(network: self.stateManager.network, postbox: self.stateManager.postbox, stateManager: self.stateManager).start())
+                    tasks.add(managedEmailSync(postbox: self.stateManager.postbox, accountPeerId: self.stateManager.accountPeerId).start())
                     tasks.add(managedSynchronizeGroupMessageStats(network: self.stateManager.network, postbox: self.stateManager.postbox, stateManager: self.stateManager).start())
                     
                     tasks.add(managedGlobalNotificationSettings(postbox: self.stateManager.postbox, network: self.stateManager.network).start())

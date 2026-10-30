@@ -44,6 +44,10 @@ public final class TelegramEngine {
     public lazy var messages: Messages = {
         return Messages(account: self.account)
     }()
+    
+    public lazy var email: Email = {
+        return Email(account: self.account)
+    }()
 
     public lazy var privacy: Privacy = {
         return Privacy(account: self.account)

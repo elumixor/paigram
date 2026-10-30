@@ -2582,6 +2582,14 @@ func peerInfoHeaderButtons(peer: EnginePeer?, cachedData: CachedPeerData?, isOpe
         }
         var callsAvailable = false
         var videoCallsAvailable = false
+        // An email correspondent is not a Telegram user: nothing to call, block or share.
+        if user.id.isEmail {
+            result.append(.mute)
+            if isOpenedFromChat {
+                result.append(.search)
+            }
+            return result
+        }
         if !user.isDeleted, user.botInfo == nil, !user.flags.contains(.isSupport) {
             if let cachedUserData = cachedData as? CachedUserData {
                 callsAvailable = cachedUserData.voiceCallsAvailable

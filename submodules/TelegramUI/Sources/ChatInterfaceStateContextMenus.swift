@@ -54,6 +54,10 @@ func canEditMessage(context: AccountContext, limitsConfiguration: EngineConfigur
 }
 
 private func canEditMessage(accountPeerId: EnginePeer.Id, limitsConfiguration: EngineConfiguration.Limits, message: EngineRawMessage, reschedule: Bool = false) -> Bool {
+    // A sent email cannot be changed.
+    if message.id.peerId.isEmail {
+        return false
+    }
     var hasEditRights = false
     var unlimitedInterval = reschedule
     

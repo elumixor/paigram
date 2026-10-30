@@ -3522,13 +3522,15 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
     
             var isSubscription = false
             var isSecret = false
-            if !isPeerGroup {
-                if case let .chatList(index) = item.index, index.messageIndex.id.peerId.namespace == Namespaces.Peer.SecretChat {
-                    isSecret = true
-                }
+            var isEmail = false
+            if !isPeerGroup, case let .chatList(index) = item.index {
+                isSecret = index.messageIndex.id.peerId.namespace == Namespaces.Peer.SecretChat
+                isEmail = index.messageIndex.id.peerId.isEmail
             }
             if isSecret {
                 currentSecretIconImage = PresentationResourcesChatList.secretIcon(item.presentationData.theme)
+            } else if isEmail {
+                currentSecretIconImage = PresentationResourcesChatList.emailIcon(item.presentationData.theme)
             }
             
             let premiumConfiguration = PremiumConfiguration.with(appConfiguration: item.context.currentAppConfiguration.with { $0 })

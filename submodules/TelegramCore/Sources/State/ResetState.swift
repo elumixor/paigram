@@ -20,7 +20,7 @@ func _internal_resetAccountState(postbox: Postbox, network: Network, accountPeer
                         transaction.updatePeerChatListInclusion(peerId, inclusion: .notIncluded)
                     }
                     
-                    if peerId.namespace != Namespaces.Peer.SecretChat {
+                    if peerId.namespace != Namespaces.Peer.SecretChat && !peerId.isEmail {
                         transaction.addHole(peerId: peerId, threadId: nil, namespace: Namespaces.Message.Cloud, space: .everywhere, range: 1 ... (Int32.max - 1))
                     }
                     
@@ -39,6 +39,13 @@ func _internal_resetAccountState(postbox: Postbox, network: Network, accountPeer
                 
                 transaction.removeAllChatListEntries(groupId: .root, exceptPeerNamespace: Namespaces.Peer.SecretChat)
                 transaction.removeAllChatListEntries(groupId: .group(1), exceptPeerNamespace: Namespaces.Peer.SecretChat)
+                // Email chats left the list with Telegram's: the box's contact list puts them back.
+                updateEmailState(transaction: transaction, { state in
+                    var state = state
+                    state.seq = 0
+                    return state
+                })
+                requestEmailSync()
                 
                 updatePeers(transaction: transaction, accountPeerId: accountPeerId, peers: fetchedChats.peers.union(with: additionalPeers))
                 _internal_applyFetchedChatInputStates(transaction: transaction, accountPeerId: accountPeerId, inputStates: fetchedChats.inputStates)

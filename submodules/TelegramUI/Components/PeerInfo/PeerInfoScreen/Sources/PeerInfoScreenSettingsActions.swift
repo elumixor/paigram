@@ -15,6 +15,7 @@ import TelegramPresentationData
 import PresentationDataUtils
 import PasswordSetupUI
 import InstantPageCache
+import PaiUI
 
 extension PeerInfoScreenNode {
     func openSettings(section: PeerInfoSettingsSection) {
@@ -76,6 +77,19 @@ extension PeerInfoScreenNode {
             })
         case .recentCalls:
             push(CallListController(context: context, mode: .navigation))
+        case .email:
+            push(EmailSettingsController(context: self.context, openChat: { [weak self] peerId in
+                guard let self else {
+                    return
+                }
+                let _ = (self.context.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: peerId))
+                |> deliverOnMainQueue).startStandalone(next: { [weak self] peer in
+                    guard let self, let peer, let navigationController = self.controller?.navigationController as? NavigationController else {
+                        return
+                    }
+                    self.context.sharedContext.navigateToChatController(NavigateToChatControllerParams(navigationController: navigationController, context: self.context, chatLocation: .peer(peer)))
+                })
+            }))
         case .devices:
             let _ = (self.activeSessionsContextAndCount.get()
             |> take(1)

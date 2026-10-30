@@ -33,6 +33,7 @@ func _internal_deleteMessagesInteractively(account: Account, messageIds: [Messag
             }
         }
 
+        startTrashingEmails(transaction: transaction, messageIds: messageIds)
         deleteMessagesInteractively(transaction: transaction, stateManager: account.stateManager, postbox: account.postbox, messageIds: messageIds, type: type, removeIfPossiblyDelivered: true)
         return ephemeralRequests
     }

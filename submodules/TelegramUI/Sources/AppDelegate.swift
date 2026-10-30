@@ -1205,6 +1205,20 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
             
             return .single(sharedApplicationContext)
         })
+        
+        // Paigram: email chats sync through the pai box, for whichever account is in front.
+        EmailChats.configure()
+        let _ = (self.sharedContextPromise.get()
+        |> mapToSignal { sharedApplicationContext -> Signal<AccountContext?, NoError> in
+            return sharedApplicationContext.sharedContext.activeAccountContexts
+            |> map { primary, _, _ -> AccountContext? in
+                return primary
+            }
+        }
+        |> distinctUntilChanged(isEqual: { $0?.account.id == $1?.account.id })
+        |> deliverOnMainQueue).start(next: { context in
+            EmailChats.attach(engine: context?.engine)
+        })
             
         self.context.set(self.sharedContextPromise.get()
         |> deliverOnMainQueue
@@ -2039,6 +2053,7 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         Logger.shared.log("App \(self.episodeId)", "register for notifications: didRegisterForRemoteNotificationsWithDeviceToken (deviceToken: \(hexString(deviceToken)))")
         self.notificationTokenPromise.set(.single(deviceToken))
+        EmailChats.register(pushToken: deviceToken)
     }
     
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
@@ -3034,6 +3049,12 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
     
     @available(iOS 10.0, *)
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        // New mail while the app is open shows up in its chat, not as a banner.
+        if EmailChats.isEmailPush(notification.request.content.userInfo) {
+            EmailChats.syncNow()
+            completionHandler([])
+            return
+        }
         let _ = (accountIdFromNotification(notification, sharedContext: self.sharedContextPromise.get())
         |> deliverOnMainQueue).start(next: { accountId in
             if let context = self.contextValue {

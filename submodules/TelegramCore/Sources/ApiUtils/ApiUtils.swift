@@ -50,6 +50,10 @@ extension PeerReference {
 }
 
 func forceApiInputPeer(_ peer: Peer) -> Api.InputPeer? {
+    // An email chat's peer is not Telegram's: nothing about it may reach Telegram's servers.
+    if peer.id.isEmail {
+        return nil
+    }
     switch peer {
     case let user as TelegramUser:
         return Api.InputPeer.inputPeerUser(.init(userId: user.id.id._internalGetInt64Value(), accessHash: user.accessHash?.value ?? 0))

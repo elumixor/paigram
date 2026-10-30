@@ -90,6 +90,9 @@ func managedPendingPeerNotificationSettings(postbox: Postbox, network: Network) 
 }
 
 func pushPeerNotificationSettings(postbox: Postbox, network: Network, peerId: PeerId, threadId: Int64?, settings: PeerNotificationSettings) -> Signal<Void, NoError> {
+    if peerId.isEmail {
+        return pushEmailNotificationSettings(postbox: postbox, peerId: peerId, settings: settings)
+    }
     return postbox.transaction { transaction -> Signal<Void, NoError> in
         if let peer = transaction.getPeer(peerId), let inputPeer = apiInputPeer(peer) {
             var notificationPeerId = peerId
