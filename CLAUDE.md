@@ -55,6 +55,8 @@ The sim ignores code signing, so the unsigned `Telegram_archive-root` bundle run
 
 ## TestFlight
 
+To get a change onto the phone, use `bun run sim` first, then `bun run device`, which installs an Ad Hoc–signed release build over USB or Wi-Fi (see PAIGRAM.md). Push a TestFlight tag only for a release.
+
 The app's display name is `Paigram`, hardcoded in `Telegram/BUILD`: `TelegramInfoPlist` for the app (`CFBundleDisplayName`/`CFBundleName`), the shared `AppNameInfoPlist` fragment for every extension, `display_name` on `TelegramWatchApp` for the watch app. Anything a user says to Siri or reads as the app's name has to match it, not upstream's "Telegram".
 
 Apple's "one or more issues" mail is warnings, not a rejection. `a9925897b9` added the Siri example phrases that caused 73 × ITMS-90626 through 0.2.5; 0.2.6's mail came back with none of them. 0.2.6 and 0.3.0 still carried 2 × ITMS-91198 "Disallowed font": upstream's `AremacFS-*.otf` (Apple's SF Camera under a reversed name, used only by `Font.Design.camera`, which falls back to the system font). Both files and their `UIAppFonts` entries are gone after 0.3.0; the next build's mail shows whether that cleared it.

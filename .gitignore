@@ -91,5 +91,6 @@ build-system/paigram-sim.json
 node_modules
 .env
 build-system/paigram-codesigning
+build-system/paigram-codesigning-adhoc
 bazel-paigram*
 submodules/PaiUI/Sources/PaiSecrets.swift

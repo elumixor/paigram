@@ -8,14 +8,14 @@
 import { $ } from "bun";
 import { asc, ascGet } from "./asc.ts";
 import { provision } from "./provision.ts";
-import { writeSecrets } from "./secrets.ts";
+import { releaseBuild } from "./release-build.ts";
 import { bumpVersion, codesigningPath as codesigning, configPath as config, readVersions, root } from "./repo.ts";
 
 const skipBuild = process.argv.includes("--no-build");
 const skipUpload = process.argv.includes("--no-upload");
 const skipBump = skipBuild || process.argv.includes("--no-bump");
 
-const { bundle_id: bundleId, api_id: apiId, api_hash: apiHash } = (await Bun.file(config).json()) as { bundle_id: string; api_id: string; api_hash: string };
+const { bundle_id: bundleId } = (await Bun.file(config).json()) as { bundle_id: string };
 
 /** Build numbers only have to go up within a version: one past the highest App Store Connect has for it, so a new version starts at 1. */
 async function buildNumber(version: string): Promise<number> {
@@ -23,11 +23,6 @@ async function buildNumber(version: string): Promise<number> {
   if (!app) throw new Error(`no App Store Connect app for ${bundleId}; create it once at appstoreconnect.apple.com`);
   const builds = (await ascGet(`/builds?filter[app]=${app.id}&filter[preReleaseVersion.version]=${version}&limit=50`)).data;
   return Math.max(0, ...builds.map((b: any) => Number(b.attributes.version) || 0)) + 1;
-}
-
-async function build(number: number) {
-  await writeSecrets();
-  await $`python3 build-system/Make/Make.py --overrideXcodeVersion --cacheDir=${process.env.HOME}/telegram-bazel-cache build --configurationPath=${config} --codesigningInformationPath=${codesigning} --buildNumber=${number} --configuration=release_arm64 --embedWatchApp --watchApiId=${apiId} --watchApiHash=${apiHash}`.cwd(root);
 }
 
 async function upload() {
@@ -59,7 +54,7 @@ if (process.argv.includes("--once") && (await buildNumber(version)) > 1) {
 const number = skipBuild ? Number(await $`unzip -p ${root}bazel-bin/Telegram/Telegram.ipa Payload/Telegram.app/Info.plist | plutil -extract CFBundleVersion raw -o - -`.text()) : await buildNumber(version);
 if (!skipBuild) {
   await provision();
-  await build(number);
+  await releaseBuild(codesigning, number, true);
 }
 if (!skipUpload) {
   await upload();

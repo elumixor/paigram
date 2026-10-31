@@ -5,6 +5,7 @@
   "scripts": {
     "sim": "bun scripts/sim.ts",
     "testflight": "bun scripts/testflight.ts",
+    "device": "bun scripts/device.ts",
     "tag": "bun scripts/tag.ts",
     "ci-secrets": "bun scripts/ci-secrets.ts",
     "watch-icon": "bun scripts/watch-icon.ts",

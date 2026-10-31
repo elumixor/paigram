@@ -22,6 +22,7 @@ Bazel builds, driven by Telegram's `build-system/Make/Make.py`. First time: `bun
 
 ```sh
 bun run sim [--no-build]          # simulator build, installed and launched on the newest iPhone simulator
+bun run device [--no-build] [--device <name>]   # the release build signed Ad Hoc, installed and launched on a paired iPhone over USB or Wi-Fi
 bun run ci-secrets                # once, on the Mac: fill the GitHub secrets CI needs from the box and the keychain
 bun run tag [--minor]             # bump the version, tag it `ios-vX.Y.Z` and push: this Mac (self-hosted runner) builds and uploads to TestFlight
 bun run testflight [--no-build] [--no-bump] [--minor]   # the same release from a Mac, locally: version bump, App Store profile via the API, release build, upload, wait
@@ -29,6 +30,8 @@ bun run typecheck                 # the scripts
 ```
 
 TestFlight needs `.env` with `ASC_KEY_ID`, `ASC_ISSUER_ID`, `TEAM_ID` and the key at `~/.appstoreconnect/private_keys/`. The TestFlight build ships everything the official app does: the share, notification service and content, Siri intents, widget and broadcast upload extensions, and the watch app (`Telegram/WatchApp`, built by xcodebuild and embedded with `--embedWatchApp`). `scripts/provision.ts` registers the bundle id of each with its capabilities and writes a fresh App Store profile for every one. The App Store Connect app record and the app group `group.com.elumixor.paigram` have to be created by hand in the portal, and the group attached to each extension's bundle id there, which the API does not allow; provisioning checks the profiles and says which ids still lack it. The same goes for Communication Notifications on the app's own id, which lets a notification carry the sender's photo with the app icon in its corner: tick it on the id in the portal, and provisioning refuses to go on while the profile lacks it. Simulator builds leave the extensions out unless `bun run sim --extensions`.
+
+Day to day the app goes on the phone with `bun run device`, not TestFlight: the same release build with the extensions (the watch app left out), signed with the Distribution certificate under Ad Hoc profiles, so push stays on production APNs, then `devicectl` installs it over the TestFlight copy and keeps its data. No upload, no processing wait, no version bump. The iPhone has to be paired with the Mac once (cable, Trust, Developer Mode; Xcode › Devices › Connect via network for Wi-Fi). A new iPhone is registered on the account and the Ad Hoc profiles (`build-system/paigram-codesigning-adhoc/`) are made again to include it. TestFlight is for releases.
 
 The icon is `Telegram/Telegram-iOS/Telegram.icon` (Icon Composer: a chat bubble in the shape of a p with a sparkle in its bowl, on a violet to blue gradient). The watch app takes a flat PNG instead, `Telegram/Telegram-iOS/WatchAppIcon.png`, which replaces the snapshot's Telegram icon at build time; after changing the icon, `bun run watch-icon` renders it again from the `.icon` (needs ImageMagick).
 
