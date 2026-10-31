@@ -24,6 +24,8 @@ interface Device {
 /** TestFlight's first build of a version has number 1 too, so the two builds share Bazel's cache. */
 const buildNumber = 1;
 const day = 86_400_000;
+const connectAttempts = 4;
+const connectRetryMs = 3_000;
 
 const skipBuild = process.argv.includes("--no-build");
 const deviceArgument = process.argv.indexOf("--device");
@@ -62,6 +64,15 @@ async function covers(profilePath: string, device: Device): Promise<boolean> {
   return Boolean(profile.ProvisionedDevices?.includes(device.udid)) && new Date(profile.ExpirationDate).getTime() > Date.now() + day;
 }
 
+/** A Wi-Fi connection that sat idle is often reset on the first try: the tunnel is opened, retrying, before installing. */
+async function connect(device: Device): Promise<boolean> {
+  for (let attempt = 0; attempt < connectAttempts; attempt++) {
+    if ((await $`xcrun devicectl device info details --device ${device.udid}`.nothrow().quiet()).exitCode === 0) return true;
+    await Bun.sleep(connectRetryMs);
+  }
+  return false;
+}
+
 async function install(device: Device) {
   const dir = mkdtempSync(`${tmpdir()}/paigram-device-`);
   await $`unzip -q ${root}bazel-bin/Telegram/Telegram.ipa -d ${dir}`;
@@ -69,8 +80,9 @@ async function install(device: Device) {
   if (!(await covers(`${app}/embedded.mobileprovision`, device))) {
     throw new DeviceError(`the last build is not signed for ${device.name} (a TestFlight build, or before it was registered): run without --no-build`);
   }
+  if (!(await connect(device))) throw new DeviceError(`${device.name} is not reachable: plug it in, or unlock it on this Mac's Wi-Fi, then run with --no-build`);
   const installed = await $`xcrun devicectl device install app --device ${device.udid} ${app}`.nothrow();
-  if (installed.exitCode !== 0) throw new DeviceError(`install on ${device.name} failed: plug it in, or unlock it on this Mac's Wi-Fi, then run with --no-build`);
+  if (installed.exitCode !== 0) throw new DeviceError(`install on ${device.name} failed`);
   const launched = await $`xcrun devicectl device process launch --device ${device.udid} --terminate-existing ${bundleId}`.nothrow().quiet();
   console.log(launched.exitCode === 0 ? `Paigram running on ${device.name}` : `Paigram installed on ${device.name}; it is locked, so open it there`);
 }
