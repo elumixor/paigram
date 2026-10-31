@@ -1,9 +1,10 @@
 /**
  * `bun run device [--no-build] [--device <name|udid>]`: the release build TestFlight ships, signed Ad Hoc
  * instead, installed straight on an iPhone over USB or Wi-Fi and launched. No upload, no processing,
- * no version bump. The iPhone has to be paired with this Mac once (cable, "Trust", Developer Mode on;
- * Xcode › Devices › "Connect via network" for Wi-Fi). The first time it is used it is registered on the
- * account and the Ad Hoc profiles are made again to include it.
+ * no version bump. The iPhone has to be paired with this Mac once by cable (`xcrun devicectl manage pair`,
+ * Developer Mode on; `pymobiledevice3 lockdown set True com.apple.mobile.wireless_lockdown EnableWifiDebugging`
+ * for Wi-Fi). The first time it is used it is registered on the account and the Ad Hoc profiles are made
+ * again to include it.
  */
 import { $ } from "bun";
 import { mkdtempSync } from "node:fs";
