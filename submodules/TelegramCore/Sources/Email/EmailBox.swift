@@ -145,6 +145,14 @@ public struct EmailAttachmentData: Codable, Equatable {
     public let size: Int64
 }
 
+/// A span of a message's text the box styled: `bold`, `italic`, or a `link` to `url`, in UTF-16 units.
+public struct EmailTextEntityData: Codable, Equatable {
+    public let type: String
+    public let offset: Int
+    public let length: Int
+    public let url: String?
+}
+
 public struct EmailMessageData: Codable, Equatable {
     public let account: String
     public let id: String
@@ -160,6 +168,7 @@ public struct EmailMessageData: Codable, Equatable {
     public let outgoing: Bool
     /// The message's own words; absent in a summary (the contact list's latest message).
     public let text: String?
+    public let entities: [EmailTextEntityData]?
     public let attachments: [EmailAttachmentData]?
 }
 

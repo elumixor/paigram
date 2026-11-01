@@ -13,10 +13,23 @@ func requestEmailSync() {
     syncRequests.putNext(Void())
 }
 
+/// Every email chat emptied down to a hole, so its mail is fetched again, drawn the box's current way, as it is scrolled.
+private func refillEmailChats(transaction: Transaction, contactIds: Set<Int64>) {
+    for id in contactIds {
+        let peerId = emailPeerId(contactId: id)
+        transaction.clearHistory(peerId, threadId: nil, minTimestamp: nil, maxTimestamp: nil, namespaces: .just([Namespaces.Message.Email]), forEachMedia: nil)
+        transaction.addHole(peerId: peerId, threadId: nil, namespace: Namespaces.Message.Email, space: .everywhere, range: 1 ... Int32.max - 1)
+    }
+}
+
 private func applyContacts(postbox: Postbox, accountPeerId: PeerId, response: EmailContactsResponse) -> Signal<Void, NoError> {
     return postbox.transaction { transaction -> Void in
-        let previous = Set(currentEmailState(transaction: transaction).contacts.map(\.id))
+        let state = currentEmailState(transaction: transaction)
+        let previous = Set(state.contacts.map(\.id))
         let current = Set(response.contacts.map(\.id))
+        if state.textVersion < EmailState.currentTextVersion {
+            refillEmailChats(transaction: transaction, contactIds: previous.union(current))
+        }
         for contact in response.contacts {
             let peerId = storeEmailContactPeer(transaction: transaction, contact: contact)
             if let last = contact.last {
@@ -36,6 +49,7 @@ private func applyContacts(postbox: Postbox, accountPeerId: PeerId, response: Em
             var state = state
             state.seq = response.seq
             state.accounts = response.accounts
+            state.textVersion = EmailState.currentTextVersion
             return state
         })
     }
@@ -77,14 +91,16 @@ private func syncContacts(postbox: Postbox, accountPeerId: PeerId) -> Signal<Voi
     }
 }
 
-/// Reads the change log from where this device stopped, page after page; a reset starts from the contact list.
+/// Reads the change log from where this device stopped, page after page; a reset, or mail stored before the box
+/// drew text its current way, starts from the contact list.
 private func syncChanges(postbox: Postbox, accountPeerId: PeerId) -> Signal<Void, EmailBoxError> {
-    return postbox.transaction { transaction -> Int64 in
-        return currentEmailState(transaction: transaction).seq
+    return postbox.transaction { transaction -> EmailState in
+        return currentEmailState(transaction: transaction)
     }
     |> castError(EmailBoxError.self)
-    |> mapToSignal { seq -> Signal<Void, EmailBoxError> in
-        if seq == 0 {
+    |> mapToSignal { state -> Signal<Void, EmailBoxError> in
+        let seq = state.seq
+        if seq == 0 || state.textVersion < EmailState.currentTextVersion {
             return syncContacts(postbox: postbox, accountPeerId: accountPeerId)
         }
         return (EmailClient.get("/gmail/changes", query: ["since": "\(seq)"]) as Signal<EmailChangesResponse, EmailBoxError>)

@@ -24,18 +24,60 @@ private func links(in text: String) -> [MessageTextEntity] {
     }
 }
 
+private func isLink(_ entity: MessageTextEntity) -> Bool {
+    switch entity.type {
+    case .Url, .TextUrl, .Email:
+        return true
+    default:
+        return false
+    }
+}
+
+/// A span the box drew; a link whose words are its own address stays a plain link, so tapping it asks nothing.
+private func textEntity(_ entity: EmailTextEntityData, in text: NSString) -> MessageTextEntity? {
+    let range = entity.offset ..< entity.offset + entity.length
+    guard entity.offset >= 0, entity.length > 0, range.upperBound <= text.length else {
+        return nil
+    }
+    switch entity.type {
+    case "bold":
+        return MessageTextEntity(range: range, type: .Bold)
+    case "italic":
+        return MessageTextEntity(range: range, type: .Italic)
+    case "link":
+        guard let url = entity.url else {
+            return nil
+        }
+        let shown = text.substring(with: NSRange(location: entity.offset, length: entity.length))
+        let type: MessageTextEntityType = url == shown ? .Url : url == "mailto:\(shown)" ? .Email : .TextUrl(url: url)
+        return MessageTextEntity(range: range, type: type)
+    default:
+        return nil
+    }
+}
+
+/// The body's spans as the box drew them, and the addresses it left as plain text made tappable.
+private func bodyEntities(_ data: EmailMessageData, body: String) -> [MessageTextEntity] {
+    let drawn = (data.entities ?? []).compactMap { textEntity($0, in: body as NSString) }
+    let linked = drawn.filter(isLink).map(\.range)
+    return drawn + links(in: body).filter { found in
+        !linked.contains(where: { $0.overlaps(found.range) })
+    }
+}
+
 /// The bubble's text and entities: subject (when it starts a thread), then the message's own words.
 func emailText(_ data: EmailMessageData) -> (String, [MessageTextEntity]) {
-    let body = (data.text ?? data.snippet).trimmingCharacters(in: .whitespacesAndNewlines)
+    let body = data.text ?? data.snippet.trimmingCharacters(in: .whitespacesAndNewlines)
+    let entities = bodyEntities(data, body: body)
     guard startsThread(subject: data.subject) else {
-        return (body, links(in: body))
+        return (body, entities)
     }
     let subjectLength = (data.subject as NSString).length
     let text = body.isEmpty ? data.subject : "\(data.subject)\n\(body)"
-    let bodyLinks = links(in: body).map { entity in
+    let shifted = entities.map { entity in
         MessageTextEntity(range: entity.range.lowerBound + subjectLength + 1 ..< entity.range.upperBound + subjectLength + 1, type: entity.type)
     }
-    return (text, [MessageTextEntity(range: 0 ..< subjectLength, type: .Bold)] + (body.isEmpty ? [] : bodyLinks))
+    return (text, [MessageTextEntity(range: 0 ..< subjectLength, type: .Bold)] + shifted)
 }
 
 func emailAttribute(_ data: EmailMessageData, isPartial: Bool) -> EmailMessageAttribute {

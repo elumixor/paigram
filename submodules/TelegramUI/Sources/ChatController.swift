@@ -10008,6 +10008,8 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
             guard let self else {
                 return
             }
+            // Mail hides nearly every link behind its words: asking before each one would be noise.
+            let skipConcealedAlert = skipConcealedAlert || self.chatLocation.peerId?.isEmail == true
             let disposable = self.context.sharedContext.openUserGeneratedUrl(context: self.context, peerId: self.contentData?.state.peerView?.peerId, url: url, webpage: nil, concealed: concealed, forceConcealed: false, skipUrlAuth: skipUrlAuth, skipConcealedAlert: skipConcealedAlert, forceDark: false, present: { [weak self] c in
                 self?.present(c, in: .window(.root))
             }, openResolved: { [weak self] resolved in

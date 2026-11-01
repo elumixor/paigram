@@ -17,12 +17,38 @@ public struct EmailState: Codable, Equatable {
         public let id: Int32
     }
     
+    /// How the box draws a message's text; raised when that changes, so mail stored the old way is fetched again.
+    public static let currentTextVersion: Int32 = 1
+    
     public var seq: Int64
     public var accounts: [EmailAccountData]
     public var contacts: [Contact]
     public var sending: [Sending]
+    /// The `currentTextVersion` the stored mail was drawn with; 0 before there was one.
+    public var textVersion: Int32
     
-    public static let empty = EmailState(seq: 0, accounts: [], contacts: [], sending: [])
+    public static let empty = EmailState(seq: 0, accounts: [], contacts: [], sending: [], textVersion: EmailState.currentTextVersion)
+    
+    private enum CodingKeys: String, CodingKey {
+        case seq, accounts, contacts, sending, textVersion
+    }
+    
+    init(seq: Int64, accounts: [EmailAccountData], contacts: [Contact], sending: [Sending], textVersion: Int32) {
+        self.seq = seq
+        self.accounts = accounts
+        self.contacts = contacts
+        self.sending = sending
+        self.textVersion = textVersion
+    }
+    
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.seq = try container.decode(Int64.self, forKey: .seq)
+        self.accounts = try container.decode([EmailAccountData].self, forKey: .accounts)
+        self.contacts = try container.decode([Contact].self, forKey: .contacts)
+        self.sending = try container.decode([Sending].self, forKey: .sending)
+        self.textVersion = try container.decodeIfPresent(Int32.self, forKey: .textVersion) ?? 0
+    }
     
     public func contact(id: Int64) -> Contact? {
         return self.contacts.first(where: { $0.id == id })
