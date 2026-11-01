@@ -73,6 +73,15 @@ async function connect(device: Device): Promise<boolean> {
   return false;
 }
 
+/** Wi-Fi can drop in the middle of the copy too: the tunnel is opened again and the copy retried. */
+async function copyApp(device: Device, app: string): Promise<boolean> {
+  for (let attempt = 0; attempt < connectAttempts; attempt++) {
+    if ((await $`xcrun devicectl device install app --device ${device.udid} ${app}`.nothrow()).exitCode === 0) return true;
+    if (!(await connect(device))) return false;
+  }
+  return false;
+}
+
 async function install(device: Device) {
   const dir = mkdtempSync(`${tmpdir()}/paigram-device-`);
   await $`unzip -q ${root}bazel-bin/Telegram/Telegram.ipa -d ${dir}`;
@@ -81,8 +90,7 @@ async function install(device: Device) {
     throw new DeviceError(`the last build is not signed for ${device.name} (a TestFlight build, or before it was registered): run without --no-build`);
   }
   if (!(await connect(device))) throw new DeviceError(`${device.name} is not reachable: plug it in, or unlock it on this Mac's Wi-Fi, then run with --no-build`);
-  const installed = await $`xcrun devicectl device install app --device ${device.udid} ${app}`.nothrow();
-  if (installed.exitCode !== 0) throw new DeviceError(`install on ${device.name} failed`);
+  if (!(await copyApp(device, app))) throw new DeviceError(`install on ${device.name} failed`);
   const launched = await $`xcrun devicectl device process launch --device ${device.udid} --terminate-existing ${bundleId}`.nothrow().quiet();
   console.log(launched.exitCode === 0 ? `Paigram running on ${device.name}` : `Paigram installed on ${device.name}; it is locked, so open it there`);
 }
