@@ -15,7 +15,10 @@ public final class PaiSettingsController: PaiHostedController {
 
     public override init(context: AccountContext) {
         super.init(context: context)
-        self.host(SettingsView(store: PaiHost.store, settings: PaiSettingsStore(), openProjects: { [weak self] in self?.openProjects?() }, close: { [weak self] in self?.dismiss() }))
+        let close: () -> Void = { [weak self] in self?.dismiss() }
+        self.host(PaiSignInGate(close: close) {
+            SettingsView(store: PaiHost.store, settings: PaiSettingsStore(), openProjects: { [weak self] in self?.openProjects?() }, close: close)
+        })
     }
 
     required init(coder aDecoder: NSCoder) {
@@ -108,6 +111,7 @@ struct SettingsView: View {
                 statusSection
                 usageSection
                 contextSection
+                PaiSignOutSection()
             }
             .listStyle(.insetGrouped)
             .navigationBarTitleDisplayMode(.inline)

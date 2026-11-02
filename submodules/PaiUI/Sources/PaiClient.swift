@@ -32,10 +32,15 @@ public final class PaiClient {
         return url
     }
 
+    private func token() throws -> String {
+        guard let token = PaiAuth.token else { throw PaiClientError(message: "Not signed in to pai: open pai's profile from its chat and sign in") }
+        return token
+    }
+
     private func request(_ path: String, method: String = "GET", body: [String: Any]? = nil, query: [String: String] = [:]) throws -> URLRequest {
         var request = URLRequest(url: try url(path, query: query))
         request.httpMethod = method
-        request.setValue("Bearer \(PaiSecrets.token)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(try token())", forHTTPHeaderField: "Authorization")
         if let body {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -43,9 +48,11 @@ public final class PaiClient {
         return request
     }
 
-    func call<T: Decodable>(_ type: T.Type, _ path: String, method: String = "GET", body: [String: Any]? = nil, query: [String: String] = [:]) async throws -> T {
-        let (data, response) = try await session.data(for: try request(path, method: method, body: body, query: query))
+    public func call<T: Decodable>(_ type: T.Type, _ path: String, method: String = "GET", body: [String: Any]? = nil, query: [String: String] = [:]) async throws -> T {
+        let request = try request(path, method: method, body: body, query: query)
+        let (data, response) = try await session.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if status == 401, let token = PaiAuth.token { PaiAuth.rejected(token) }
         guard (200..<300).contains(status) else {
             let detail = (try? JSONDecoder().decode([String: String].self, from: data))?["error"]
             throw PaiClientError(message: detail ?? "\(path) failed with HTTP \(status)")
@@ -166,7 +173,7 @@ public final class PaiClient {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    var query = ["follow": "1", "replay": "0", "deltas": deltas ? "1" : "0", "token": PaiSecrets.token]
+                    var query = ["follow": "1", "replay": "0", "deltas": deltas ? "1" : "0", "token": try token()]
                     if let id { query["session"] = id }
                     var request = try request("/events", query: query)
                     request.timeoutInterval = 3600

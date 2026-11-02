@@ -11,9 +11,21 @@ public enum EmailChats {
     private static let stateDisposable = MetaDisposable()
     private static var activeObserver: NSObjectProtocol?
     
-    /// Before any account starts: email and WhatsApp sync and send through the box the app ships with.
+    private static var pushToken: Data?
+    private static var authObserver: NSObjectProtocol?
+
+    /// Before any account starts: email and WhatsApp sync and send through the box, once this phone is signed in to
+    /// pai; a sign-in later configures them then and registers for pushes.
     public static func configure() {
-        PaiBox.configure(baseURL: PaiSecrets.baseURL, token: PaiSecrets.token)
+        PaiAuth.apply()
+        if self.authObserver == nil {
+            self.authObserver = NotificationCenter.default.addObserver(forName: PaiAuth.didChange, object: nil, queue: .main, using: { _ in
+                if let pushToken = self.pushToken {
+                    self.register(pushToken: pushToken)
+                }
+                self.syncNow()
+            })
+        }
     }
     
     /// The account whose chats sync now: its state is followed, and each return to the app syncs.
@@ -57,7 +69,8 @@ public enum EmailChats {
     
     /// The device token, so the box can push new mail here (production APNs unless this is a debug build).
     public static func register(pushToken: Data) {
-        guard let url = URL(string: PaiSecrets.baseURL + "/push/devices") else {
+        self.pushToken = pushToken
+        guard let token = PaiAuth.token, let url = URL(string: PaiSecrets.baseURL + "/push/devices") else {
             return
         }
         #if DEBUG
@@ -72,7 +85,7 @@ public enum EmailChats {
         ]
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.setValue("Bearer \(PaiSecrets.token)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         URLSession.shared.dataTask(with: request, completionHandler: { _, response, error in

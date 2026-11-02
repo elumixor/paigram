@@ -2,18 +2,25 @@ import Foundation
 import SwiftSignalKit
 
 /// The pai box: where Paigram's email and WhatsApp chats come from and go to (`/gmail/…`, `/whatsapp/…`), with the
-/// token baked into the app.
+/// phone's own device token (the app sets it once the phone is signed in to pai).
 public enum PaiBox {
     private static let lock = NSLock()
     private static var configured: (baseURL: URL, token: String)?
 
-    /// Set once at launch by the main app; until then (and in extensions) box chats neither sync nor send.
+    /// Set by the main app while the phone is signed in to pai; until then (and in extensions) box chats neither sync nor send.
     public static func configure(baseURL: String, token: String) {
         guard let url = URL(string: baseURL), !token.isEmpty else {
             return
         }
         self.lock.lock()
         self.configured = (url, token)
+        self.lock.unlock()
+    }
+
+    /// Signed out: box chats stop syncing and sending.
+    public static func clear() {
+        self.lock.lock()
+        self.configured = nil
         self.lock.unlock()
     }
 

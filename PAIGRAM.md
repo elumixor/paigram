@@ -32,7 +32,7 @@ The ✨ button in the composer rewrites the draft through the box's `/compose` (
 
 ## Build
 
-Bazel builds, driven by Telegram's `build-system/Make/Make.py`. First time: `bun install`, then copy `build-system/paigram.example.json` to `build-system/paigram.json` and `build-system/paigram-sim.json` (api id and hash from my.telegram.org; the simulator file keeps the bundle id `ph.telegra.Telegraph`, which the repo's fake codesigning profiles are bound to). Every build writes `submodules/PaiUI/Sources/PaiSecrets.swift` from `~/.config/pai/box.json` and the box's `/m/telegram/info`, so the app ships with its server, token and bot name; where there is no box file (CI) `PAI_BOX_URL`, `PAI_BOX_TOKEN` and `PAI_BOT_USERNAME` stand in for it.
+Bazel builds, driven by Telegram's `build-system/Make/Make.py`. First time: `bun install`, then copy `build-system/paigram.example.json` to `build-system/paigram.json` and `build-system/paigram-sim.json` (api id and hash from my.telegram.org; the simulator file keeps the bundle id `ph.telegra.Telegraph`, which the repo's fake codesigning profiles are bound to). Every build writes `submodules/PaiUI/Sources/PaiSecrets.swift` from `~/.config/pai/box.json` and the box's `/m/telegram/info`, so the app ships with its server and bot name (no credential: each phone signs in to pai and keeps its own device token in the keychain, `PaiAuth`); where there is no box file (CI) `PAI_BOX_URL` and `PAI_BOT_USERNAME` stand in for it.
 
 ```sh
 bun run sim [--no-build]          # simulator build, installed and launched on the newest iPhone simulator
@@ -63,7 +63,7 @@ Once, from the Mac that holds the Apple material:
 bun run ci-secrets [--p12 <path>]
 ```
 
-`scripts/ci-secrets.ts` sets all eleven repo secrets itself. Eight of the values already live on the box and it reads them over `pai ssh` (the `.env`, `build-system/paigram.json` and `~/pai/data/config.json` there, plus the box's own `/m/telegram/info` for the bot name); the App Store Connect key and the distribution certificate exist nowhere but that Mac, so it reads the key out of `~/.appstoreconnect/private_keys/` and exports the certificate from the login keychain — macOS asks for the login password before it releases a private key, and if more than one distribution identity is in there it asks which one. `security export` cannot be pointed at a single identity, so it exports the keychain's identities and separates the chosen certificate and its key out with openssl; `--p12 <path>` skips all of that and takes a `.p12` exported by hand from Keychain Access instead. Every value goes to `gh secret set` on stdin, so none of them reaches argv or shell history. It needs `gh` logged in with access to the repo, and checks that before it reads anything.
+`scripts/ci-secrets.ts` sets all ten repo secrets itself. Seven of the values already live on the box and it reads them over `pai ssh` (the `.env`, `build-system/paigram.json` and `~/pai/data/config.json` there, plus the box's own `/m/telegram/info` for the bot name); the App Store Connect key and the distribution certificate exist nowhere but that Mac, so it reads the key out of `~/.appstoreconnect/private_keys/` and exports the certificate from the login keychain — macOS asks for the login password before it releases a private key, and if more than one distribution identity is in there it asks which one. `security export` cannot be pointed at a single identity, so it exports the keychain's identities and separates the chosen certificate and its key out with openssl; `--p12 <path>` skips all of that and takes a `.p12` exported by hand from Keychain Access instead. Every value goes to `gh secret set` on stdin, so none of them reaches argv or shell history. It needs `gh` logged in with access to the repo, and checks that before it reads anything.
 
 The secrets it sets, for setting them by hand under Settings → Secrets and variables → Actions:
 
@@ -78,7 +78,6 @@ The secrets it sets, for setting them by hand under Settings → Secrets and var
 | `TELEGRAM_API_ID` | `api_id` from my.telegram.org |
 | `TELEGRAM_API_HASH` | `api_hash` from my.telegram.org |
 | `PAI_BOX_URL` | the box the app talks to |
-| `PAI_BOX_TOKEN` | the box's bearer token |
 | `PAI_BOT_USERNAME` | the box's bot username, without the `@` (set so the build does not have to reach the box) |
 
 `.github/workflows/build.yml` is upstream Telegram's CI — a full Bazel build with fake codesigning, producing an unsigned ipa on a GitHub release. It no longer runs on pushes to master: macOS runners bill at ten times the Linux rate and that ipa is of no use here, so it is `workflow_dispatch` only and the TestFlight workflow is the only build a push can start.

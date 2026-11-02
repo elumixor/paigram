@@ -22,11 +22,14 @@ public final class PaiHubController: PaiHostedController {
     public override init(context: AccountContext) {
         super.init(context: context)
         if #available(iOS 16.0, *) {
-            self.host(HubView(
-                openAgent: { [weak self] agent in self?.openAgent?(agent.slug) },
-                openThread: { [weak self] threadId in self?.openThread?(threadId) },
-                close: { [weak self] in self?.dismiss() }
-            ).environmentObject(PaiHost.store))
+            let close: () -> Void = { [weak self] in self?.dismiss() }
+            self.host(PaiSignInGate(close: close) {
+                HubView(
+                    openAgent: { [weak self] agent in self?.openAgent?(agent.slug) },
+                    openThread: { [weak self] threadId in self?.openThread?(threadId) },
+                    close: close
+                )
+            }.environmentObject(PaiHost.store))
         } else {
             self.host(Text("Pai needs iOS 16 or newer").foregroundColor(.secondary))
         }

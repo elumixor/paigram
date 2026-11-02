@@ -75,7 +75,6 @@ jobs:
           TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
           TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
           PAI_BOX_URL: ${{ secrets.PAI_BOX_URL }}
-          PAI_BOX_TOKEN: ${{ secrets.PAI_BOX_TOKEN }}
           PAI_BOT_USERNAME: ${{ secrets.PAI_BOT_USERNAME }}
         run: bun scripts/ci.ts
 
@@ -91,7 +90,6 @@ jobs:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           TEAM_ID: ${{ secrets.TEAM_ID }}
           PAI_BOX_URL: ${{ secrets.PAI_BOX_URL }}
-          PAI_BOX_TOKEN: ${{ secrets.PAI_BOX_TOKEN }}
           PAI_BOT_USERNAME: ${{ secrets.PAI_BOT_USERNAME }}
         run: bun run testflight --no-bump --once
 

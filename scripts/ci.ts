@@ -25,7 +25,6 @@ const required = {
   TELEGRAM_API_ID: "api_id from my.telegram.org",
   TELEGRAM_API_HASH: "api_hash from my.telegram.org",
   PAI_BOX_URL: "the box the app talks to",
-  PAI_BOX_TOKEN: "the box's bearer token",
   PAI_BOT_USERNAME: "the box's Telegram bot username, without the @",
 } as const;
 

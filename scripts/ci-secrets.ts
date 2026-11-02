@@ -1,6 +1,6 @@
 /**
  * `bun run ci-secrets`: fills every GitHub repo secret the TestFlight workflow needs, once, from the
- * Mac that holds the Apple material. Eight of the eleven values already live on the box and are read
+ * Mac that holds the Apple material. Seven of the ten values already live on the box and are read
  * over `pai ssh`; the App Store Connect key and the distribution certificate exist nowhere but this
  * Mac. Each value reaches `gh secret set` on stdin, so none of them lands in argv or shell history,
  * and this file holds no secret of its own.
@@ -34,7 +34,6 @@ print(json.dumps({
     'TELEGRAM_API_ID': app['api_id'],
     'TELEGRAM_API_HASH': app['api_hash'],
     'PAI_BOX_URL': 'https://' + pai['PAI_DOMAIN'],
-    'PAI_BOX_TOKEN': pai['PAI_TOKEN'],
 }))
 `;
 
@@ -168,7 +167,7 @@ if (!repo) throw new Error(`cannot read the GitHub repo out of origin (${origin}
 await requireTooling(repo);
 
 const boxValues = await fromBox();
-const botUsername = await fetchBotUsername(boxValues.PAI_BOX_URL, boxValues.PAI_BOX_TOKEN);
+const botUsername = await fetchBotUsername(boxValues.PAI_BOX_URL);
 
 const keychain = (await $`security default-keychain -d user`.text()).trim().replace(/"/g, "");
 const workdir = mkdtempSync(`${tmpdir()}/paigram-ci-secrets-`);

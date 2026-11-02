@@ -3,14 +3,30 @@ import Foundation
 /// The other half of the notification extension's quick answers (`PaiNotification` there): what it needs to
 /// reach the box, and sending the answer a tap on a notification's button picked.
 public enum PaiNotificationAnswer {
-    /// Leaves the box's address, token and the bot's user id in the app group, where the extension reads them.
-    /// `basePath` is Telegram's data directory inside the app group.
+    private static var written: (path: String, botUserId: Int64)?
+
+    /// Leaves the box's address, this phone's token and the bot's user id in the app group, where the extension
+    /// reads them; signed out, the file is removed. `basePath` is Telegram's data directory inside the app group.
     public static func writeConfig(basePath: String, botUserId: Int64) {
-        let path = (basePath as NSString).deletingLastPathComponent + "/pai.json"
-        let config = ["baseURL": PaiSecrets.baseURL, "token": PaiSecrets.token, "botUserId": String(botUserId)]
+        write(path: (basePath as NSString).deletingLastPathComponent + "/pai.json", botUserId: botUserId)
+    }
+
+    /// After a sign-in or out: the file the bot chat last wrote follows the token.
+    static func refreshConfig() {
+        guard let written else { return }
+        write(path: written.path, botUserId: written.botUserId)
+    }
+
+    private static func write(path: String, botUserId: Int64) {
+        written = (path, botUserId)
+        guard let token = PaiAuth.token else {
+            try? FileManager.default.removeItem(atPath: path)
+            return
+        }
+        let config = ["baseURL": PaiSecrets.baseURL, "token": token, "botUserId": String(botUserId)]
         guard let data = try? JSONSerialization.data(withJSONObject: config) else { return }
         if (try? Data(contentsOf: URL(fileURLWithPath: path))) == data { return }
-        try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
+        try? data.write(to: URL(fileURLWithPath: path), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
 
     /// Whether a notification action is one of pai's answers.

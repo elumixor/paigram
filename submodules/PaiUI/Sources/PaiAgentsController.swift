@@ -14,7 +14,10 @@ public final class PaiAgentTreeController: PaiHostedController {
 
     public override init(context: AccountContext) {
         super.init(context: context)
-        self.host(AgentTreeView(open: { [weak self] agent in self?.openAgent?(agent.slug) }, close: { [weak self] in self?.dismiss() }).environmentObject(PaiHost.store))
+        let close: () -> Void = { [weak self] in self?.dismiss() }
+        self.host(PaiSignInGate(close: close) {
+            AgentTreeView(open: { [weak self] agent in self?.openAgent?(agent.slug) }, close: close)
+        }.environmentObject(PaiHost.store))
     }
 
     required init(coder aDecoder: NSCoder) {
