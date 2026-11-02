@@ -169,8 +169,8 @@ public struct PresentationResourcesSettings {
     public static let lockOrange = renderSettingsIcon(name: "Item List/Icons/Privacy", backgroundColors: [colorOrange])
     public static let passkeys = renderSettingsIcon(name: "Item List/Icons/Key", backgroundColors: [colorViolet])
     public static let timer = renderSettingsIcon(name: "Item List/Icons/Timer", backgroundColors: [colorPurple])
-    public static let email = renderSettingsIcon(name: "Item List/Icons/Email", backgroundColors: [colorViolet])
-    public static let whatsApp = renderSettingsIcon(name: "Item List/Icons/Chat", backgroundColors: [colorGreen])
+    public static let email = renderSettingsIcon(name: "Item List/Icons/Gmail")
+    public static let whatsApp = renderSettingsIcon(name: "Item List/Icons/WhatsApp", backgroundColors: [UIColor(rgb: 0x25d366)])
     public static let paiStats = renderSettingsIcon(name: "Item List/Icons/Stats", backgroundColors: [colorOrange])
         
     public static let premium = generateImage(CGSize(width: 30.0, height: 30.0), contextGenerator: { size, context in
@@ -325,7 +325,7 @@ public struct PresentationResourcesSettings {
     
     public static let groupType = renderSettingsIcon(name: "Item List/Icons/Members", backgroundColors: [colorBlue])
     public static let channelType = renderSettingsIcon(name: "Item List/Icons/Channel", backgroundColors: [colorBlue])
-    public static let chatHistory = renderSettingsIcon(name: "Item List/Icons/Chat", backgroundColors: [colorGreen])
+    public static let chatHistory = renderSettingsIcon(name: "Item List/Icons/WhatsApp", backgroundColors: [UIColor(rgb: 0x25d366)])
     public static let topics = renderSettingsIcon(name: "Item List/Icons/Topics", backgroundColors: [colorLightBlue])
     public static let links = renderSettingsIcon(name: "Item List/Icons/Link", backgroundColors: [colorOrange])
     public static let chatAppearance = renderSettingsIcon(name: "Item List/Icons/Brush", backgroundColors: [colorOrange])

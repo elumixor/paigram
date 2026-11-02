@@ -40,6 +40,18 @@ extension StarsRevenueStats: Stats {
     
 }
 
+/// Up to eight figures, two to a row: a value, what it counts, and its change against the period before.
+struct OverviewValues: Stats, Equatable {
+    struct Value: Equatable {
+        let value: String
+        let title: String
+        let delta: String?
+        let isPositive: Bool
+    }
+
+    let values: [Value]
+}
+
 final class StatsOverviewItem: ListViewItem, ItemListItem {
     let context: AccountContext
     let presentationData: ItemListPresentationData
@@ -550,6 +562,27 @@ class StatsOverviewItemNode: ListViewItemNode {
                     height += topRightItemLayoutAndApply!.0.height * 2.0 + verticalSpacing
                 } else {
                     height += topLeftItemLayoutAndApply!.0.height * 4.0 + verticalSpacing * 3.0
+                }
+            } else if let stats = item.stats as? OverviewValues {
+                let makers = [makeTopLeftItemLayout, makeTopRightItemLayout, makeMiddle1LeftItemLayout, makeMiddle1RightItemLayout, makeMiddle2LeftItemLayout, makeMiddle2RightItemLayout, makeBottomLeftItemLayout, makeBottomRightItemLayout]
+                let layouts = zip(makers, stats.values).map { make, value in
+                    make(item.context, params.width, item.presentationData, value.value, value.title, value.delta.map { ($0, value.isPositive ? .positive : .negative) }, .generic)
+                }
+                for (index, layout) in layouts.enumerated() {
+                    switch index {
+                    case 0: topLeftItemLayoutAndApply = layout
+                    case 1: topRightItemLayoutAndApply = layout
+                    case 2: middle1LeftItemLayoutAndApply = layout
+                    case 3: middle1RightItemLayoutAndApply = layout
+                    case 4: middle2LeftItemLayoutAndApply = layout
+                    case 5: middle2RightItemLayoutAndApply = layout
+                    case 6: bottomLeftItemLayoutAndApply = layout
+                    default: bottomRightItemLayoutAndApply = layout
+                    }
+                }
+                if let rowHeight = layouts.first?.0.height {
+                    let rowsCount = twoColumnLayout ? ceil(CGFloat(layouts.count) / 2.0) : CGFloat(layouts.count)
+                    height += rowHeight * rowsCount + verticalSpacing * (rowsCount - 1.0)
                 }
             } else if let stats = item.stats as? ChannelStats {
                 let viewsPerPostDelta = deltaText(stats.viewsPerPost)

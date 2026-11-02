@@ -15,6 +15,7 @@ swift_library(
         "//submodules/ComponentFlow",
         "//submodules/Postbox",
         "//submodules/TelegramCore",
+        "//submodules/PaiUI:PaiUI",
         "//submodules/TelegramPresentationData",
         "//submodules/TelegramUIPreferences",
         "//submodules/AccountContext",

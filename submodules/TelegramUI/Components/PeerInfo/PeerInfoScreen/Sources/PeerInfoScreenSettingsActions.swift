@@ -16,6 +16,7 @@ import PresentationDataUtils
 import PasswordSetupUI
 import InstantPageCache
 import PaiUI
+import StatisticsUI
 
 extension PeerInfoScreenNode {
     func openSettings(section: PeerInfoSettingsSection) {
@@ -79,14 +80,14 @@ extension PeerInfoScreenNode {
             push(CallListController(context: context, mode: .navigation))
         case .whatsApp:
             if #available(iOS 16.0, *) {
-                push(WhatsAppSettingsController(context: self.context))
+                push(whatsAppSettingsController(context: self.context))
             }
         case .paiStats:
             if #available(iOS 16.0, *) {
-                push(PaiStatsController(context: self.context))
+                push(paiStatsController(context: self.context))
             }
         case .email:
-            push(EmailSettingsController(context: self.context, openChat: { [weak self] peerId in
+            push(emailSettingsController(context: self.context, openChat: { [weak self] peerId in
                 guard let self else {
                     return
                 }
