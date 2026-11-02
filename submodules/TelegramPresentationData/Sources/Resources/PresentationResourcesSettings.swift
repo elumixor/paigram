@@ -171,6 +171,7 @@ public struct PresentationResourcesSettings {
     public static let timer = renderSettingsIcon(name: "Item List/Icons/Timer", backgroundColors: [colorPurple])
     public static let email = renderSettingsIcon(name: "Item List/Icons/Email", backgroundColors: [colorViolet])
     public static let whatsApp = renderSettingsIcon(name: "Item List/Icons/Chat", backgroundColors: [colorGreen])
+    public static let paiStats = renderSettingsIcon(name: "Item List/Icons/Stats", backgroundColors: [colorOrange])
         
     public static let premium = generateImage(CGSize(width: 30.0, height: 30.0), contextGenerator: { size, context in
         let bounds = CGRect(origin: CGPoint(), size: size)

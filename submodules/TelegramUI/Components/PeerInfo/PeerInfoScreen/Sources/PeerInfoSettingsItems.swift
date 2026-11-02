@@ -227,6 +227,9 @@ func settingsItems(data: PeerInfoScreenData?, context: AccountContext, presentat
         items[.shortcuts]!.append(PeerInfoScreenDisclosureItem(id: 6, text: "WhatsApp", icon: PresentationResourcesSettings.whatsApp, action: {
             interaction.openSettings(.whatsApp)
         }))
+        items[.shortcuts]!.append(PeerInfoScreenDisclosureItem(id: 7, text: "Stats", icon: PresentationResourcesSettings.paiStats, action: {
+            interaction.openSettings(.paiStats)
+        }))
     }
     
     let notificationsWarning: Bool

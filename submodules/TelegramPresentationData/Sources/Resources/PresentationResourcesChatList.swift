@@ -79,6 +79,21 @@ public enum ScamIconType {
     case service
 }
 
+/// A filled circle with a white line glyph: the corner mark of a chat that lives outside Telegram.
+private func generateBoxBadge(color: UIColor, glyph: @escaping (CGContext, CGRect) -> Void) -> UIImage? {
+    return generateImage(CGSize(width: 18.0, height: 18.0), rotatedContext: { size, context in
+        let rect = CGRect(origin: CGPoint(), size: size)
+        context.clear(rect)
+        context.setFillColor(color.cgColor)
+        context.fillEllipse(in: rect)
+        context.setStrokeColor(UIColor.white.cgColor)
+        context.setLineWidth(1.2)
+        context.setLineJoin(.round)
+        context.setLineCap(.round)
+        glyph(context, rect)
+    })
+}
+
 public struct PresentationResourcesChatList {
     public static func pendingImage(_ theme: PresentationTheme) -> UIImage? {
         return theme.image(PresentationResourceKey.chatListPending.rawValue, { theme in
@@ -485,39 +500,31 @@ public struct PresentationResourcesChatList {
         })
     }
     
-    /// A speech bubble before a WhatsApp chat's title, where a secret chat has its lock.
-    public static func whatsAppIcon(_ theme: PresentationTheme) -> UIImage? {
-        return theme.image(PresentationResourceKey.chatListWhatsAppIcon.rawValue, { theme in
-            return generateImage(CGSize(width: 12.0, height: 12.0), rotatedContext: { size, context in
-                context.clear(CGRect(origin: CGPoint(), size: size))
-                context.setStrokeColor(UIColor(rgb: 0x25d366).cgColor)
-                context.setLineWidth(1.32)
-                context.setLineJoin(.round)
-                let circle = CGRect(origin: CGPoint(x: 1.2, y: 0.66), size: CGSize(width: size.width - 1.86, height: size.height - 1.86))
-                let path = UIBezierPath(ovalIn: circle)
-                path.move(to: CGPoint(x: circle.minX + 1.6, y: circle.maxY - 2.2))
-                path.addLine(to: CGPoint(x: 0.66, y: size.height - 0.66))
-                path.addLine(to: CGPoint(x: circle.minX + 3.2, y: circle.maxY - 0.6))
-                context.addPath(path.cgPath)
+    /// The mark on the corner of an email chat's avatar: an envelope on the accent colour.
+    public static func emailBadge(_ theme: PresentationTheme) -> UIImage? {
+        return theme.image(PresentationResourceKey.chatListEmailBadge.rawValue, { theme in
+            return generateBoxBadge(color: theme.list.itemAccentColor, glyph: { context, rect in
+                let body = CGRect(x: rect.midX - 4.5, y: rect.midY - 3.5, width: 9.0, height: 7.0)
+                context.addPath(UIBezierPath(roundedRect: body, cornerRadius: 1.2).cgPath)
+                context.strokePath()
+                context.move(to: CGPoint(x: body.minX + 0.4, y: body.minY + 0.4))
+                context.addLine(to: CGPoint(x: body.midX, y: body.minY + 4.0))
+                context.addLine(to: CGPoint(x: body.maxX - 0.4, y: body.minY + 0.4))
                 context.strokePath()
             })
         })
     }
     
-    /// An envelope before an email chat's title, where a secret chat has its lock.
-    public static func emailIcon(_ theme: PresentationTheme) -> UIImage? {
-        return theme.image(PresentationResourceKey.chatListEmailIcon.rawValue, { theme in
-            return generateImage(CGSize(width: 13.0, height: 10.0), rotatedContext: { size, context in
-                context.clear(CGRect(origin: CGPoint(), size: size))
-                context.setStrokeColor(theme.list.itemAccentColor.cgColor)
-                context.setLineWidth(1.32)
-                context.setLineJoin(.round)
-                let body = CGRect(origin: CGPoint(), size: size).insetBy(dx: 0.66, dy: 0.66)
-                context.addPath(UIBezierPath(roundedRect: body, cornerRadius: 1.5).cgPath)
-                context.strokePath()
-                context.move(to: CGPoint(x: body.minX + 0.5, y: body.minY + 0.5))
-                context.addLine(to: CGPoint(x: size.width / 2.0, y: size.height * 0.58))
-                context.addLine(to: CGPoint(x: body.maxX - 0.5, y: body.minY + 0.5))
+    /// The mark on the corner of a WhatsApp chat's avatar: a speech bubble on WhatsApp's green.
+    public static func whatsAppBadge(_ theme: PresentationTheme) -> UIImage? {
+        return theme.image(PresentationResourceKey.chatListWhatsAppBadge.rawValue, { _ in
+            return generateBoxBadge(color: UIColor(rgb: 0x25d366), glyph: { context, rect in
+                let circle = CGRect(x: rect.midX - 3.6, y: rect.midY - 4.2, width: 8.0, height: 8.0)
+                let path = UIBezierPath(ovalIn: circle)
+                path.move(to: CGPoint(x: circle.minX + 1.2, y: circle.maxY - 1.6))
+                path.addLine(to: CGPoint(x: circle.minX - 0.8, y: circle.maxY + 1.2))
+                path.addLine(to: CGPoint(x: circle.minX + 2.4, y: circle.maxY - 0.4))
+                context.addPath(path.cgPath)
                 context.strokePath()
             })
         })

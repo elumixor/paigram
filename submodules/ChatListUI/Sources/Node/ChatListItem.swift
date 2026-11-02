@@ -1421,6 +1421,8 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
     var avatarBadgeNode: ChatListBadgeNode?
     var avatarBadgeBackground: ASImageNode?
     let onlineNode: PeerOnlineMarkerNode
+    /// An email or WhatsApp chat's mark on the avatar's corner, ringed in the row's background.
+    let boxBadgeNode: ASImageNode
     var avatarTimerBadge: AvatarBadgeView?
     private var starView: StarView?
     var avatarLiveBadge: (outline: UIImageView, foreground: UIImageView)?
@@ -1720,6 +1722,10 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
         self.badgeNode = ChatListBadgeNode()
         self.mentionBadgeNode = ChatListBadgeNode()
         self.onlineNode = PeerOnlineMarkerNode()
+        self.boxBadgeNode = ASImageNode()
+        self.boxBadgeNode.displaysAsynchronously = false
+        self.boxBadgeNode.isLayerBacked = true
+        self.boxBadgeNode.isHidden = true
         
         self.forwardedIconNode = ASImageNode()
         self.forwardedIconNode.isLayerBacked = true
@@ -1759,6 +1765,7 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
 
         self.contextContainer.addSubnode(self.avatarContainerNode)
         self.avatarNode.addSubnode(self.onlineNode)
+        self.avatarNode.addSubnode(self.boxBadgeNode)
         
         self.mainContentContainerNode.addSubnode(self.titleNode)
         self.mainContentContainerNode.addSubnode(self.authorNode)
@@ -3522,19 +3529,19 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
     
             var isSubscription = false
             var isSecret = false
-            var isEmail = false
-            var isWhatsApp = false
+            // A chat that lives outside Telegram wears its service's mark on its avatar's corner.
+            var boxBadgeImage: UIImage?
             if !isPeerGroup, case let .chatList(index) = item.index {
-                isSecret = index.messageIndex.id.peerId.namespace == Namespaces.Peer.SecretChat
-                isEmail = index.messageIndex.id.peerId.isEmail
-                isWhatsApp = index.messageIndex.id.peerId.isWhatsApp
+                let peerId = index.messageIndex.id.peerId
+                isSecret = peerId.namespace == Namespaces.Peer.SecretChat
+                if peerId.isEmail {
+                    boxBadgeImage = PresentationResourcesChatList.emailBadge(item.presentationData.theme)
+                } else if peerId.isWhatsApp {
+                    boxBadgeImage = PresentationResourcesChatList.whatsAppBadge(item.presentationData.theme)
+                }
             }
             if isSecret {
                 currentSecretIconImage = PresentationResourcesChatList.secretIcon(item.presentationData.theme)
-            } else if isEmail {
-                currentSecretIconImage = PresentationResourcesChatList.emailIcon(item.presentationData.theme)
-            } else if isWhatsApp {
-                currentSecretIconImage = PresentationResourcesChatList.whatsAppIcon(item.presentationData.theme)
             }
             
             let premiumConfiguration = PremiumConfiguration.with(appConfiguration: item.context.currentAppConfiguration.with { $0 })
@@ -4464,6 +4471,19 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                         effectiveBackgroundColor = item.presentationData.theme.chatList.itemBackgroundColor
                     }
                     strongSelf.onlineNode.setImage(onlineIcon, color: item.presentationData.theme.list.itemCheckColors.foregroundColor, transition: .immediate)
+                    
+                    if let boxBadgeImage {
+                        let ring: CGFloat = 1.5
+                        let badgeSize = CGSize(width: boxBadgeImage.size.width + ring * 2.0, height: boxBadgeImage.size.height + ring * 2.0)
+                        strongSelf.boxBadgeNode.image = boxBadgeImage
+                        strongSelf.boxBadgeNode.contentMode = .center
+                        strongSelf.boxBadgeNode.backgroundColor = effectiveBackgroundColor
+                        strongSelf.boxBadgeNode.cornerRadius = badgeSize.height / 2.0
+                        strongSelf.boxBadgeNode.isHidden = false
+                        transition.updateFrame(node: strongSelf.boxBadgeNode, frame: CGRect(origin: CGPoint(x: avatarFrame.width - badgeSize.width + 2.0, y: avatarFrame.height - badgeSize.height + 2.0), size: badgeSize))
+                    } else {
+                        strongSelf.boxBadgeNode.isHidden = true
+                    }
                     
                     if isSubscription, autoremoveTimeout == nil {
                         let starView: StarView
