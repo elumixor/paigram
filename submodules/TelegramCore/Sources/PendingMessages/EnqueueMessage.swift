@@ -202,7 +202,7 @@ public enum EnqueueMessage {
     }
 }
 
-private extension EnqueueMessage {
+extension EnqueueMessage {
     var correlationId: Int64? {
         switch self {
         case let .message(_, _, _, _, _, _, _, _, correlationId, _):

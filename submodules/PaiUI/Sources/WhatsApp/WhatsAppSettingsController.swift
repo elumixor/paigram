@@ -43,6 +43,9 @@ private struct WhatsAppSettingsState: Equatable {
     var code: String?
     var isBusy = false
     var error: String?
+    var signedIn = PaiAuth.isSignedIn
+    /// Why the status could not be read; shown instead of "Checking…", with a way to try again.
+    var loadError: String?
 }
 
 private final class WhatsAppSettingsArguments {
@@ -53,6 +56,8 @@ private final class WhatsAppSettingsArguments {
     let setNotify: (Bool) -> Void
     let reloadChats: () -> Void
     let relink: () -> Void
+    /// Signs in when the phone is not, else reads the status again.
+    var retry: () -> Void = {}
 
     init(updatePhone: @escaping (String) -> Void, requestCode: @escaping () -> Void, copyCode: @escaping () -> Void, openWhatsApp: @escaping () -> Void, setNotify: @escaping (Bool) -> Void, reloadChats: @escaping () -> Void, relink: @escaping () -> Void) {
         self.updatePhone = updatePhone
@@ -75,6 +80,7 @@ private enum WhatsAppSettingsSection: Int32 {
 private enum WhatsAppSettingsEntry: ItemListNodeEntry {
     case account(String, String)
     case accountInfo(String)
+    case retry(String)
     case linkHeader
     case phone(String)
     case code(String)
@@ -89,7 +95,7 @@ private enum WhatsAppSettingsEntry: ItemListNodeEntry {
 
     var section: ItemListSectionId {
         switch self {
-        case .account, .accountInfo:
+        case .account, .accountInfo, .retry:
             return WhatsAppSettingsSection.account.rawValue
         case .linkHeader, .phone, .code, .openWhatsApp, .requestCode, .linkInfo:
             return WhatsAppSettingsSection.link.rawValue
@@ -104,6 +110,7 @@ private enum WhatsAppSettingsEntry: ItemListNodeEntry {
         switch self {
         case .account: return 0
         case .accountInfo: return 1
+        case .retry: return 2
         case .linkHeader: return 10
         case .phone: return 11
         case .code: return 12
@@ -131,6 +138,8 @@ private enum WhatsAppSettingsEntry: ItemListNodeEntry {
             return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
         case .linkHeader:
             return ItemListSectionHeaderItem(presentationData: presentationData, text: "LINK THIS PHONE", sectionId: self.section)
+        case let .retry(title):
+            return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: title, kind: .generic, alignment: .natural, sectionId: self.section, style: .blocks, action: arguments.retry)
         case let .phone(text):
             return ItemListSingleLineInputItem(presentationData: presentationData, systemStyle: .glass, title: NSAttributedString(), text: text, placeholder: "Your WhatsApp number", type: .number, sectionId: self.section, textUpdated: arguments.updatePhone, action: arguments.requestCode)
         case let .code(code):
@@ -163,16 +172,26 @@ private func whatsAppSettingsEntries(_ state: WhatsAppSettingsState) -> [WhatsAp
         } else {
             label = status.state == "linking" ? "Waiting for a phone" : "Not linked"
         }
+    } else if !state.signedIn {
+        label = "Not signed in"
     } else {
-        label = "Checking…"
+        label = state.loadError == nil ? "Checking…" : "Couldn't load"
     }
     entries.append(.account(status?.linked == true ? status?.name ?? "Linked" : "WhatsApp", label))
     var info = status?.cached.map { "The box has seen \($0.chats) chats and \($0.messages) messages. Older messages come from your phone as you scroll up in a chat." } ?? ""
     if let error = status?.error, status?.linked == false {
         info = error
     }
+    if status == nil, !state.signedIn {
+        info = "WhatsApp comes through your pai box; this phone has to be signed in to it first."
+    } else if status == nil, let loadError = state.loadError {
+        info = loadError
+    }
     if !info.isEmpty {
         entries.append(.accountInfo(info))
+    }
+    if status == nil, !state.signedIn || state.loadError != nil {
+        entries.append(.retry(state.signedIn ? "Try Again" : "Sign In to pai"))
     }
     if status?.linked == false {
         entries.append(.linkHeader)
@@ -277,16 +296,49 @@ public func whatsAppSettingsController(context: AccountContext) -> ViewControlle
             TextAlertAction(type: .genericAction, title: "Cancel", action: {}),
             TextAlertAction(type: .destructiveAction, title: "Link Again", action: {
                 run {
-                    _ = try await client.call(Relinking.self, "/whatsapp/relink", method: "POST", body: [:])
+                    _ = try await client.call(Relinking.self, "/whatsapp/relink", method: "POST", body: [String: Any]())
                     _ = try await load()
                 }
             })
         ]))
     })
 
-    run {
-        _ = try await load()
+    /// The status read when the screen opens, after a sign-in and on Try Again; a failure is said, not waited on.
+    var authObserver: NSObjectProtocol?
+    let refresh: (Bool) -> Void = { alertOnFailure in
+        updateState { $0.signedIn = PaiAuth.isSignedIn; $0.loadError = nil }
+        guard PaiAuth.isSignedIn else {
+            return
+        }
+        tasks.append(Task { @MainActor in
+            do {
+                _ = try await load()
+            } catch {
+                updateState { $0.loadError = error.localizedDescription }
+                if alertOnFailure {
+                    presentImpl?(textAlertController(context: context, title: nil, text: "Couldn't load WhatsApp: \(error.localizedDescription)", actions: [TextAlertAction(type: .defaultAction, title: "OK", action: {})]))
+                }
+            }
+        })
     }
+    arguments.retry = {
+        guard PaiAuth.isSignedIn else {
+            tasks.append(Task { @MainActor in
+                do {
+                    try await PaiAuth.signIn()
+                } catch is CancellationError {
+                } catch {
+                    presentImpl?(textAlertController(context: context, title: nil, text: error.localizedDescription, actions: [TextAlertAction(type: .defaultAction, title: "OK", action: {})]))
+                }
+            })
+            return
+        }
+        refresh(true)
+    }
+    refresh(true)
+    authObserver = NotificationCenter.default.addObserver(forName: PaiAuth.didChange, object: nil, queue: .main, using: { _ in
+        refresh(false)
+    })
 
     let signal = combineLatest(context.sharedContext.presentationData, statePromise.get())
     |> deliverOnMainQueue
@@ -298,6 +350,9 @@ public func whatsAppSettingsController(context: AccountContext) -> ViewControlle
     |> afterDisposed {
         tasks.forEach { $0.cancel() }
         polling?.cancel()
+        if let authObserver {
+            NotificationCenter.default.removeObserver(authObserver)
+        }
     }
 
     let controller = ItemListController(context: context, state: signal)

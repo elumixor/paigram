@@ -37,7 +37,7 @@ public final class PaiClient {
         return token
     }
 
-    private func request(_ path: String, method: String = "GET", body: [String: Any]? = nil, query: [String: String] = [:]) throws -> URLRequest {
+    private func request(_ path: String, method: String = "GET", body: Any? = nil, query: [String: String] = [:]) throws -> URLRequest {
         var request = URLRequest(url: try url(path, query: query))
         request.httpMethod = method
         request.setValue("Bearer \(try token())", forHTTPHeaderField: "Authorization")
@@ -48,7 +48,8 @@ public final class PaiClient {
         return request
     }
 
-    public func call<T: Decodable>(_ type: T.Type, _ path: String, method: String = "GET", body: [String: Any]? = nil, query: [String: String] = [:]) async throws -> T {
+    /// `body` is anything `JSONSerialization` takes: an object, or an array for the box's batch routes.
+    public func call<T: Decodable>(_ type: T.Type, _ path: String, method: String = "GET", body: Any? = nil, query: [String: String] = [:]) async throws -> T {
         let request = try request(path, method: method, body: body, query: query)
         let (data, response) = try await session.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -124,7 +125,7 @@ public final class PaiClient {
     /// Interrupts an agent's turn (and its sub-agents'); for pai, its one session.
     public func stop(agent slug: String) async throws {
         struct Stopped: Decodable { let stopped: [String]? }
-        _ = try await call(Stopped.self, "/agents/\(slug)/stop", method: "POST", body: [:])
+        _ = try await call(Stopped.self, "/agents/\(slug)/stop", method: "POST", body: [String: Any]())
     }
 
     public func needs() async throws -> [PaiNeed] { try await call([PaiNeed].self, "/needs") }

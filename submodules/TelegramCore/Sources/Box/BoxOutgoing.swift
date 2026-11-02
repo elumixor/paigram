@@ -37,6 +37,10 @@ func enqueueBoxMessages(transaction: Transaction, accountPeerId: PeerId, peerId:
         if let replyTo = content.replyTo {
             attributes.append(ReplyMessageAttribute(messageId: replyTo, threadMessageId: nil, quote: nil, isQuote: false, innerSubject: nil))
         }
+        // The chat clears its composer (and plays the send animation) only once a message carrying this id lands.
+        if let correlationId = message.correlationId {
+            attributes.append(OutgoingMessageInfoAttribute(uniqueId: globallyUniqueId, flags: [], acknowledged: false, correlationId: correlationId, bubbleUpEmojiOrStickersets: [], partialReference: nil))
+        }
         let (tags, globalTags) = tagsForStoreMessage(incoming: false, attributes: attributes, media: content.media, textEntities: content.entities, isPinned: false)
         let _ = transaction.addMessages([StoreMessage(id: id, customStableId: nil, globallyUniqueId: globallyUniqueId, groupingKey: nil, threadId: nil, timestamp: Int32(clamping: now / 1000), flags: [.Sending], tags: tags, globalTags: globalTags, localTags: [], forwardInfo: nil, authorId: accountPeerId, text: content.text, attributes: attributes, media: content.media)], location: .Random)
         return id

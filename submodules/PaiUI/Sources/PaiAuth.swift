@@ -46,7 +46,7 @@ public enum PaiAuth {
         components?.path = "/"
         components?.fragment = "/link?" + Self.query(["state": state, "name": UIDevice.current.name])
         guard let url = components?.url else { throw PaiClientError(message: "Server address is not a valid URL") }
-        let callback = try await WebSignIn.run(url: url, callbackScheme: callbackScheme)
+        let callback = try await PaiWebSheet.run(url: url, callbackScheme: callbackScheme)
         let items = URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems ?? []
         guard callback.host == "pai-auth", items.first(where: { $0.name == "state" })?.value == state,
               let token = items.first(where: { $0.name == "token" })?.value, token.hasPrefix("pd_") else {
@@ -115,15 +115,15 @@ public enum PaiAuth {
 }
 
 /// `ASWebAuthenticationSession` as one async call; it shares Safari's cookies, so a phone already signed in to Desk
-/// only confirms.
-private final class WebSignIn: NSObject, ASWebAuthenticationPresentationContextProviding {
-    private static var running: WebSignIn?
+/// only confirms. Also how a mailbox is connected (Google's consent, answered with `paigram://pai-mailbox`).
+final class PaiWebSheet: NSObject, ASWebAuthenticationPresentationContextProviding {
+    private static var running: PaiWebSheet?
     private var session: ASWebAuthenticationSession?
 
     @MainActor
     static func run(url: URL, callbackScheme: String) async throws -> URL {
         try await withCheckedThrowingContinuation { continuation in
-            let signIn = WebSignIn()
+            let signIn = PaiWebSheet()
             let session = ASWebAuthenticationSession(url: url, callbackURLScheme: callbackScheme) { callback, error in
                 running = nil
                 if let callback {

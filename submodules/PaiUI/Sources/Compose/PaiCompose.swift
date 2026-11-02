@@ -95,7 +95,10 @@ public extension PaiClient {
                 return ["fromMe": message.fromMe, "author": message.author, "text": message.text, "at": Int(message.at)]
             },
             // Questions come back in English whatever the chat's language: the user reads them, not the peer.
-            "askIn": "English"
+            "askIn": "English",
+            // "Tomorrow" and "at 5" are his, so the box reads them against this phone's clock and zone.
+            "now": Int(Date().timeIntervalSince1970),
+            "timeZone": TimeZone.current.identifier
         ]
         if let subject = context.subject {
             body["subject"] = subject

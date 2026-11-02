@@ -80,7 +80,11 @@ extension ChatControllerImpl {
         })
         // The box's notes ride on the undo toast rather than a sheet: there is nothing to answer.
         self.presentPaiComposeToast(title: notes.isEmpty ? nil : "Rewritten", text: notes.isEmpty ? "Rewritten" : notes.joined(separator: "\n"), undo: { [weak self] in
-            self?.updateChatPresentationInterfaceState(animated: true, interactive: true, { state in
+            // Sent or edited since: the draft is gone and must not come back into the field.
+            guard let self, let panel = self.chatDisplayNode.textInputPanelNode, paiComposeDraft(panel.inputTextState) == text.trimmingCharacters(in: .whitespacesAndNewlines) else {
+                return
+            }
+            self.updateChatPresentationInterfaceState(animated: true, interactive: true, { state in
                 return state.updatedInterfaceState { $0.withUpdatedEffectiveInputState(original) }
             })
         })

@@ -87,6 +87,9 @@ extension PeerInfoScreenNode {
                 push(paiStatsController(context: self.context))
             }
         case .email:
+            guard #available(iOS 16.0, *) else {
+                break
+            }
             push(emailSettingsController(context: self.context, openChat: { [weak self] peerId in
                 guard let self else {
                     return
