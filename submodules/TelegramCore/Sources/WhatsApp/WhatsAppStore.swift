@@ -9,14 +9,24 @@ public struct WhatsAppState: Codable, Equatable {
         public let id: Int32
     }
 
+    /// A person's number. A list, not a dictionary: Postbox's encoder cannot store a dictionary with number keys.
+    public struct Phone: Codable, Equatable {
+        public let person: Int64
+        public let phone: String
+    }
+
     public var seq: Int64
     /// His own person id on the box; nil until WhatsApp says who he is.
     public var me: Int64?
-    /// Person id → phone number, for the people that have one.
-    public var phones: [Int64: String]
+    /// The numbers of the people that have one.
+    public var phones: [Phone]
     public var sending: [Sending]
 
-    public static let empty = WhatsAppState(seq: 0, me: nil, phones: [:], sending: [])
+    public static let empty = WhatsAppState(seq: 0, me: nil, phones: [], sending: [])
+
+    public func phone(person: Int64) -> String? {
+        return self.phones.first(where: { $0.person == person })?.phone
+    }
 }
 
 func currentWhatsAppState(transaction: Transaction) -> WhatsAppState {
@@ -77,15 +87,15 @@ func rememberWhatsAppPeople(transaction: Transaction, _ people: [WhatsAppPersonD
     for person in people {
         storeWhatsAppPerson(transaction: transaction, person: person)
     }
-    let phones = people.compactMap { person in person.phone.map { (person.id, $0) } }
-    guard !phones.isEmpty else {
+    let known = currentWhatsAppState(transaction: transaction).phones
+    let changed = people.compactMap { person in person.phone.map { WhatsAppState.Phone(person: person.id, phone: $0) } }.filter { !known.contains($0) }
+    guard !changed.isEmpty else {
         return
     }
+    let changedPeople = Set(changed.map(\.person))
     updateWhatsAppState(transaction: transaction, { state in
         var state = state
-        for (id, phone) in phones {
-            state.phones[id] = phone
-        }
+        state.phones = state.phones.filter { !changedPeople.contains($0.person) } + changed
         return state
     })
 }

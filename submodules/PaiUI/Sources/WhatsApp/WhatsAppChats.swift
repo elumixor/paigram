@@ -33,7 +33,7 @@ public enum WhatsAppChats {
         guard peerId.isWhatsApp, !peerId.isWhatsAppGroup else {
             return nil
         }
-        return self.state.with { $0.phones[peerId.id._internalGetInt64Value()] }.map { "+\($0) · WhatsApp" } ?? "WhatsApp"
+        return self.state.with { $0.phone(person: peerId.id._internalGetInt64Value()) }.map { "+\($0) · WhatsApp" } ?? "WhatsApp"
     }
     
     /// Whether a notification is one of the box's WhatsApp pushes.
