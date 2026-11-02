@@ -1,4 +1,5 @@
 import Foundation
+import Intents
 import UserNotifications
 
 /// pai's questions answered from the notification itself — and from the watch, which mirrors its buttons. A
@@ -12,6 +13,12 @@ enum PaiNotification {
         let baseURL: String
         let token: String
         let botUserId: String
+    }
+
+    /// What the box needs to reach it again: enough for a sender's picture.
+    private struct BoxConfig: Decodable {
+        let baseURL: String
+        let token: String
     }
 
     private struct Need: Decodable {
@@ -87,5 +94,85 @@ enum PaiNotification {
                 completion(mutable)
             }
         }
+    }
+
+    // MARK: Mail and WhatsApp
+
+    /// A push the box sent itself (mail, WhatsApp), not one of Telegram's: it carries `pai` with who wrote, the chat
+    /// it belongs to and where the sender's picture is.
+    static func isBoxPush(_ userInfo: [AnyHashable: Any]) -> Bool {
+        return userInfo["pai"] is [String: Any]
+    }
+
+    /// Shown as a message from a person, the way Telegram's own are: their picture on the lock screen, one stack per
+    /// chat. A picture that does not come in time is left out rather than holding the banner back.
+    static func decorateBoxPush(_ content: UNNotificationContent, appGroupPath: String?, completion: @escaping (UNNotificationContent) -> Void) {
+        guard let info = content.userInfo["pai"] as? [String: Any], let mutable = content.mutableCopy() as? UNMutableNotificationContent else {
+            completion(content)
+            return
+        }
+        let thread = info["thread"] as? String ?? content.threadIdentifier
+        if !thread.isEmpty {
+            mutable.threadIdentifier = thread
+        }
+        let config = appGroupPath
+            .flatMap { try? Data(contentsOf: URL(fileURLWithPath: $0 + "/pai.json")) }
+            .flatMap { try? JSONDecoder().decode(BoxConfig.self, from: $0) }
+        let base = config?.baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let senderURL = (info["avatar"] as? String).flatMap { path in base.flatMap { URL(string: $0 + path) } }
+        let groupURL = (info["groupAvatar"] as? String).flatMap { path in base.flatMap { URL(string: $0 + path) } }
+
+        let group = DispatchGroup()
+        var senderImage: INImage?
+        var groupImage: INImage?
+        if let config {
+            for (url, assign) in [(senderURL, { (image: INImage) in senderImage = image }), (groupURL, { (image: INImage) in groupImage = image })] {
+                guard let url else { continue }
+                group.enter()
+                var request = URLRequest(url: url, timeoutInterval: 5.0)
+                request.setValue("Bearer \(config.token)", forHTTPHeaderField: "Authorization")
+                URLSession.shared.dataTask(with: request) { data, response, _ in
+                    if let data, !data.isEmpty, (response as? HTTPURLResponse)?.statusCode == 200 {
+                        DispatchQueue.main.async { assign(INImage(imageData: data)) }
+                    }
+                    DispatchQueue.main.async { group.leave() }
+                }.resume()
+            }
+        }
+        group.notify(queue: .main) {
+            completion(communication(mutable, info: info, thread: thread, senderImage: senderImage, groupImage: groupImage))
+        }
+    }
+
+    private static func communication(_ content: UNMutableNotificationContent, info: [String: Any], thread: String, senderImage: INImage?, groupImage: INImage?) -> UNNotificationContent {
+        guard #available(iOS 15.0, *) else { return content }
+        let senderName = info["sender"] as? String ?? content.title
+        let senderId = info["senderId"] as? String ?? thread
+        let groupName = info["group"] as? String
+        let sender = INPerson(personHandle: INPersonHandle(value: senderId, type: .unknown), nameComponents: nil, displayName: senderName, image: senderImage, contactIdentifier: nil, customIdentifier: senderId)
+        let me = INPerson(personHandle: INPersonHandle(value: "0", type: .unknown), nameComponents: nil, displayName: nil, image: nil, contactIdentifier: nil, customIdentifier: nil, isMe: true, suggestionType: .none)
+        // A group is drawn as one only with more than one recipient; the sender stands in as the second.
+        let intent = INSendMessageIntent(
+            recipients: groupName == nil ? [me] : [me, sender],
+            outgoingMessageType: .outgoingMessageText,
+            content: content.body,
+            speakableGroupName: groupName.map { INSpeakableString(spokenPhrase: $0) },
+            conversationIdentifier: thread,
+            serviceName: info["service"] as? String,
+            sender: sender,
+            attachments: nil
+        )
+        if let senderImage {
+            intent.setImage(senderImage, forParameterNamed: \.sender)
+        }
+        if groupName != nil, let groupImage {
+            intent.setImage(groupImage, forParameterNamed: \.speakableGroupName)
+        }
+        let interaction = INInteraction(intent: intent, response: nil)
+        interaction.direction = .incoming
+        interaction.donate(completion: nil)
+        guard let updated = try? content.updating(from: intent), let result = updated.mutableCopy() as? UNMutableNotificationContent else { return content }
+        result.threadIdentifier = thread
+        return result
     }
 }

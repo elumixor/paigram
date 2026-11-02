@@ -2568,6 +2568,16 @@ final class NotificationService: UNNotificationServiceExtension {
 
         self.impl = nil
 
+        // Mail and WhatsApp pushed by pai's box have nothing for Telegram's handler to decrypt.
+        if PaiNotification.isBoxPush(request.content.userInfo) {
+            PaiNotification.decorateBoxPush(request.content, appGroupPath: paiAppGroupPath(), completion: { [weak self] content in
+                guard let self, let contentHandler = self.contentHandler else { return }
+                self.contentHandler = nil
+                contentHandler(content)
+            })
+            return
+        }
+
         let content = self.content
 
         self.impl = QueueLocalObject(queue: queue, generate: { [weak self] in

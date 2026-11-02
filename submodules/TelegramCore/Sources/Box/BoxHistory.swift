@@ -30,7 +30,9 @@ func fillBoxHistoryHole(postbox: Postbox, peerId: PeerId, namespace: MessageId.N
     guard case .everywhere = space, PaiBox.configuration != nil, namespace == Namespaces.Message.Box else {
         return filled(window, [])
     }
-    return fetchPage(BoxMessageIds.dateAfter(id: window.upperBound), min(max(count, 20), 50))
+    // A failed page is asked again: Postbox counts the hole as handled once this completes and does not come back
+    // to it while the chat stays open, so giving up here leaves the chat empty.
+    return retryingBoxPage(fetchPage(BoxMessageIds.dateAfter(id: window.upperBound), min(max(count, 20), 50)), attempts: 4, wait: 1.0)
     |> mapToSignal { page -> Signal<FetchMessageHistoryHoleResult?, NoError> in
         guard let page else {
             return .single(nil)
@@ -39,6 +41,17 @@ func fillBoxHistoryHole(postbox: Postbox, peerId: PeerId, namespace: MessageId.N
         let oldest = page.ids.map(\.id).min() ?? window.lowerBound
         let lower = !page.more || oldest <= window.lowerBound ? window.lowerBound : oldest
         return filled(lower ... window.upperBound, page.ids)
+    }
+}
+
+private func retryingBoxPage(_ page: Signal<BoxHistoryPage?, NoError>, attempts: Int, wait: Double) -> Signal<BoxHistoryPage?, NoError> {
+    return page
+    |> mapToSignal { result -> Signal<BoxHistoryPage?, NoError> in
+        guard result == nil, attempts > 0 else {
+            return .single(result)
+        }
+        return (Signal<BoxHistoryPage?, NoError>.complete() |> delay(wait, queue: Queue.concurrentDefaultQueue()))
+        |> then(retryingBoxPage(page, attempts: attempts - 1, wait: wait * 2.0))
     }
 }
 

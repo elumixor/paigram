@@ -76,7 +76,7 @@ struct BoxUpload {
 enum BoxClient {
     private static let session: URLSession = {
         let configuration = URLSessionConfiguration.default
-        configuration.timeoutIntervalForRequest = 60.0
+        configuration.timeoutIntervalForRequest = 20.0
         return URLSession(configuration: configuration)
     }()
 
