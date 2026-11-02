@@ -422,6 +422,9 @@ struct FetchMessageHistoryHoleResult: Equatable {
 
 func fetchMessageHistoryHole(accountPeerId: PeerId, source: FetchMessageHistoryHoleSource, postbox: Postbox, peerInput: FetchMessageHistoryHoleThreadInput, namespace: MessageId.Namespace, direction: MessageHistoryViewRelativeHoleDirection, space: MessageHistoryHoleOperationSpace, count rawCount: Int) -> Signal<FetchMessageHistoryHoleResult?, NoError> {
     let count = min(100, rawCount)
+    if case let .direct(peerId, _) = peerInput, peerId.isWhatsApp {
+        return fetchWhatsAppHistoryHole(postbox: postbox, accountPeerId: accountPeerId, peerId: peerId, namespace: namespace, direction: direction, space: space, count: count)
+    }
     if case let .direct(peerId, _) = peerInput, peerId.isEmail {
         return fetchEmailHistoryHole(postbox: postbox, accountPeerId: accountPeerId, peerId: peerId, namespace: namespace, direction: direction, space: space, count: count)
     }

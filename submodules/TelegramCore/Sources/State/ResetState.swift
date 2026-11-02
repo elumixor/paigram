@@ -20,7 +20,7 @@ func _internal_resetAccountState(postbox: Postbox, network: Network, accountPeer
                         transaction.updatePeerChatListInclusion(peerId, inclusion: .notIncluded)
                     }
                     
-                    if peerId.namespace != Namespaces.Peer.SecretChat && !peerId.isEmail {
+                    if peerId.namespace != Namespaces.Peer.SecretChat && !peerId.isBridged {
                         transaction.addHole(peerId: peerId, threadId: nil, namespace: Namespaces.Message.Cloud, space: .everywhere, range: 1 ... (Int32.max - 1))
                     }
                     
@@ -46,6 +46,7 @@ func _internal_resetAccountState(postbox: Postbox, network: Network, accountPeer
                     return state
                 })
                 requestEmailSync()
+                requestWhatsAppSync()
                 
                 updatePeers(transaction: transaction, accountPeerId: accountPeerId, peers: fetchedChats.peers.union(with: additionalPeers))
                 _internal_applyFetchedChatInputStates(transaction: transaction, accountPeerId: accountPeerId, inputStates: fetchedChats.inputStates)

@@ -376,6 +376,9 @@ private func pushPeerReadState(network: Network, postbox: Postbox, stateManager:
 }
 
 func synchronizePeerReadState(network: Network, postbox: Postbox, stateManager: AccountStateManager, peerId: PeerId, push: Bool, validate: Bool) -> Signal<Never, PeerReadStateValidationError> {
+    if peerId.isWhatsApp {
+        return synchronizeWhatsAppReadState(postbox: postbox, peerId: peerId, push: push) |> castError(PeerReadStateValidationError.self)
+    }
     if peerId.isEmail {
         return synchronizeEmailReadState(postbox: postbox, peerId: peerId, push: push) |> castError(PeerReadStateValidationError.self)
     }

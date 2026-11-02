@@ -116,6 +116,7 @@ public enum PresentationResourceKey: Int32 {
     case chatListFakeServiceIcon
     case chatListSecretIcon
     case chatListEmailIcon
+    case chatListWhatsAppIcon
     case chatListStatusLockIcon
     case chatListTopicArrowIcon
     case chatListRecentStatusOnlineIcon

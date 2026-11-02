@@ -173,6 +173,7 @@ private var declaredEncodables: Void = {
     declareEncodable(CachedSecretChatData.self, f: { CachedSecretChatData(decoder: $0) })
     declareEncodable(AuthorSignatureMessageAttribute.self, f: { AuthorSignatureMessageAttribute(decoder: $0) })
     declareEncodable(EmailMessageAttribute.self, f: { EmailMessageAttribute(decoder: $0) })
+    declareEncodable(WhatsAppMessageAttribute.self, f: { WhatsAppMessageAttribute(decoder: $0) })
     declareEncodable(TelegramMediaExpiredContent.self, f: { TelegramMediaExpiredContent(decoder: $0) })
     declareEncodable(ConsumablePersonalMentionMessageAttribute.self, f: { ConsumablePersonalMentionMessageAttribute(decoder: $0) })
     declareEncodable(ConsumePersonalMessageAction.self, f: { ConsumePersonalMessageAction(decoder: $0) })

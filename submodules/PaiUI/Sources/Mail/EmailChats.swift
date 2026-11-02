@@ -11,9 +11,9 @@ public enum EmailChats {
     private static let stateDisposable = MetaDisposable()
     private static var activeObserver: NSObjectProtocol?
     
-    /// Before any account starts: sync and sends talk to the box the app ships with.
+    /// Before any account starts: email and WhatsApp sync and send through the box the app ships with.
     public static func configure() {
-        EmailBox.configure(baseURL: PaiSecrets.baseURL, token: PaiSecrets.token)
+        PaiBox.configure(baseURL: PaiSecrets.baseURL, token: PaiSecrets.token)
     }
     
     /// The account whose chats sync now: its state is followed, and each return to the app syncs.

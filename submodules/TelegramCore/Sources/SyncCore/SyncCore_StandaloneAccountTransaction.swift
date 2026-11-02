@@ -9,8 +9,10 @@ public let telegramPostboxSeedConfiguration: SeedConfiguration = {
             Namespaces.Message.Cloud: Set(MessageTags.all)
         ]
     }
-    // An email chat's history is loaded from the box as it is scrolled, through the same holes.
-    messageHoles[Namespaces.Peer.Email] = [Namespaces.Message.Email: Set()]
+    // A box chat's history (email, WhatsApp) is loaded from the box as it is scrolled, through the same holes.
+    for peerNamespace in [Namespaces.Peer.Email, Namespaces.Peer.WhatsApp, Namespaces.Peer.WhatsAppGroup] {
+        messageHoles[peerNamespace] = [Namespaces.Message.Box: Set()]
+    }
     
     // To avoid upgrading the database, **new** tags can be added here
     // Uninitialized peers will fill the info using messageHoles
@@ -50,7 +52,7 @@ public let telegramPostboxSeedConfiguration: SeedConfiguration = {
         messageTagsWithSummary: [.unseenPersonalMessage, .pinned, .video, .photo, .gif, .music, .voiceOrInstantVideo, .webPage, .file, .unseenReaction, .unseenPollVote],
         messageTagsWithThreadSummary: [.unseenPersonalMessage, .unseenReaction, .unseenPollVote],
         existingGlobalMessageTags: GlobalMessageTags.all,
-        peerNamespacesRequiringMessageTextIndex: [Namespaces.Peer.SecretChat, Namespaces.Peer.Email],
+        peerNamespacesRequiringMessageTextIndex: [Namespaces.Peer.SecretChat, Namespaces.Peer.Email, Namespaces.Peer.WhatsApp, Namespaces.Peer.WhatsAppGroup],
         peerSummaryCounterTags: { peer, isContact in
             if let peer = peer as? TelegramUser {
                 if peer.botInfo != nil {
@@ -104,7 +106,7 @@ public let telegramPostboxSeedConfiguration: SeedConfiguration = {
         additionalChatListIndexNamespace: Namespaces.Message.Cloud,
         messageNamespacesRequiringGroupStatsValidation: [Namespaces.Message.Cloud],
         defaultMessageNamespaceReadStates: [Namespaces.Message.Local: .idBased(maxIncomingReadId: 0, maxOutgoingReadId: 0, maxKnownId: 0, count: 0, markedUnread: false)],
-        chatMessagesNamespaces: Set([Namespaces.Message.Cloud, Namespaces.Message.Local, Namespaces.Message.SecretIncoming, Namespaces.Message.Email]),
+        chatMessagesNamespaces: Set([Namespaces.Message.Cloud, Namespaces.Message.Local, Namespaces.Message.SecretIncoming, Namespaces.Message.Box]),
         getGlobalNotificationSettings: { transaction -> PostboxGlobalNotificationSettings? in
             (transaction.getPreferencesEntry(key: PreferencesKeys.globalNotifications)?.get(GlobalNotificationSettings.self)).flatMap { settings in
                 return PostboxGlobalNotificationSettings(defaultIncludePeer: { peer in

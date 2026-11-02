@@ -33,6 +33,7 @@ func _internal_deleteMessagesInteractively(account: Account, messageIds: [Messag
             }
         }
 
+        // A WhatsApp message deleted here is deleted on this device only: WhatsApp's own delete is a different promise.
         startTrashingEmails(transaction: transaction, messageIds: messageIds)
         deleteMessagesInteractively(transaction: transaction, stateManager: account.stateManager, postbox: account.postbox, messageIds: messageIds, type: type, removeIfPossiblyDelivered: true)
         return ephemeralRequests

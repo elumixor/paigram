@@ -48,6 +48,10 @@ public final class TelegramEngine {
     public lazy var email: Email = {
         return Email(account: self.account)
     }()
+    
+    public lazy var whatsApp: WhatsApp = {
+        return WhatsApp(account: self.account)
+    }()
 
     public lazy var privacy: Privacy = {
         return Privacy(account: self.account)

@@ -31,14 +31,14 @@ public extension TelegramEngine {
         
         /// A chat with anyone by address, made on the box first so it has the same id everywhere; it is in the
         /// chat list from the start, since the user asked for it.
-        public func openChat(address: String, name: String) -> Signal<EnginePeer.Id, EmailBoxError> {
+        public func openChat(address: String, name: String) -> Signal<EnginePeer.Id, BoxError> {
             struct Body: Encodable {
                 let address: String
                 let name: String
             }
             let postbox = self.account.postbox
-            return (EmailClient.post("/gmail/contacts", body: Body(address: address, name: name)) as Signal<EmailContactData, EmailBoxError>)
-            |> mapToSignal { contact -> Signal<EnginePeer.Id, EmailBoxError> in
+            return (BoxClient.post("/gmail/contacts", body: Body(address: address, name: name)) as Signal<EmailContactData, BoxError>)
+            |> mapToSignal { contact -> Signal<EnginePeer.Id, BoxError> in
                 return postbox.transaction { transaction -> EnginePeer.Id in
                     let peerId = storeEmailContact(transaction: transaction, contact: contact)
                     if case .notIncluded = transaction.getPeerChatListInclusion(peerId) {
@@ -46,7 +46,7 @@ public extension TelegramEngine {
                     }
                     return peerId
                 }
-                |> castError(EmailBoxError.self)
+                |> castError(BoxError.self)
             }
         }
     }

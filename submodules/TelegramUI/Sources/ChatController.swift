@@ -9980,6 +9980,14 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
     ) {
         self.commitPurposefulAction()
         
+        // A whole email is a page of the box: always the app's own browser, whatever the setting for other links.
+        if EmailBox.isEmailPage(url), let navigationController = self.effectiveNavigationController {
+            progress?.set(.single(false))
+            self.chatDisplayNode.dismissInput()
+            navigationController.pushViewController(BrowserScreen(context: self.context, subject: .webPage(url: url)))
+            return
+        }
+        
         if allowInlineWebpageResolution, let message, let webpage = message.media.first(where: { $0 is TelegramMediaWebpage }) as? TelegramMediaWebpage, case let .Loaded(content) = webpage.content, content.url == url {
             if content.instantPage != nil {
                 if let navigationController = self.navigationController as? NavigationController {
@@ -10008,8 +10016,8 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
             guard let self else {
                 return
             }
-            // Mail hides nearly every link behind its words: asking before each one would be noise.
-            let skipConcealedAlert = skipConcealedAlert || self.chatLocation.peerId?.isEmail == true
+            // Mail hides nearly every link behind its words, and a box chat's links were never Telegram's to vet: asking before each one would be noise.
+            let skipConcealedAlert = skipConcealedAlert || self.chatLocation.peerId?.isBridged == true
             let disposable = self.context.sharedContext.openUserGeneratedUrl(context: self.context, peerId: self.contentData?.state.peerView?.peerId, url: url, webpage: nil, concealed: concealed, forceConcealed: false, skipUrlAuth: skipUrlAuth, skipConcealedAlert: skipConcealedAlert, forceDark: false, present: { [weak self] c in
                 self?.present(c, in: .window(.root))
             }, openResolved: { [weak self] resolved in

@@ -29,7 +29,7 @@ func startTrashingEmails(transaction: Transaction, messageIds: [MessageId]) {
     guard !items.isEmpty else {
         return
     }
-    let _ = (EmailClient.post("/gmail/trash", body: EmailTrashBody(items: items)) as Signal<EmailTrashResponse, EmailBoxError>).startStandalone(error: { error in
+    let _ = (BoxClient.post("/gmail/trash", body: EmailTrashBody(items: items)) as Signal<EmailTrashResponse, BoxError>).startStandalone(error: { error in
         Logger.shared.log("Email", "trash failed: \(error)")
     })
 }
@@ -56,7 +56,7 @@ func pushEmailNotificationSettings(postbox: Postbox, peerId: PeerId, settings: P
         if case let .muted(until) = settings.muteState {
             muted = until > Int32(Date().timeIntervalSince1970)
         }
-        return (EmailClient.post("/gmail/mute", body: EmailMuteBody(contact: peerId.id._internalGetInt64Value(), muted: muted)) as Signal<EmailContactData, EmailBoxError>)
+        return (BoxClient.post("/gmail/mute", body: EmailMuteBody(contact: peerId.id._internalGetInt64Value(), muted: muted)) as Signal<EmailContactData, BoxError>)
         |> map { _ in Void() }
         |> `catch` { error -> Signal<Void, NoError> in
             Logger.shared.log("Email", "mute of \(peerId) failed: \(error)")

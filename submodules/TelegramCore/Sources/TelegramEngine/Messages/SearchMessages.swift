@@ -371,7 +371,7 @@ func _internal_searchMessages(account: Account, location: SearchMessagesLocation
     let remoteSearchResult: Signal<(Api.messages.Messages?, Api.messages.Messages?), NoError>
     switch location {
         case let .peer(peerId, fromId, tags, reactions, threadId, minDate, maxDate):
-            if peerId.namespace == Namespaces.Peer.SecretChat || peerId.isEmail {
+            if peerId.namespace == Namespaces.Peer.SecretChat || peerId.isBridged {
                 let local = account.postbox.transaction { transaction -> (SearchMessagesResult, SearchMessagesState) in
                     var readStates: [PeerId: CombinedPeerReadState] = [:]
                     var threadInfo: [MessageId: MessageHistoryThreadData] = [:]
@@ -396,9 +396,12 @@ func _internal_searchMessages(account: Account, location: SearchMessagesLocation
                     
                     return (SearchMessagesResult(messages: result, readStates: readStates, threadInfo: threadInfo, totalCount: Int32(result.count), completed: true), SearchMessagesState(main: SearchMessagesPeerState(messages: [], readStates: [:], threadInfo: [:], totalCount: 0, completed: true, nextRate: nil), additional: nil))
                 }
-                // An email chat also asks Gmail, then searches again with what that stored.
+                // A box chat also asks the box (Gmail's search, WhatsApp's store), then searches again with what that stored.
                 if peerId.isEmail {
                     return local |> then(emailBoxSearch(postbox: account.postbox, accountPeerId: account.peerId, query: query, peerId: peerId) |> mapToSignal { _ in local })
+                }
+                if peerId.isWhatsApp {
+                    return local |> then(whatsAppBoxSearch(postbox: account.postbox, accountPeerId: account.peerId, query: query, peerId: peerId) |> mapToSignal { _ in local })
                 }
                 return local
             }
@@ -653,13 +656,14 @@ func _internal_searchMessages(account: Account, location: SearchMessagesLocation
             return (mergedResult(updatedState), updatedState)
         }
     }
-    // The first page of a search everywhere also asks Gmail: Telegram's results come first, mail found on the box after.
+    // The first page of a search everywhere also asks the box: Telegram's results come first, mail and WhatsApp found on the box after.
     guard state == nil, case let .general(scope, _, tags, minDate, maxDate, _, communityId) = location, communityId == nil, !isChannelsScope(scope) else {
         return searchResult
     }
     return searchResult
     |> mapToSignal { first -> Signal<(SearchMessagesResult, SearchMessagesState), NoError> in
-        let withMail = emailBoxSearch(postbox: account.postbox, accountPeerId: account.peerId, query: query, peerId: nil)
+        let withMail = combineLatest(emailBoxSearch(postbox: account.postbox, accountPeerId: account.peerId, query: query, peerId: nil), whatsAppBoxSearch(postbox: account.postbox, accountPeerId: account.peerId, query: query, peerId: nil))
+        |> take(1)
         |> mapToSignal { _ -> Signal<(SearchMessagesResult, SearchMessagesState), NoError> in
             return account.postbox.transaction { transaction -> (SearchMessagesResult, SearchMessagesState) in
                 let updated = SearchMessagesState(main: first.1.main, additional: localSearchState(transaction: transaction, query: query, tags: tags, minDate: minDate, maxDate: maxDate))

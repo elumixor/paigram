@@ -570,6 +570,17 @@ private func opportunisticallyTransformOutgoingMedia(network: Network, postbox: 
 }
 
 public func enqueueMessages(account: Account, peerId: PeerId, messages: [EnqueueMessage]) -> Signal<[MessageId?], NoError> {
+    if peerId.isWhatsApp {
+        return account.postbox.transaction { transaction -> [MessageId] in
+            return enqueueWhatsAppMessages(transaction: transaction, accountPeerId: account.peerId, peerId: peerId, messages: messages)
+        }
+        |> map { ids -> [MessageId?] in
+            for id in ids {
+                let _ = sendWhatsAppMessage(postbox: account.postbox, messageId: id).startStandalone()
+            }
+            return ids
+        }
+    }
     if peerId.isEmail {
         return account.postbox.transaction { transaction -> [MessageId] in
             return enqueueEmailMessages(transaction: transaction, accountPeerId: account.peerId, peerId: peerId, messages: messages)
@@ -627,11 +638,13 @@ public func enqueueMessages(account: Account, peerId: PeerId, messages: [Enqueue
 }
 
 public func resendMessages(account: Account, messageIds: [MessageId]) -> Signal<Void, NoError> {
-    let emailIds = messageIds.filter { $0.peerId.isEmail }
-    if !emailIds.isEmpty {
-        let others = messageIds.filter { !$0.peerId.isEmail }
-        let email = resendEmailMessages(postbox: account.postbox, accountPeerId: account.peerId, messageIds: emailIds)
-        return others.isEmpty ? email : combineLatest(email, resendMessages(account: account, messageIds: others)) |> map { _ in Void() }
+    let boxIds = messageIds.filter { $0.peerId.isBridged }
+    if !boxIds.isEmpty {
+        let others = messageIds.filter { !$0.peerId.isBridged }
+        let email = resendEmailMessages(postbox: account.postbox, accountPeerId: account.peerId, messageIds: boxIds.filter { $0.peerId.isEmail })
+        let whatsApp = resendWhatsAppMessages(postbox: account.postbox, messageIds: boxIds.filter { $0.peerId.isWhatsApp })
+        let box = combineLatest(email, whatsApp) |> map { _ in Void() }
+        return others.isEmpty ? box : combineLatest(box, resendMessages(account: account, messageIds: others)) |> map { _ in Void() }
     }
     return account.postbox.transaction { transaction -> Void in
         var removeMessageIds: [MessageId] = []

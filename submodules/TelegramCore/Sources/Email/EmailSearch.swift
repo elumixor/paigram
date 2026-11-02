@@ -6,14 +6,14 @@ import SwiftSignalKit
 /// local search that runs after it finds it like any other message. Emits once, when that is done (or failed).
 func emailBoxSearch(postbox: Postbox, accountPeerId: PeerId, query: String, peerId: PeerId?) -> Signal<Void, NoError> {
     let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard EmailBox.configuration != nil, trimmed.count >= 2 else {
+    guard PaiBox.configuration != nil, trimmed.count >= 2 else {
         return .single(Void())
     }
     var parameters = ["q": trimmed]
     if let peerId {
         parameters["contact"] = "\(peerId.id._internalGetInt64Value())"
     }
-    return (EmailClient.get("/gmail/search", query: parameters) as Signal<EmailSearchResponse, EmailBoxError>)
+    return (BoxClient.get("/gmail/search", query: parameters) as Signal<EmailSearchResponse, BoxError>)
     |> map(Optional.init)
     |> `catch` { error -> Signal<EmailSearchResponse?, NoError> in
         Logger.shared.log("Email", "search failed: \(error)")

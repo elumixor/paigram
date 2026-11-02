@@ -1307,6 +1307,7 @@ public class Account {
         let _ = _internal_failStaleEphemeralOutgoingMessages(postbox: postbox).start()
         if !supplementary {
             let _ = failInterruptedEmailSends(postbox: postbox).start()
+            let _ = failInterruptedWhatsAppSends(postbox: postbox).start()
         }
         if !supplementary {
             self.pendingStoryManager = PendingStoryManager(postbox: postbox, network: network, accountPeerId: peerId, stateManager: self.stateManager, messageMediaPreuploadManager: self.messageMediaPreuploadManager, revalidationContext: self.mediaReferenceRevalidationContext, auxiliaryMethods: self.auxiliaryMethods)

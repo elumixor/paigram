@@ -1218,6 +1218,7 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
         |> distinctUntilChanged(isEqual: { $0?.account.id == $1?.account.id })
         |> deliverOnMainQueue).start(next: { context in
             EmailChats.attach(engine: context?.engine)
+            WhatsAppChats.attach(engine: context?.engine)
         })
             
         self.context.set(self.sharedContextPromise.get()
@@ -3049,9 +3050,14 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
     
     @available(iOS 10.0, *)
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        // New mail while the app is open shows up in its chat, not as a banner.
+        // New mail or a WhatsApp message while the app is open shows up in its chat, not as a banner.
         if EmailChats.isEmailPush(notification.request.content.userInfo) {
             EmailChats.syncNow()
+            completionHandler([])
+            return
+        }
+        if WhatsAppChats.isWhatsAppPush(notification.request.content.userInfo) {
+            WhatsAppChats.syncNow()
             completionHandler([])
             return
         }

@@ -485,6 +485,25 @@ public struct PresentationResourcesChatList {
         })
     }
     
+    /// A speech bubble before a WhatsApp chat's title, where a secret chat has its lock.
+    public static func whatsAppIcon(_ theme: PresentationTheme) -> UIImage? {
+        return theme.image(PresentationResourceKey.chatListWhatsAppIcon.rawValue, { theme in
+            return generateImage(CGSize(width: 12.0, height: 12.0), rotatedContext: { size, context in
+                context.clear(CGRect(origin: CGPoint(), size: size))
+                context.setStrokeColor(UIColor(rgb: 0x25d366).cgColor)
+                context.setLineWidth(1.32)
+                context.setLineJoin(.round)
+                let circle = CGRect(origin: CGPoint(x: 1.2, y: 0.66), size: CGSize(width: size.width - 1.86, height: size.height - 1.86))
+                let path = UIBezierPath(ovalIn: circle)
+                path.move(to: CGPoint(x: circle.minX + 1.6, y: circle.maxY - 2.2))
+                path.addLine(to: CGPoint(x: 0.66, y: size.height - 0.66))
+                path.addLine(to: CGPoint(x: circle.minX + 3.2, y: circle.maxY - 0.6))
+                context.addPath(path.cgPath)
+                context.strokePath()
+            })
+        })
+    }
+    
     /// An envelope before an email chat's title, where a secret chat has its lock.
     public static func emailIcon(_ theme: PresentationTheme) -> UIImage? {
         return theme.image(PresentationResourceKey.chatListEmailIcon.rawValue, { theme in

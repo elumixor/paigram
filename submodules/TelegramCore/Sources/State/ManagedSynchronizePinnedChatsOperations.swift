@@ -117,21 +117,21 @@ private func synchronizePinnedChats(transaction: Transaction, postbox: Postbox, 
     let initialRemoteItemIdsWithoutSecretChats = initialRemoteItemIds.filter { item in
         switch item {
             case let .peer(peerId):
-                return peerId.namespace != Namespaces.Peer.SecretChat && !peerId.isEmail
+                return peerId.namespace != Namespaces.Peer.SecretChat && !peerId.isBridged
         }
     }
     let localItemIds = transaction.getPinnedItemIds(groupId: groupId)
     let localItemIdsWithoutSecretChats = localItemIds.filter { item in
         switch item {
             case let .peer(peerId):
-                return peerId.namespace != Namespaces.Peer.SecretChat && !peerId.isEmail
+                return peerId.namespace != Namespaces.Peer.SecretChat && !peerId.isBridged
         }
     }
     // Telegram's server never hears of email chats, so their pins are this device's alone.
     let localEmailItemIds = localItemIds.filter { item in
         switch item {
             case let .peer(peerId):
-                return peerId.isEmail
+                return peerId.isBridged
         }
     }
     

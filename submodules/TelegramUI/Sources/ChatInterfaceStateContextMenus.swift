@@ -54,8 +54,8 @@ func canEditMessage(context: AccountContext, limitsConfiguration: EngineConfigur
 }
 
 private func canEditMessage(accountPeerId: EnginePeer.Id, limitsConfiguration: EngineConfiguration.Limits, message: EngineRawMessage, reschedule: Bool = false) -> Bool {
-    // A sent email cannot be changed.
-    if message.id.peerId.isEmail {
+    // A sent email cannot be changed, nor (yet) a WhatsApp message.
+    if message.id.peerId.isBridged {
         return false
     }
     var hasEditRights = false
@@ -1333,6 +1333,16 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
             if media is TelegramMediaImage {
                 isImage = true
             }
+        }
+        
+        // An email shown as a summary, or as its words without its layout: the whole of it as its sender made it.
+        if let email = message.attributes.first(where: { $0 is EmailMessageAttribute }) as? EmailMessageAttribute, !email.viewUrl.isEmpty {
+            actions.append(.action(ContextMenuActionItem(text: "View Original", icon: { theme in
+                return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Browser"), color: theme.actionSheet.primaryTextColor)
+            }, action: { _, f in
+                f(.dismissWithoutContent)
+                controllerInteraction.openUrl(ChatControllerInteraction.OpenUrl(url: email.viewUrl, concealed: false))
+            })))
         }
         
         let isCopyProtected = chatPresentationInterfaceState.copyProtectionEnabled || message.isCopyProtected()

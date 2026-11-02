@@ -418,8 +418,8 @@ public func updatePeersCustom(transaction: Transaction, peers: [Peer], update: (
                 } else {
                     assertionFailure()
                 }
-            case Namespaces.Peer.Email:
-                // Email chats keep the inclusion the box's contact list gives them (`storeEmailContact`).
+            case Namespaces.Peer.Email, Namespaces.Peer.WhatsApp, Namespaces.Peer.WhatsAppGroup:
+                // Box chats keep the inclusion the box's lists give them (`storeEmailContact`, `storeWhatsAppChatPeer`).
                 break
             default:
                 assertionFailure()

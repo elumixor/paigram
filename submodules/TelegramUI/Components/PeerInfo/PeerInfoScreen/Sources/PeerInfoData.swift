@@ -2582,8 +2582,8 @@ func peerInfoHeaderButtons(peer: EnginePeer?, cachedData: CachedPeerData?, isOpe
         }
         var callsAvailable = false
         var videoCallsAvailable = false
-        // An email correspondent is not a Telegram user: nothing to call, block or share.
-        if user.id.isEmail {
+        // An email correspondent or a WhatsApp person is not a Telegram user: nothing to call, block or share.
+        if user.id.isBridged {
             result.append(.mute)
             if isOpenedFromChat {
                 result.append(.search)
@@ -2692,6 +2692,12 @@ func peerInfoHeaderButtons(peer: EnginePeer?, cachedData: CachedPeerData?, isOpe
                     result.append(.more)
                 }
             }
+        }
+    } else if case let .legacyGroup(group) = peer, group.id.isWhatsAppGroup {
+        // A WhatsApp group lives on WhatsApp: nothing here can call it, leave it or manage it.
+        result.append(.mute)
+        if isOpenedFromChat {
+            result.append(.search)
         }
     } else if case let .legacyGroup(group) = peer {
         let hasVoiceChat = group.flags.contains(.hasVoiceChat)

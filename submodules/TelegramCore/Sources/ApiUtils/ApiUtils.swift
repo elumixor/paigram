@@ -50,8 +50,8 @@ extension PeerReference {
 }
 
 func forceApiInputPeer(_ peer: Peer) -> Api.InputPeer? {
-    // An email chat's peer is not Telegram's: nothing about it may reach Telegram's servers.
-    if peer.id.isEmail {
+    // A box chat's peer (email, WhatsApp) is not Telegram's: nothing about it may reach Telegram's servers.
+    if peer.id.isBridged {
         return nil
     }
     switch peer {
@@ -77,6 +77,9 @@ func forceApiInputPeer(_ peer: Peer) -> Api.InputPeer? {
 }
 
 func apiInputPeer(_ peer: Peer) -> Api.InputPeer? {
+    if peer.id.isBridged {
+        return nil
+    }
     switch peer {
     case let user as TelegramUser where user.accessHash != nil:
         return Api.InputPeer.inputPeerUser(.init(userId: user.id.id._internalGetInt64Value(), accessHash: user.accessHash!.value))
@@ -113,6 +116,9 @@ private func apiInputPeerFromSourceMessage(_ sourceMessageId: MessageId?, transa
 }
 
 func apiInputPeer(_ peer: Peer, sourceMessageId: MessageId?, transaction: Transaction) -> Api.InputPeer? {
+    if peer.id.isBridged {
+        return nil
+    }
     switch peer {
     case let user as TelegramUser:
         if let accessHash = user.accessHash {

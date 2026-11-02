@@ -18,7 +18,7 @@ public struct EmailState: Codable, Equatable {
     }
     
     /// How the box draws a message's text; raised when that changes, so mail stored the old way is fetched again.
-    public static let currentTextVersion: Int32 = 1
+    public static let currentTextVersion: Int32 = 2
     
     public var seq: Int64
     public var accounts: [EmailAccountData]
@@ -65,44 +65,9 @@ func updateEmailState(transaction: Transaction, _ f: (EmailState) -> EmailState)
     })
 }
 
-/// Message ids in an email chat follow the date: minutes since 2000, with 64 slots for mail sent in the same
-/// minute. History holes are id ranges, so this is what lets a hole stand for "mail before this date".
-enum EmailMessageIds {
-    private static let epoch: Int64 = 946_684_800
-    private static let slots: Int64 = 64
-    
-    static func base(date: Int64) -> Int32 {
-        let minutes = max(1, (date / 1000 - self.epoch) / 60)
-        return Int32(clamping: minutes * self.slots)
-    }
-    
-    /// The first date after every message an id up to `id` can have; nil for the top of the range (no limit).
-    static func dateAfter(id: Int32) -> Int64? {
-        if id >= Int32.max - 1 {
-            return nil
-        }
-        return ((Int64(id) / self.slots + 1) * 60 + self.epoch) * 1000
-    }
-    
-    /// Gmail's 64-bit hex message id, which every copy of a message is found by.
-    static func globallyUniqueId(gmailId: String) -> Int64 {
-        return Int64(bitPattern: UInt64(gmailId, radix: 16) ?? UInt64(truncatingIfNeeded: gmailId.hashValue))
-    }
-    
-    /// A free id for mail of `date`, or the one the message already has.
-    static func id(transaction: Transaction, peerId: PeerId, date: Int64, globallyUniqueId: Int64) -> MessageId {
-        if let existing = transaction.messageIdForGloballyUniqueMessageId(peerId: peerId, id: globallyUniqueId) {
-            return existing
-        }
-        let base = self.base(date: date)
-        for slot in 0 ..< Int32(self.slots) {
-            let id = MessageId(peerId: peerId, namespace: Namespaces.Message.Email, id: base + slot)
-            if transaction.getMessage(id) == nil {
-                return id
-            }
-        }
-        return MessageId(peerId: peerId, namespace: Namespaces.Message.Email, id: base + Int32(self.slots) - 1)
-    }
+/// Gmail's 64-bit hex message id, which every copy of a message is found by.
+func emailGloballyUniqueId(gmailId: String) -> Int64 {
+    return UInt64(gmailId, radix: 16).map { Int64(bitPattern: $0) } ?? BoxMessageIds.globallyUniqueId(key: "gmail:\(gmailId)")
 }
 
 public extension PeerId {
@@ -115,6 +80,15 @@ func emailPeerId(contactId: Int64) -> PeerId {
     return PeerId(namespace: Namespaces.Peer.Email, id: PeerId.Id._internalFromInt64Value(contactId))
 }
 
+/// The box's square JPEG of a correspondent, fetched over plain HTTP like an attachment.
+private func emailContactPhoto(avatar: String?) -> [TelegramMediaImageRepresentation] {
+    guard let avatar, let url = EmailBox.avatarURL(hash: avatar) else {
+        return []
+    }
+    let side = 256
+    return [TelegramMediaImageRepresentation(dimensions: PixelDimensions(width: Int32(side), height: Int32(side)), resource: HttpReferenceMediaResource(url: url, size: nil), progressiveSizes: [], immediateThumbnailData: nil)]
+}
+
 /// The chat for a correspondent: its peer and whether it is in the chat list, as the box says. Its address is
 /// remembered by `rememberEmailContacts`, once for a whole batch, and its unread count is set by
 /// `resetEmailReadState` after its messages are stored (storing an incoming message counts it as unread).
@@ -122,8 +96,10 @@ func emailPeerId(contactId: Int64) -> PeerId {
 func storeEmailContactPeer(transaction: Transaction, contact: EmailContactData) -> PeerId {
     let peerId = emailPeerId(contactId: contact.id)
     let name = contact.name.isEmpty ? contact.address : contact.name
-    if (transaction.getPeer(peerId) as? TelegramUser)?.firstName != name {
-        let user = TelegramUser(id: peerId, accessHash: nil, firstName: name, lastName: nil, username: nil, phone: nil, photo: [], botInfo: nil, restrictionInfo: nil, flags: [], emojiStatus: nil, usernames: [], storiesHidden: nil, nameColor: nil, backgroundEmojiId: nil, profileColor: nil, profileBackgroundEmojiId: nil, subscriberCount: nil, verificationIconFileId: nil)
+    let photo = emailContactPhoto(avatar: contact.avatar)
+    let current = transaction.getPeer(peerId) as? TelegramUser
+    if current?.firstName != name || current?.photo != photo {
+        let user = TelegramUser(id: peerId, accessHash: nil, firstName: name, lastName: nil, username: nil, phone: nil, photo: photo, botInfo: nil, restrictionInfo: nil, flags: [], emojiStatus: nil, usernames: [], storiesHidden: nil, nameColor: nil, backgroundEmojiId: nil, profileColor: nil, profileBackgroundEmojiId: nil, subscriberCount: nil, verificationIconFileId: nil)
         transaction.updatePeersInternal([user], update: { _, updated in
             return updated
         })
@@ -170,17 +146,7 @@ func storeEmailContact(transaction: Transaction, contact: EmailContactData) -> P
     return peerId
 }
 
-/// The box counts what is unread; the read line sits just before its oldest unread message.
+/// The box counts what is unread; mail has no read receipts.
 func resetEmailReadState(transaction: Transaction, peerId: PeerId, contact: EmailContactData) {
-    let maxIncomingReadIndex: MessageIndex
-    if contact.unread > 0, let oldest = contact.oldestUnread {
-        maxIncomingReadIndex = MessageIndex(id: MessageId(peerId: peerId, namespace: Namespaces.Message.Email, id: EmailMessageIds.base(date: oldest) - 1), timestamp: Int32(clamping: oldest / 1000) - 1)
-    } else {
-        maxIncomingReadIndex = MessageIndex.upperBound(peerId: peerId, namespace: Namespaces.Message.Email)
-    }
-    // Mail has no read receipts: what went out shows as read.
-    let state = PeerReadState.indexBased(maxIncomingReadIndex: maxIncomingReadIndex, maxOutgoingReadIndex: MessageIndex.upperBound(peerId: peerId, namespace: Namespaces.Message.Email), count: contact.unread, markedUnread: false)
-    if transaction.getPeerReadStates(peerId)?.first(where: { $0.0 == Namespaces.Message.Email })?.1 != state {
-        transaction.resetIncomingReadStates([peerId: [Namespaces.Message.Email: state]])
-    }
+    resetBoxReadState(transaction: transaction, peerId: peerId, unread: contact.unread, oldestUnread: contact.oldestUnread)
 }

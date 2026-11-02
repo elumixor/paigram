@@ -11,8 +11,8 @@ public struct Namespaces {
         public static let QuickReplyCloud: Int32 = 5
         public static let QuickReplyLocal: Int32 = 6
         public static let EphemeralLocal: Int32 = 7
-        /// Paigram: mail, in and out, in an email chat. Ids follow the date (`EmailMessageIds`), so history holes order by time.
-        public static let Email: Int32 = 8
+        /// Paigram: messages of the box's chats (email, WhatsApp), in and out. Ids follow the date (`BoxMessageIds`), so history holes order by time.
+        public static let Box: Int32 = 8
         
         public static let allScheduled: Set<Int32> = Set([Namespaces.Message.ScheduledCloud, Namespaces.Message.ScheduledLocal])
         public static let allQuickReply: Set<Int32> = Set([Namespaces.Message.QuickReplyCloud, Namespaces.Message.QuickReplyLocal])
@@ -52,6 +52,10 @@ public struct Namespaces {
         public static let SecretChat = PeerId.Namespace._internalFromInt32Value(3)
         /// Paigram: one correspondent of the user's mailboxes, kept by the box; the id is the box's contact id.
         public static let Email = PeerId.Namespace._internalFromInt32Value(4)
+        /// Paigram: a WhatsApp person (a DM, or an author in a group), kept by the box; the id is the box's person id.
+        public static let WhatsApp = PeerId.Namespace._internalFromInt32Value(5)
+        /// Paigram: a WhatsApp group, kept by the box.
+        public static let WhatsAppGroup = PeerId.Namespace._internalFromInt32Value(6)
         public static let Empty = PeerId.Namespace.max
     }
     
@@ -341,6 +345,7 @@ private enum PreferencesKeyValues: Int32 {
     case webBrowserSettings = 49
     case communitiesState = 50
     case emailState = 51
+    case whatsAppState = 52
 }
 
 public func applicationSpecificPreferencesKey(_ value: Int32) -> ValueBoxKey {
@@ -455,6 +460,12 @@ public struct PreferencesKeys {
     public static let emailState: ValueBoxKey = {
         let key = ValueBoxKey(length: 4)
         key.setInt32(0, value: PreferencesKeyValues.emailState.rawValue)
+        return key
+    }()
+    
+    public static let whatsAppState: ValueBoxKey = {
+        let key = ValueBoxKey(length: 4)
+        key.setInt32(0, value: PreferencesKeyValues.whatsAppState.rawValue)
         return key
     }()
 

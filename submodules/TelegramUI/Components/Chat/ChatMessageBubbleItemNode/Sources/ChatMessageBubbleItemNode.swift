@@ -1788,7 +1788,7 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
                     ignoreNameHiding = true
                 }
                 
-                displayAuthorInfo = !mergedTop.merged && allowAuthor && peerId.isGroupOrChannel && effectiveAuthor != nil
+                displayAuthorInfo = !mergedTop.merged && allowAuthor && (peerId.isGroupOrChannel || peerId.isWhatsAppGroup) && effectiveAuthor != nil
                 if let forwardInfo = firstMessage.forwardInfo, forwardInfo.psaType != nil {
                     displayAuthorInfo = false
                 }
@@ -1820,7 +1820,7 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
                         ignoreNameHiding = true
                     }
                     
-                    displayAuthorInfo = !mergedTop.merged && allowAuthor && peerId.isGroupOrChannel && effectiveAuthor != nil
+                    displayAuthorInfo = !mergedTop.merged && allowAuthor && (peerId.isGroupOrChannel || peerId.isWhatsAppGroup) && effectiveAuthor != nil
                     if let forwardInfo = firstMessage.forwardInfo, forwardInfo.psaType != nil {
                         displayAuthorInfo = false
                     }
@@ -1828,7 +1828,7 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
             }
         
             if !peerId.isRepliesOrSavedMessages(accountPeerId: item.context.account.peerId) {
-                if peerId.isGroupOrChannel && effectiveAuthor != nil {
+                if (peerId.isGroupOrChannel || peerId.isWhatsAppGroup) && effectiveAuthor != nil {
                     var isBroadcastChannel = false
                     var isMonoForum = false
                     if let peer = firstMessage.peers[firstMessage.id.peerId] as? TelegramChannel {

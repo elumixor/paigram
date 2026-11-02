@@ -354,7 +354,7 @@ public final class ChatMessageItemImpl: ChatMessageItem, CustomStringConvertible
                         break
                     }
                 }
-                displayAuthorInfo = incoming && peerId.isGroupOrChannel && effectiveAuthor != nil
+                displayAuthorInfo = incoming && (peerId.isGroupOrChannel || peerId.isWhatsAppGroup) && effectiveAuthor != nil
                 
                 if let _ = content.firstMessage.guestChatAttribute {
                     displayAuthorInfo = true

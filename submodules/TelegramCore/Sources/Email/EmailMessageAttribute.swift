@@ -14,10 +14,12 @@ public final class EmailMessageAttribute: MessageAttribute {
     public let cc: [String]
     /// Only the snippet is known (the contact list's latest message): the chat's first page brings the text.
     public let isPartial: Bool
+    /// The whole email as a page; empty while it is not known (a snippet, a message being sent).
+    public let viewUrl: String
     
     public let associatedPeerIds: [PeerId] = []
     
-    public init(account: String, gmailId: String, threadId: String, subject: String, from: String, to: [String], cc: [String], isPartial: Bool) {
+    public init(account: String, gmailId: String, threadId: String, subject: String, from: String, to: [String], cc: [String], isPartial: Bool, viewUrl: String) {
         self.account = account
         self.gmailId = gmailId
         self.threadId = threadId
@@ -26,6 +28,7 @@ public final class EmailMessageAttribute: MessageAttribute {
         self.to = to
         self.cc = cc
         self.isPartial = isPartial
+        self.viewUrl = viewUrl
     }
     
     required public init(decoder: PostboxDecoder) {
@@ -37,6 +40,7 @@ public final class EmailMessageAttribute: MessageAttribute {
         self.to = decoder.decodeStringArrayForKey("to")
         self.cc = decoder.decodeStringArrayForKey("cc")
         self.isPartial = decoder.decodeBoolForKey("p", orElse: false)
+        self.viewUrl = decoder.decodeStringForKey("v", orElse: "")
     }
     
     public func encode(_ encoder: PostboxEncoder) {
@@ -48,5 +52,6 @@ public final class EmailMessageAttribute: MessageAttribute {
         encoder.encodeStringArray(self.to, forKey: "to")
         encoder.encodeStringArray(self.cc, forKey: "cc")
         encoder.encodeBool(self.isPartial, forKey: "p")
+        encoder.encodeString(self.viewUrl, forKey: "v")
     }
 }
