@@ -763,8 +763,12 @@ public final class AvatarNode: ASDisplayNode {
                 self.imageNode.view.mask = nil
             }
             
-            if let imageCache = genericContext.imageCache as? DirectMediaImageCache, let peer, let smallProfileImage = peer.smallProfileImage, let peerReference = PeerReference(peer) {
-                if let result = imageCache.getAvatarImage(peer: peerReference, resource: MediaResourceReference.avatar(peer: peerReference, resource: smallProfileImage.resource), immediateThumbnail: peer.profileImageRepresentations.first?.immediateThumbnailData, size: Int(displayDimensions.width * UIScreenScale), synchronous: synchronousLoad) {
+            if let imageCache = genericContext.imageCache as? DirectMediaImageCache, let peer, let smallProfileImage = peer.smallProfileImage {
+                // A peer from outside Telegram (an email correspondent, a WhatsApp person) has no reference for Telegram's
+                // servers: its picture is fetched as the resource it is.
+                let peerReference = PeerReference(peer)
+                let resource: MediaResourceReference = peerReference.map { .avatar(peer: $0, resource: smallProfileImage.resource) } ?? .standalone(resource: smallProfileImage.resource)
+                if let result = imageCache.getAvatarImage(peer: peerReference, resource: resource, immediateThumbnail: peer.profileImageRepresentations.first?.immediateThumbnailData, size: Int(displayDimensions.width * UIScreenScale), synchronous: synchronousLoad) {
                     if let image = result.image {
                         self.imageNode.contents = image.cgImage
                     }

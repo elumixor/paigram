@@ -16,6 +16,19 @@ public extension TelegramEngine {
             requestWhatsAppSync()
         }
         
+        /// Every chat read again from the box's chat list (after a new link, or when something looks missing).
+        public func reloadChats() {
+            let _ = (self.account.postbox.transaction { transaction -> Void in
+                updateWhatsAppState(transaction: transaction, { state in
+                    var state = state
+                    state.seq = 0
+                    return state
+                })
+            }).startStandalone(completed: {
+                requestWhatsAppSync()
+            })
+        }
+        
         public func state() -> Signal<WhatsAppState, NoError> {
             return self.account.postbox.preferencesView(keys: [PreferencesKeys.whatsAppState])
             |> map { view -> WhatsAppState in

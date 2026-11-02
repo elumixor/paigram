@@ -492,7 +492,7 @@ public final class DirectMediaImageCache {
         return GetMediaResult(image: resultImage, blurredImage: blurredImage, loadSignal: self.getLoadSignal(width: width, aspectRatio: aspectRatio, userLocation: userLocation, userContentType: .image, resource: resource.resource, resourceSizeLimit: resource.size))
     }
     
-    private func getAvatarImageSynchronous(peer: PeerReference, resource: MediaResourceReference, immediateThumbnail: Data?, size: Int, includeBlurred: Bool) -> GetMediaResult? {
+    private func getAvatarImageSynchronous(peer: PeerReference?, resource: MediaResourceReference, immediateThumbnail: Data?, size: Int, includeBlurred: Bool) -> GetMediaResult? {
         let immediateThumbnailData: Data? = immediateThumbnail
         
         var blurredImage: UIImage?
@@ -558,7 +558,7 @@ public final class DirectMediaImageCache {
         }
     }
     
-    public func getAvatarImage(peer: PeerReference, resource: MediaResourceReference, immediateThumbnail: Data?, size: Int, includeBlurred: Bool = false, synchronous: Bool) -> GetMediaResult? {
+    public func getAvatarImage(peer: PeerReference?, resource: MediaResourceReference, immediateThumbnail: Data?, size: Int, includeBlurred: Bool = false, synchronous: Bool) -> GetMediaResult? {
         if synchronous {
             return self.getAvatarImageSynchronous(peer: peer, resource: resource, immediateThumbnail: immediateThumbnail, size: size, includeBlurred: includeBlurred)
         } else {

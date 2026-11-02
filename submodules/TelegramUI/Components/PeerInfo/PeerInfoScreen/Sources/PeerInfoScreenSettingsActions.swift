@@ -77,6 +77,10 @@ extension PeerInfoScreenNode {
             })
         case .recentCalls:
             push(CallListController(context: context, mode: .navigation))
+        case .whatsApp:
+            if #available(iOS 16.0, *) {
+                push(WhatsAppSettingsController(context: self.context))
+            }
         case .email:
             push(EmailSettingsController(context: self.context, openChat: { [weak self] peerId in
                 guard let self else {

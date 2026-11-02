@@ -154,6 +154,7 @@ enum PeerInfoContextSubject {
 
 enum PeerInfoSettingsSection {
     case email
+    case whatsApp
     case avatar
     case edit
     case proxy

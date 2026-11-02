@@ -223,6 +223,11 @@ func settingsItems(data: PeerInfoScreenData?, context: AccountContext, presentat
     items[.shortcuts]!.append(PeerInfoScreenDisclosureItem(id: 5, text: "Email", icon: PresentationResourcesSettings.email, action: {
         interaction.openSettings(.email)
     }))
+    if #available(iOS 16.0, *) {
+        items[.shortcuts]!.append(PeerInfoScreenDisclosureItem(id: 6, text: "WhatsApp", icon: PresentationResourcesSettings.whatsApp, action: {
+            interaction.openSettings(.whatsApp)
+        }))
+    }
     
     let notificationsWarning: Bool
     if let settings = data.globalSettings {
