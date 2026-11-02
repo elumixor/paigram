@@ -252,8 +252,9 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
     private let counterTextNode: ImmediateTextNode
     
     // The AI (compose) button now lives inside the attachment button's glass background (top slot of the
-    // capsule), not in the text field. See the 3-line capsule geometry in updateLayout.
+    // capsule), not in the text field. See the capsule geometry in updateLayout.
     private var attachmentAIButton: (button: HighlightTrackingButton, icon: UIImageView)?
+    private var paiComposeIndicator: ActivityIndicator?
     private struct ThreeLineHeightCacheEntry { let width: CGFloat; let baseFontSize: CGFloat; let value: CGFloat }
     private var threeLineHeightCache: ThreeLineHeightCacheEntry?
 
@@ -360,6 +361,16 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
     private let hapticFeedback = HapticFeedback()
     
     public var isAIEnabled: Bool = false
+    /// Paigram's own compose (tap on the AI button); `isAIEnabled` now only gates upstream's long-press path.
+    public var isPaiComposeEnabled: Bool = false
+    /// A compose request is in flight: the AI button shows a spinner and ignores taps.
+    public var isPaiComposing: Bool = false {
+        didSet {
+            if self.isPaiComposing != oldValue {
+                self.requestLayout(transition: .animated(duration: 0.2, curve: .easeInOut))
+            }
+        }
+    }
     
     public var inputTextState: ChatTextInputState {
         if let richTextInputNode = self.richTextInputNode {
@@ -3570,17 +3581,17 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
             transition.updateFrame(layer: self.searchLayoutClearButtonIcon.layer, frame: clearIconFrame.offsetBy(dx: clearButtonFrame.minX, dy: clearButtonFrame.minY))
         }
         
-        // AI-button visibility + capsule height (3-line rule). When shown, the attachment glass background
-        // grows UPWARD into a pill (bottom edge stays at textInputFrame.maxY): + at the bottom slot, AI at the top.
+        // AI-button visibility + capsule height. Whenever there is text, the attachment glass background grows
+        // UPWARD into a pill (bottom edge stays at textInputFrame.maxY): + at the bottom slot, AI at the top.
+        // A 1-2 line field is shorter than two slots, so the pill rises past the field's top edge (hitTest
+        // reaches it there) instead of taking width from the text; from 3 lines on it matches the field.
         var isAIButtonVisible = false
         var attachmentPillHeight: CGFloat = 40.0
         let inputHasNonWhitespaceText = !(self.richTextInputNode?.inputContentIsEmptyWhitespaceTrimmed ?? true)
-        if self.isAIEnabled, inputHasNonWhitespaceText, let node = self.richTextInputNode {
+        if self.isPaiComposeEnabled, inputHasNonWhitespaceText, let node = self.richTextInputNode {
             let threeLineHeight = self.threeLineFieldHeight(forWidth: baseWidth, node: node, metrics: metrics, bottomInset: bottomInset, textFieldInsets: textFieldInsets)
-            if textInputHeight >= threeLineHeight - 0.5 {
-                isAIButtonVisible = true
-                attachmentPillHeight = threeLineHeight
-            }
+            isAIButtonVisible = true
+            attachmentPillHeight = max(80.0, min(textInputHeight, threeLineHeight))
         }
 
         let attachmentButtonFrame = CGRect(origin: CGPoint(x: attachmentButtonX, y: textInputFrame.maxY - attachmentPillHeight), size: CGSize(width: 40.0, height: attachmentPillHeight))
@@ -3596,8 +3607,8 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
             transition.updateFrame(view: self.attachmentButtonIcon, frame: CGRect(origin: CGPoint(x: 0.0, y: attachmentButtonFrame.height - 40.0), size: CGSize(width: 40, height: 40)))
         }
 
-        // AI button in the TOP 40x40 slot of the capsule (fades in with the 3-line rule).
-        if self.isAIEnabled {
+        // AI button in the TOP 40x40 slot of the capsule (fades in with the first non-whitespace text).
+        if self.isPaiComposeEnabled {
             let aiButton: (button: HighlightTrackingButton, icon: UIImageView)
             if let current = self.attachmentAIButton {
                 aiButton = current
@@ -3616,6 +3627,7 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
                     }
                 }
                 aiButton.button.addTarget(self, action: #selector(self.aiButtonPressed), for: .touchUpInside)
+                aiButton.button.addGestureRecognizer(UILongPressGestureRecognizer(target: self, action: #selector(self.aiButtonLongPressed(_:))))
                 aiButton.button.addSubview(aiButton.icon)
                 aiButton.icon.image = UIImage(bundleImageName: "Chat/Input/Text/InputAIIcon")?.withRenderingMode(.alwaysTemplate)
                 self.attachmentButtonBackground.contentView.addSubview(aiButton.icon)
@@ -3630,10 +3642,28 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
                 aiButton.icon.bounds = CGRect(origin: CGPoint(), size: image.size)
             }
             // Collapsed (pillHeight == 40): the AI slot coincides with the + slot, so it must NOT intercept + taps.
-            aiButton.button.isUserInteractionEnabled = isAIButtonVisible
+            let isComposing = isAIButtonVisible && self.isPaiComposing
+            aiButton.button.isUserInteractionEnabled = isAIButtonVisible && !isComposing
             ComponentTransition(transition).setAlpha(view: aiButton.button, alpha: isAIButtonVisible ? 1.0 : 0.0)
-            ComponentTransition(transition).setAlpha(view: aiButton.icon, alpha: isAIButtonVisible ? 1.0 : 0.0)
-            ComponentTransition(transition).setScale(view: aiButton.icon, scale: isAIButtonVisible ? 1.0 : 0.001)
+            ComponentTransition(transition).setAlpha(view: aiButton.icon, alpha: isAIButtonVisible && !isComposing ? 1.0 : 0.0)
+            ComponentTransition(transition).setScale(view: aiButton.icon, scale: isAIButtonVisible && !isComposing ? 1.0 : 0.001)
+
+            if isComposing {
+                let indicator: ActivityIndicator
+                if let current = self.paiComposeIndicator {
+                    indicator = current
+                } else {
+                    indicator = ActivityIndicator(type: .custom(interfaceState.theme.chat.inputPanel.panelControlColor, 20.0, 1.5, true))
+                    indicator.isUserInteractionEnabled = false
+                    self.paiComposeIndicator = indicator
+                    self.attachmentButtonBackground.contentView.addSubview(indicator.view)
+                }
+                let indicatorSize = indicator.measure(aiSlot.size)
+                indicator.frame = indicatorSize.centered(in: aiSlot)
+            } else if let indicator = self.paiComposeIndicator {
+                self.paiComposeIndicator = nil
+                indicator.view.removeFromSuperview()
+            }
         } else if let aiButton = self.attachmentAIButton {
             self.attachmentAIButton = nil
             aiButton.button.removeFromSuperview()
@@ -3951,7 +3981,17 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
     }
     
     @objc private func aiButtonPressed() {
+        if self.isPaiComposing {
+            return
+        }
         self.interfaceInteraction?.openAICompose()
+    }
+
+    /// Upstream's own server-side AI screen stays one long-press away where Telegram allows it.
+    @objc private func aiButtonLongPressed(_ gestureRecognizer: UILongPressGestureRecognizer) {
+        if gestureRecognizer.state == .began, self.isAIEnabled, !self.isPaiComposing {
+            self.interfaceInteraction?.openTextProcessing()
+        }
     }
 
     /// The field's glass-background height (text region, excluding any accessory panel) at exactly 3 lines —
@@ -5811,6 +5851,13 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         
         if !self.recordMoreButton.isHidden && self.recordMoreButton.alpha > 0.0 {
             if let result = self.recordMoreButton.view.hitTest(self.view.convert(point, to: self.recordMoreButton.view), with: event) {
+                return result
+            }
+        }
+
+        // Over a short field the AI slot sits above the panel's bounds, where the default hit test never looks.
+        if let aiButton = self.attachmentAIButton, aiButton.button.isUserInteractionEnabled, !self.attachmentButtonBackground.alpha.isZero {
+            if let result = aiButton.button.hitTest(self.view.convert(point, to: aiButton.button), with: event) {
                 return result
             }
         }

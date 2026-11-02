@@ -43,7 +43,7 @@ public final class PaiClient {
         return request
     }
 
-    private func call<T: Decodable>(_ type: T.Type, _ path: String, method: String = "GET", body: [String: Any]? = nil, query: [String: String] = [:]) async throws -> T {
+    func call<T: Decodable>(_ type: T.Type, _ path: String, method: String = "GET", body: [String: Any]? = nil, query: [String: String] = [:]) async throws -> T {
         let (data, response) = try await session.data(for: try request(path, method: method, body: body, query: query))
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else {

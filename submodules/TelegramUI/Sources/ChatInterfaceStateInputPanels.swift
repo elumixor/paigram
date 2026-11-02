@@ -507,6 +507,7 @@ func inputPanelForChatPresentationIntefaceState(_ chatPresentationInterfaceState
                 } else if let peerId = chatPresentationInterfaceState.chatLocation.peerId, peerId.namespace != Namespaces.Peer.SecretChat {
                     panel.isAIEnabled = true
                 }
+                panel.isPaiComposeEnabled = chatPresentationInterfaceState.chatLocation.peerId != nil
                 panel.textInputAccessoryPanel = textInputAccessoryPanel
                 panel.textInputContextPanel = textInputContextPanel
                 panel.chatControllerInteraction = chatControllerInteraction

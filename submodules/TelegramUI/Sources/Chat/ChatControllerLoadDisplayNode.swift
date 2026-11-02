@@ -4742,7 +4742,12 @@ extension ChatControllerImpl {
             guard let self else {
                 return
             }
-            self.chatDisplayNode.openAICompose()
+            self.openPaiCompose()
+        }, openTextProcessing: { [weak self] in
+            guard let self else {
+                return
+            }
+            self.chatDisplayNode.openTextProcessing()
         }, openExpandedInput: { [weak self] in
             guard let self else {
                 return

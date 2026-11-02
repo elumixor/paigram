@@ -948,6 +948,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
         } else if let peerId = self.chatPresentationInterfaceState.chatLocation.peerId, peerId.namespace != Namespaces.Peer.SecretChat {
             self.textInputPanelNode?.isAIEnabled = true
         }
+        self.textInputPanelNode?.isPaiComposeEnabled = self.chatPresentationInterfaceState.chatLocation.peerId != nil
         self.textInputPanelNode?.textInputAccessoryPanel = textInputAccessoryPanel
         self.textInputPanelNode?.textInputContextPanel = textInputContextPanel
         self.textInputPanelNode?.storedInputLanguage = chatPresentationInterfaceState.interfaceState.inputLanguage
@@ -4664,7 +4665,8 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
         }
     }
 
-    func openAICompose() {
+    /// Upstream's server-side AI screen; Paigram's own compose (`ChatControllerImpl.openPaiCompose`) owns the tap.
+    func openTextProcessing() {
         Task { @MainActor [weak self] in
             guard let self else {
                 return
