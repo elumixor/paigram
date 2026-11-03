@@ -139,9 +139,8 @@ func storeEmailMessage(transaction: Transaction, accountPeerId: PeerId, peerId: 
         // Known already, possibly in full: a summary never overwrites it.
         return existing
     }
-    if data.outgoing {
-        clearEmailReplyButtons(transaction: transaction, peerId: peerId)
-    }
+    // Answers are offered for a chat's latest mail only: anything newer takes the older ones' away.
+    clearEmailReplyButtons(transaction: transaction, peerId: peerId, before: Int32(clamping: data.date / 1000), except: globallyUniqueId)
     let (text, entities) = emailText(data)
     let markup = replyButtons(data)
     let files = (data.attachments ?? []).enumerated().compactMap { index, attachment in
@@ -188,11 +187,11 @@ func storeEmailMessage(transaction: Transaction, accountPeerId: PeerId, peerId: 
     return transaction.messageIdForGloballyUniqueMessageId(peerId: peerId, id: globallyUniqueId)
 }
 
-/// The user wrote in the chat: the answers offered to earlier mail are spent.
-func clearEmailReplyButtons(transaction: Transaction, peerId: PeerId) {
+/// A newer message came (or the user wrote): the answers offered to earlier mail are spent.
+func clearEmailReplyButtons(transaction: Transaction, peerId: PeerId, before timestamp: Int32 = Int32.max, except globallyUniqueId: Int64? = nil) {
     var marked: [MessageId] = []
     transaction.scanTopMessages(peerId: peerId, namespace: Namespaces.Message.Box, limit: 100, { message in
-        if message.attributes.contains(where: { $0 is ReplyMarkupMessageAttribute }) {
+        if message.timestamp <= timestamp, message.globallyUniqueId != globallyUniqueId, message.attributes.contains(where: { $0 is ReplyMarkupMessageAttribute }) {
             marked.append(message.id)
         }
         return true

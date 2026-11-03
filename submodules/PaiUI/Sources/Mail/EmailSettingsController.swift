@@ -3,6 +3,7 @@ import Display
 import Foundation
 import ItemListUI
 import PresentationDataUtils
+import PromptUI
 import SwiftSignalKit
 import TelegramCore
 import TelegramPresentationData
@@ -66,66 +67,38 @@ private struct EmailSettingsState: Equatable {
     var accounts: [EmailAccountData] = EmailChats.accounts
     var isLoading = true
     var loadError: String?
-    var newLabel = ""
     var isConnecting = false
-    var address = ""
-    var name = ""
-    var from: String?
-    var subject = ""
-    var isOpening = false
-    var error: String?
+}
 
-    /// The mailbox a new email goes out from: the one picked, else the box's own default.
-    var fromAccount: EmailAccountData? {
-        return self.accounts.first(where: { $0.label == self.from }) ?? self.accounts.first(where: { $0.label == "personal" }) ?? self.accounts.first
+/// A short name as the box keys a mailbox by: lowercase, dashes for spaces, ASCII letters, digits and dashes.
+private func mailboxLabel(_ text: String) -> String? {
+    let label = text.trimmingCharacters(in: .whitespaces).lowercased().replacingOccurrences(of: " ", with: "-")
+    guard !label.isEmpty, label.count <= 40, label.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" }), label.unicodeScalars.allSatisfy(\.isASCII) else {
+        return nil
     }
-
-    var canOpen: Bool {
-        let trimmed = self.address.trimmingCharacters(in: .whitespaces)
-        return self.signedIn && !self.isOpening && trimmed.contains("@") && trimmed.contains(".")
-    }
-
-    var labelToConnect: String {
-        return self.newLabel.trimmingCharacters(in: .whitespaces).lowercased().replacingOccurrences(of: " ", with: "-")
-    }
-
-    var canConnect: Bool {
-        let label = self.labelToConnect
-        return self.signedIn && !self.isConnecting && !label.isEmpty && label.count <= 40 && label.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" } && label.unicodeScalars.allSatisfy(\.isASCII)
-    }
+    return label
 }
 
 private final class EmailSettingsArguments {
     let signIn: () -> Void
     let retry: () -> Void
     let editMailbox: (EmailAccountData) -> Void
-    let updateNewLabel: (String) -> Void
-    let connect: () -> Void
-    let updateAddress: (String) -> Void
-    let updateName: (String) -> Void
-    let pickFrom: () -> Void
-    let updateSubject: (String) -> Void
-    let open: () -> Void
+    let addMailbox: () -> Void
+    let newEmail: () -> Void
 
-    init(signIn: @escaping () -> Void, retry: @escaping () -> Void, editMailbox: @escaping (EmailAccountData) -> Void, updateNewLabel: @escaping (String) -> Void, connect: @escaping () -> Void, updateAddress: @escaping (String) -> Void, updateName: @escaping (String) -> Void, pickFrom: @escaping () -> Void, updateSubject: @escaping (String) -> Void, open: @escaping () -> Void) {
+    init(signIn: @escaping () -> Void, retry: @escaping () -> Void, editMailbox: @escaping (EmailAccountData) -> Void, addMailbox: @escaping () -> Void, newEmail: @escaping () -> Void) {
         self.signIn = signIn
         self.retry = retry
         self.editMailbox = editMailbox
-        self.updateNewLabel = updateNewLabel
-        self.connect = connect
-        self.updateAddress = updateAddress
-        self.updateName = updateName
-        self.pickFrom = pickFrom
-        self.updateSubject = updateSubject
-        self.open = open
+        self.addMailbox = addMailbox
+        self.newEmail = newEmail
     }
 }
 
 private enum EmailSettingsSection: Int32 {
     case signIn
     case mailboxes
-    case addMailbox
-    case newEmail
+    case actions
 }
 
 private enum EmailSettingsEntry: ItemListNodeEntry {
@@ -136,17 +109,8 @@ private enum EmailSettingsEntry: ItemListNodeEntry {
     case loading(String)
     case retry
     case mailboxesInfo(String)
-    case addHeader
-    case newLabel(String)
-    case connect(Bool, Bool)
-    case addInfo
-    case newEmailHeader
-    case address(String)
-    case name(String)
-    case from(String, Bool)
-    case subject(String)
-    case open(Bool, Bool)
-    case newEmailInfo(String?)
+    case addMailbox(Bool, Bool)
+    case newEmail(Bool)
 
     var section: ItemListSectionId {
         switch self {
@@ -154,10 +118,8 @@ private enum EmailSettingsEntry: ItemListNodeEntry {
             return EmailSettingsSection.signIn.rawValue
         case .mailboxesHeader, .mailbox, .loading, .retry, .mailboxesInfo:
             return EmailSettingsSection.mailboxes.rawValue
-        case .addHeader, .newLabel, .connect, .addInfo:
-            return EmailSettingsSection.addMailbox.rawValue
-        case .newEmailHeader, .address, .name, .from, .subject, .open, .newEmailInfo:
-            return EmailSettingsSection.newEmail.rawValue
+        case .addMailbox, .newEmail:
+            return EmailSettingsSection.actions.rawValue
         }
     }
 
@@ -170,17 +132,8 @@ private enum EmailSettingsEntry: ItemListNodeEntry {
         case .loading: return 90
         case .retry: return 91
         case .mailboxesInfo: return 99
-        case .addHeader: return 100
-        case .newLabel: return 101
-        case .connect: return 102
-        case .addInfo: return 103
-        case .newEmailHeader: return 200
-        case .address: return 201
-        case .name: return 202
-        case .from: return 203
-        case .subject: return 204
-        case .open: return 205
-        case .newEmailInfo: return 206
+        case .addMailbox: return 100
+        case .newEmail: return 101
         }
     }
 
@@ -207,28 +160,10 @@ private enum EmailSettingsEntry: ItemListNodeEntry {
             return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: "Try Again", kind: .generic, alignment: .natural, sectionId: self.section, style: .blocks, action: arguments.retry)
         case let .mailboxesInfo(text):
             return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
-        case .addHeader:
-            return ItemListSectionHeaderItem(presentationData: presentationData, text: "ADD MAILBOX", sectionId: self.section)
-        case let .newLabel(text):
-            return ItemListSingleLineInputItem(presentationData: presentationData, systemStyle: .glass, title: NSAttributedString(), text: text, placeholder: "Short name, e.g. work", type: .username, sectionId: self.section, textUpdated: arguments.updateNewLabel, action: arguments.connect)
-        case let .connect(isConnecting, enabled):
-            return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: isConnecting ? "Connecting…" : "Connect with Google", kind: enabled ? .generic : .disabled, alignment: .natural, sectionId: self.section, style: .blocks, action: arguments.connect)
-        case .addInfo:
-            return ItemListTextItem(presentationData: presentationData, text: .plain("Signs in to a Gmail or Google Workspace account and gives pai its mail. The short name is how pai refers to it."), sectionId: self.section)
-        case .newEmailHeader:
-            return ItemListSectionHeaderItem(presentationData: presentationData, text: "NEW EMAIL", sectionId: self.section)
-        case let .address(text):
-            return ItemListSingleLineInputItem(presentationData: presentationData, systemStyle: .glass, title: NSAttributedString(string: "To"), text: text, placeholder: "Address", type: .email, sectionId: self.section, textUpdated: arguments.updateAddress, action: arguments.open)
-        case let .name(text):
-            return ItemListSingleLineInputItem(presentationData: presentationData, systemStyle: .glass, title: NSAttributedString(string: "Name"), text: text, placeholder: "Optional", sectionId: self.section, textUpdated: arguments.updateName, action: arguments.open)
-        case let .from(title, enabled):
-            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, title: "From", enabled: enabled, label: title, sectionId: self.section, style: .blocks, action: enabled ? arguments.pickFrom : nil)
-        case let .subject(text):
-            return ItemListSingleLineInputItem(presentationData: presentationData, systemStyle: .glass, title: NSAttributedString(string: "Subject"), text: text, placeholder: "Optional", sectionId: self.section, textUpdated: arguments.updateSubject, action: arguments.open)
-        case let .open(isOpening, enabled):
-            return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: isOpening ? "Opening…" : "Open Chat", kind: enabled ? .generic : .disabled, alignment: .natural, sectionId: self.section, style: .blocks, action: arguments.open)
-        case let .newEmailInfo(error):
-            return ItemListTextItem(presentationData: presentationData, text: .plain(error ?? "Opens a chat with the address; your first message becomes the email. Without a subject, its first line is the subject."), sectionId: self.section)
+        case let .addMailbox(isConnecting, enabled):
+            return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: isConnecting ? "Connecting…" : "Add Mailbox…", kind: enabled ? .generic : .disabled, alignment: .natural, sectionId: self.section, style: .blocks, action: arguments.addMailbox)
+        case let .newEmail(enabled):
+            return ItemListActionItem(presentationData: presentationData, systemStyle: .glass, title: "New Email…", kind: enabled ? .generic : .disabled, alignment: .natural, sectionId: self.section, style: .blocks, action: arguments.newEmail)
         }
     }
 }
@@ -261,11 +196,9 @@ private func emailSettingsEntries(_ state: EmailSettingsState) -> [EmailSettings
     } else if state.accounts.isEmpty {
         entries.append(.loading(state.isLoading ? "Loading…" : "No mailboxes yet"))
     } else {
-        entries.append(.mailboxesInfo("\(EmailChats.chatCount) email chats. New mail arrives as a message from its sender; a reply goes out from the mailbox its thread is in. Tap a mailbox to rename, recolour, reconnect or remove it."))
+        entries.append(.mailboxesInfo("\(EmailChats.chatCount) email chats. Tap a mailbox to rename, recolour, reconnect or remove it."))
     }
-    entries += [.addHeader, .newLabel(state.newLabel), .connect(state.isConnecting, state.canConnect), .addInfo]
-    let from = state.fromAccount.map { "\(mailboxTitle($0)) · \($0.email)" } ?? "—"
-    entries += [.newEmailHeader, .address(state.address), .name(state.name), .from(from, state.accounts.count > 1), .subject(state.subject), .open(state.isOpening, state.canOpen), .newEmailInfo(state.error)]
+    entries += [.addMailbox(state.isConnecting, state.signedIn && !state.isConnecting), .newEmail(state.signedIn && !state.accounts.isEmpty)]
     return entries
 }
 
@@ -281,7 +214,6 @@ public func emailSettingsController(context: AccountContext, openChat: @escaping
             return state
         })
     }
-    let disposable = MetaDisposable()
     var tasks: [Task<Void, Never>] = []
     var presentImpl: ((ViewController) -> Void)?
     var pushImpl: ((ViewController) -> Void)?
@@ -308,6 +240,20 @@ public func emailSettingsController(context: AccountContext, openChat: @escaping
         })
     }
 
+    let connect: (String) -> Void = { label in
+        updateState { $0.isConnecting = true }
+        tasks.append(Task { @MainActor in
+            do {
+                _ = try await connectMailbox(label: label)
+            } catch is CancellationError {
+            } catch {
+                presentImpl?(alertError(context, error.localizedDescription))
+            }
+            updateState { $0.isConnecting = false }
+            reload(false)
+        })
+    }
+
     let arguments = EmailSettingsArguments(signIn: {
         tasks.append(Task { @MainActor in
             do {
@@ -323,37 +269,160 @@ public func emailSettingsController(context: AccountContext, openChat: @escaping
         pushImpl?(mailboxEditController(context: context, client: client, account: account, changed: {
             reload(false)
         }))
-    }, updateNewLabel: { label in
-        updateState { $0.newLabel = label }
-    }, connect: {
-        let state = stateValue.with { $0 }
-        guard state.canConnect else {
-            return
+    }, addMailbox: {
+        presentImpl?(promptController(context: context, text: "Add Mailbox", subtitle: "Signs in to a Gmail or Google Workspace account and gives pai its mail. The short name is how pai refers to it.", value: nil, placeholder: "Short name, e.g. work", characterLimit: 40, apply: { text in
+            guard let text else {
+                return
+            }
+            guard let label = mailboxLabel(text) else {
+                presentImpl?(alertError(context, "A short name takes letters, digits and dashes only."))
+                return
+            }
+            if let existing = stateValue.with({ $0.accounts }).first(where: { $0.label == label }) {
+                presentImpl?(textAlertController(context: context, title: "Reconnect \(mailboxTitle(existing))?", text: "\(label) is already \(existing.email). Sign in as that account to renew pai's access.", actions: [
+                    TextAlertAction(type: .genericAction, title: "Cancel", action: {}),
+                    TextAlertAction(type: .defaultAction, title: "Reconnect", action: { connect(label) })
+                ]))
+            } else {
+                connect(label)
+            }
+        }))
+    }, newEmail: {
+        pushImpl?(newEmailController(context: context, accounts: stateValue.with { $0.accounts }, address: "", openChat: openChat))
+    })
+
+    reload(true)
+    authObserver = NotificationCenter.default.addObserver(forName: PaiAuth.didChange, object: nil, queue: .main, using: { _ in
+        reload(false)
+    })
+
+    let signal = combineLatest(context.sharedContext.presentationData, statePromise.get())
+    |> deliverOnMainQueue
+    |> map { presentationData, state -> (ItemListControllerState, (ItemListNodeState, Any)) in
+        let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text("Email"), leftNavigationButton: nil, rightNavigationButton: nil, backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back), animateChanges: false)
+        let listState = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: emailSettingsEntries(state), style: .blocks, animateChanges: true)
+        return (controllerState, (listState, arguments))
+    }
+    |> afterDisposed {
+        tasks.forEach { $0.cancel() }
+        if let authObserver {
+            NotificationCenter.default.removeObserver(authObserver)
         }
-        let label = state.labelToConnect
-        let connect = {
-            updateState { $0.isConnecting = true }
-            tasks.append(Task { @MainActor in
-                do {
-                    _ = try await connectMailbox(label: label)
-                    updateState { $0.newLabel = "" }
-                } catch is CancellationError {
-                } catch {
-                    presentImpl?(alertError(context, error.localizedDescription))
-                }
-                updateState { $0.isConnecting = false }
-                reload(false)
-            })
+    }
+
+    let controller = ItemListController(context: context, state: signal)
+    presentImpl = { [weak controller] c in
+        controller?.present(c, in: .window(.root))
+    }
+    pushImpl = { [weak controller] c in
+        (controller?.navigationController as? NavigationController)?.pushViewController(c)
+    }
+    return controller
+}
+
+// MARK: - A new email
+
+private struct NewEmailState: Equatable {
+    var accounts: [EmailAccountData]
+    var address: String
+    var name = ""
+    var from: String?
+    var subject = ""
+    var isOpening = false
+    var error: String?
+
+    /// The mailbox a new email goes out from: the one picked, else the box's own default.
+    var fromAccount: EmailAccountData? {
+        return self.accounts.first(where: { $0.label == self.from }) ?? self.accounts.first(where: { $0.label == "personal" }) ?? self.accounts.first
+    }
+
+    var canOpen: Bool {
+        let trimmed = self.address.trimmingCharacters(in: .whitespaces)
+        return !self.isOpening && trimmed.contains("@") && trimmed.contains(".")
+    }
+}
+
+private final class NewEmailArguments {
+    let updateAddress: (String) -> Void
+    let updateName: (String) -> Void
+    let pickFrom: () -> Void
+    let updateSubject: (String) -> Void
+    let open: () -> Void
+
+    init(updateAddress: @escaping (String) -> Void, updateName: @escaping (String) -> Void, pickFrom: @escaping () -> Void, updateSubject: @escaping (String) -> Void, open: @escaping () -> Void) {
+        self.updateAddress = updateAddress
+        self.updateName = updateName
+        self.pickFrom = pickFrom
+        self.updateSubject = updateSubject
+        self.open = open
+    }
+}
+
+private enum NewEmailEntry: ItemListNodeEntry {
+    case address(String)
+    case name(String)
+    case from(String, Bool)
+    case subject(String)
+    case info(String?)
+
+    var section: ItemListSectionId {
+        return 0
+    }
+
+    var stableId: Int32 {
+        switch self {
+        case .address: return 0
+        case .name: return 1
+        case .from: return 2
+        case .subject: return 3
+        case .info: return 4
         }
-        if let existing = state.accounts.first(where: { $0.label == label }) {
-            presentImpl?(textAlertController(context: context, title: "Reconnect \(mailboxTitle(existing))?", text: "\(label) is already \(existing.email). Sign in as that account to renew pai's access.", actions: [
-                TextAlertAction(type: .genericAction, title: "Cancel", action: {}),
-                TextAlertAction(type: .defaultAction, title: "Reconnect", action: connect)
-            ]))
-        } else {
-            connect()
+    }
+
+    static func <(lhs: NewEmailEntry, rhs: NewEmailEntry) -> Bool {
+        return lhs.stableId < rhs.stableId
+    }
+
+    func item(presentationData: ItemListPresentationData, arguments: Any) -> ListViewItem {
+        let arguments = arguments as! NewEmailArguments
+        // The field's own title, in the list's text colour (a bare string draws black, unreadable in the dark theme).
+        let title: (String) -> NSAttributedString = { text in
+            NSAttributedString(string: text, font: Font.regular(presentationData.fontSize.itemListBaseFontSize), textColor: presentationData.theme.list.itemPrimaryTextColor)
         }
-    }, updateAddress: { address in
+        switch self {
+        case let .address(text):
+            return ItemListSingleLineInputItem(presentationData: presentationData, systemStyle: .glass, title: title("To"), text: text, placeholder: "Address", type: .email, sectionId: self.section, textUpdated: arguments.updateAddress, action: arguments.open)
+        case let .name(text):
+            return ItemListSingleLineInputItem(presentationData: presentationData, systemStyle: .glass, title: title("Name"), text: text, placeholder: "Optional", sectionId: self.section, textUpdated: arguments.updateName, action: arguments.open)
+        case let .from(text, enabled):
+            return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, title: "From", enabled: enabled, label: text, sectionId: self.section, style: .blocks, action: enabled ? arguments.pickFrom : nil)
+        case let .subject(text):
+            return ItemListSingleLineInputItem(presentationData: presentationData, systemStyle: .glass, title: title("Subject"), text: text, placeholder: "Optional", sectionId: self.section, textUpdated: arguments.updateSubject, action: arguments.open)
+        case let .info(error):
+            return ItemListTextItem(presentationData: presentationData, text: .plain(error ?? "Opens a chat with the address; your first message becomes the email. Without a subject, its first line is the subject."), sectionId: self.section)
+        }
+    }
+}
+
+/// A chat with a new address, from a chosen mailbox under a subject. Also where a `mailto:` link lands.
+@available(iOS 16.0, *)
+public func newEmailController(context: AccountContext, accounts: [EmailAccountData], address: String, subject: String = "", openChat: @escaping (EnginePeer.Id) -> Void) -> ViewController {
+    var initial = NewEmailState(accounts: accounts, address: address)
+    initial.subject = subject
+    let statePromise = ValuePromise(initial, ignoreRepeated: true)
+    let stateValue = Atomic(value: initial)
+    let updateState: ((inout NewEmailState) -> Void) -> Void = { f in
+        statePromise.set(stateValue.modify { state in
+            var state = state
+            f(&state)
+            return state
+        })
+    }
+    let disposable = MetaDisposable()
+    var presentImpl: ((ViewController) -> Void)?
+    var replaceImpl: ((EnginePeer.Id) -> Void)?
+
+    let arguments = NewEmailArguments(updateAddress: { address in
         updateState { $0.address = address }
     }, updateName: { name in
         updateState { $0.name = name }
@@ -382,41 +451,36 @@ public func emailSettingsController(context: AccountContext, openChat: @escaping
         updateState { $0.isOpening = true; $0.error = nil }
         let address = state.address.trimmingCharacters(in: .whitespaces).lowercased()
         let subject = state.subject.trimmingCharacters(in: .whitespaces)
-        disposable.set((context.engine.email.openChat(address: address, name: state.name.trimmingCharacters(in: .whitespaces), account: state.from, subject: subject.isEmpty ? nil : subject)
+        disposable.set((context.engine.email.openChat(address: address, name: state.name.trimmingCharacters(in: .whitespaces), account: state.fromAccount?.label, subject: subject.isEmpty ? nil : subject)
         |> deliverOnMainQueue).start(next: { peerId in
-            updateState { $0.isOpening = false; $0.address = ""; $0.name = ""; $0.subject = "" }
-            openChat(peerId)
+            updateState { $0.isOpening = false }
+            replaceImpl?(peerId)
         }, error: { error in
             updateState { $0.isOpening = false; $0.error = error.description }
         }))
     })
 
-    reload(true)
-    authObserver = NotificationCenter.default.addObserver(forName: PaiAuth.didChange, object: nil, queue: .main, using: { _ in
-        reload(false)
-    })
-
     let signal = combineLatest(context.sharedContext.presentationData, statePromise.get())
     |> deliverOnMainQueue
     |> map { presentationData, state -> (ItemListControllerState, (ItemListNodeState, Any)) in
-        let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text("Email"), leftNavigationButton: nil, rightNavigationButton: nil, backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back), animateChanges: false)
-        let listState = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: emailSettingsEntries(state), style: .blocks, animateChanges: true)
+        let from = state.fromAccount.map { "\(mailboxTitle($0)) · \($0.email)" } ?? "—"
+        let entries: [NewEmailEntry] = [.address(state.address), .name(state.name), .from(from, state.accounts.count > 1), .subject(state.subject), .info(state.error)]
+        let open = ItemListNavigationButton(content: .text(state.isOpening ? "Opening…" : "Open"), style: .bold, enabled: state.canOpen, action: arguments.open)
+        let controllerState = ItemListControllerState(presentationData: ItemListPresentationData(presentationData), title: .text("New Email"), leftNavigationButton: nil, rightNavigationButton: open, backNavigationButton: ItemListBackButton(title: presentationData.strings.Common_Back), animateChanges: false)
+        let listState = ItemListNodeState(presentationData: ItemListPresentationData(presentationData), entries: entries, style: .blocks, animateChanges: false)
         return (controllerState, (listState, arguments))
     }
     |> afterDisposed {
         disposable.dispose()
-        tasks.forEach { $0.cancel() }
-        if let authObserver {
-            NotificationCenter.default.removeObserver(authObserver)
-        }
     }
 
     let controller = ItemListController(context: context, state: signal)
     presentImpl = { [weak controller] c in
         controller?.present(c, in: .window(.root))
     }
-    pushImpl = { [weak controller] c in
-        (controller?.navigationController as? NavigationController)?.pushViewController(c)
+    replaceImpl = { [weak controller] peerId in
+        let _ = (controller?.navigationController as? NavigationController)?.popViewController(animated: false)
+        openChat(peerId)
     }
     return controller
 }

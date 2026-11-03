@@ -3,29 +3,37 @@ import Foundation
 /// The other half of the notification extension's quick answers (`PaiNotification` there): what it needs to
 /// reach the box, and sending the answer a tap on a notification's button picked.
 public enum PaiNotificationAnswer {
-    private static var written: (path: String, botUserId: Int64)?
+    /// The app group's `pai.json`, where the notification extension reads how to reach the box.
+    private static var path: String? {
+        guard let bundleId = Bundle.main.bundleIdentifier else { return nil }
+        return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.\(bundleId)")?.appendingPathComponent("pai.json").path
+    }
 
     /// Leaves the box's address, this phone's token and the bot's user id in the app group, where the extension
-    /// reads them; signed out, the file is removed. `basePath` is Telegram's data directory inside the app group.
+    /// reads them; signed out, the file is removed. The bot's id is known once its chat has been open.
     public static func writeConfig(basePath: String, botUserId: Int64) {
-        write(path: (basePath as NSString).deletingLastPathComponent + "/pai.json", botUserId: botUserId)
+        write(botUserId: String(botUserId))
     }
 
-    /// After a sign-in or out: the file the bot chat last wrote follows the token.
+    /// At launch and after a sign-in or out: mail and WhatsApp pushes need the token for their senders' pictures
+    /// whether or not the bot's chat was ever opened.
     static func refreshConfig() {
-        guard let written else { return }
-        write(path: written.path, botUserId: written.botUserId)
+        write(botUserId: nil)
     }
 
-    private static func write(path: String, botUserId: Int64) {
-        written = (path, botUserId)
+    private static func write(botUserId: String?) {
+        guard let path else { return }
         guard let token = PaiAuth.token else {
             try? FileManager.default.removeItem(atPath: path)
             return
         }
-        let config = ["baseURL": PaiSecrets.baseURL, "token": token, "botUserId": String(botUserId)]
+        let existing = (try? Data(contentsOf: URL(fileURLWithPath: path))).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: String] } ?? [:]
+        var config = ["baseURL": PaiSecrets.baseURL, "token": token]
+        if let botUserId = botUserId ?? existing["botUserId"] {
+            config["botUserId"] = botUserId
+        }
+        if existing == config { return }
         guard let data = try? JSONSerialization.data(withJSONObject: config) else { return }
-        if (try? Data(contentsOf: URL(fileURLWithPath: path))) == data { return }
         try? data.write(to: URL(fileURLWithPath: path), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
 

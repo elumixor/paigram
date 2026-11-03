@@ -121,11 +121,26 @@ enum PaiNotification {
         let base = config?.baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let senderURL = (info["avatar"] as? String).flatMap { path in base.flatMap { URL(string: $0 + path) } }
         let groupURL = (info["groupAvatar"] as? String).flatMap { path in base.flatMap { URL(string: $0 + path) } }
+        let pictureURL = (info["image"] as? String).flatMap { path in base.flatMap { URL(string: $0 + path) } }
 
         let group = DispatchGroup()
         var senderImage: INImage?
         var groupImage: INImage?
+        var picture: Data?
         if let config {
+            if let pictureURL {
+                group.enter()
+                var request = URLRequest(url: pictureURL, timeoutInterval: 5.0)
+                request.setValue("Bearer \(config.token)", forHTTPHeaderField: "Authorization")
+                URLSession.shared.dataTask(with: request) { data, response, _ in
+                    DispatchQueue.main.async {
+                        if let data, !data.isEmpty, (response as? HTTPURLResponse)?.statusCode == 200 {
+                            picture = data
+                        }
+                        group.leave()
+                    }
+                }.resume()
+            }
             for (url, assign) in [(senderURL, { (image: INImage) in senderImage = image }), (groupURL, { (image: INImage) in groupImage = image })] {
                 guard let url else { continue }
                 group.enter()
@@ -140,14 +155,15 @@ enum PaiNotification {
             }
         }
         group.notify(queue: .main) {
-            completion(communication(mutable, info: info, thread: thread, senderImage: senderImage, groupImage: groupImage))
+            let content = communication(mutable, info: info, thread: thread, senderImage: senderImage, groupImage: groupImage)
+            completion(withPicture(content, picture))
         }
     }
 
     private static func communication(_ content: UNMutableNotificationContent, info: [String: Any], thread: String, senderImage: INImage?, groupImage: INImage?) -> UNNotificationContent {
         guard #available(iOS 15.0, *) else { return content }
-        let senderName = info["sender"] as? String ?? content.title
-        let senderId = info["senderId"] as? String ?? thread
+        let senderName = info["name"] as? String ?? content.title
+        let senderId = info["id"] as? String ?? thread
         let groupName = info["group"] as? String
         let sender = INPerson(personHandle: INPersonHandle(value: senderId, type: .unknown), nameComponents: nil, displayName: senderName, image: senderImage, contactIdentifier: nil, customIdentifier: senderId)
         let me = INPerson(personHandle: INPersonHandle(value: "0", type: .unknown), nameComponents: nil, displayName: nil, image: nil, contactIdentifier: nil, customIdentifier: nil, isMe: true, suggestionType: .none)
@@ -157,7 +173,7 @@ enum PaiNotification {
             outgoingMessageType: .outgoingMessageText,
             content: content.body,
             speakableGroupName: groupName.map { INSpeakableString(spokenPhrase: $0) },
-            conversationIdentifier: thread,
+            conversationIdentifier: info["conversation"] as? String ?? thread,
             serviceName: info["service"] as? String,
             sender: sender,
             attachments: nil
@@ -174,5 +190,14 @@ enum PaiNotification {
         guard let updated = try? content.updating(from: intent), let result = updated.mutableCopy() as? UNMutableNotificationContent else { return content }
         result.threadIdentifier = thread
         return result
+    }
+
+    /// The picture a mail's summary picked, shown in the notification's preview.
+    private static func withPicture(_ content: UNNotificationContent, _ data: Data?) -> UNNotificationContent {
+        guard let data, let mutable = content.mutableCopy() as? UNMutableNotificationContent else { return content }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jpg")
+        guard (try? data.write(to: url)) != nil, let attachment = try? UNNotificationAttachment(identifier: "picture", url: url, options: nil) else { return content }
+        mutable.attachments = [attachment]
+        return mutable
     }
 }

@@ -1,4 +1,5 @@
 import Foundation
+import PaiUI
 import Display
 import TelegramCore
 import SwiftSignalKit
@@ -361,6 +362,21 @@ private func makeTelegramUrl(_ path: String, queryItems: [URLQueryItem] = []) ->
     return appendQueryItems(to: "https://t.me\(path)", items: queryItems)
 }
 
+/// A `mailto:` link's first address, subject and body.
+private func parseMailto(_ url: URL) -> (address: String, subject: String?, body: String)? {
+    guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+        return nil
+    }
+    let to = components.path.split(separator: ",").first.map(String.init) ?? components.queryItems?.first(where: { $0.name.lowercased() == "to" })?.value ?? ""
+    let address = (to.removingPercentEncoding ?? to).trimmingCharacters(in: .whitespaces).lowercased()
+    guard address.contains("@") else {
+        return nil
+    }
+    let item = { (name: String) in components.queryItems?.first(where: { $0.name.lowercased() == name })?.value }
+    let subject = item("subject").flatMap { $0.isEmpty ? nil : $0 }
+    return (address, subject, item("body") ?? "")
+}
+
 func openExternalUrlImpl(context: AccountContext, urlContext: OpenURLContext, url: String, forceExternal: Bool, presentationData: PresentationData, navigationController: NavigationController?, dismissInput: @escaping () -> Void) {
     if forceExternal || url.lowercased().hasPrefix("tel:") || url.lowercased().hasPrefix("calshow:") {
         if url.lowercased().hasPrefix("tel:+888") {
@@ -379,6 +395,23 @@ func openExternalUrlImpl(context: AccountContext, urlContext: OpenURLContext, ur
     }
     
     if canonicalUrl.scheme == "mailto" {
+        // Signed in to pai, mail is written here: the address opens as an email chat (the subject carried over).
+        if PaiAuth.isSignedIn, let navigationController, let mailto = parseMailto(canonicalUrl) {
+            let _ = (context.engine.email.openChat(address: mailto.address, name: "", account: nil, subject: mailto.subject)
+            |> mapToSignal { peerId in
+                return context.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: peerId))
+                |> castError(BoxError.self)
+            }
+            |> deliverOnMainQueue).startStandalone(next: { peer in
+                guard let peer else {
+                    return
+                }
+                context.sharedContext.navigateToChatController(NavigateToChatControllerParams(navigationController: navigationController, context: context, chatLocation: .peer(peer), updateTextInputState: mailto.body.isEmpty ? nil : ChatTextInputState(inputText: NSAttributedString(string: mailto.body))))
+            }, error: { _ in
+                context.sharedContext.applicationBindings.openUrl(url)
+            })
+            return
+        }
         context.sharedContext.applicationBindings.openUrl(url)
         return
     }

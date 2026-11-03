@@ -88,6 +88,8 @@ public struct EmailMessageData: Codable, Equatable {
     public let hero: EmailHeroData?
     /// Answers the user might give to a mail that asks him something (button labels); gone once he wrote back.
     public let replies: [String]?
+    /// The mail in one line, for a notification or a chat list.
+    public let short: String?
     /// The whole email as its sender made it, a signed page on the box.
     public let viewUrl: String?
 }
