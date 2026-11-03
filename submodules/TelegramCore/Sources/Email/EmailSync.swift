@@ -49,8 +49,22 @@ private func applyContacts(postbox: Postbox, accountPeerId: PeerId, response: Em
     }
 }
 
+/// Mail the box is still reading arrives finished in its change log within seconds: read it then, not at the
+/// next half-minute tick.
+private func followPending(_ messages: [EmailMessageData]) {
+    guard messages.contains(where: { $0.pending == true }) else {
+        return
+    }
+    for delay in [6.0, 20.0, 45.0] {
+        Queue.concurrentDefaultQueue().after(delay, {
+            syncRequests.putNext(Void())
+        })
+    }
+}
+
 private func applyChanges(postbox: Postbox, accountPeerId: PeerId, response: EmailChangesResponse) -> Signal<Void, NoError> {
     return postbox.transaction { transaction -> Void in
+        followPending(response.changes.compactMap(\.payload.message))
         for change in response.changes {
             let peerId = change.payload.contact.map { storeEmailContactPeer(transaction: transaction, contact: $0) }
             switch change.kind {
@@ -147,6 +161,7 @@ func fetchEmailHistoryHole(postbox: Postbox, accountPeerId: PeerId, peerId: Peer
                 return .single(nil)
             }
             return postbox.transaction { transaction -> BoxHistoryPage? in
+                followPending(response.messages)
                 let ids = response.messages.compactMap { storeEmailMessage(transaction: transaction, accountPeerId: accountPeerId, peerId: peerId, data: $0) }
                 resetEmailReadState(transaction: transaction, peerId: peerId, contact: response.contact)
                 return BoxHistoryPage(ids: ids, more: response.more)

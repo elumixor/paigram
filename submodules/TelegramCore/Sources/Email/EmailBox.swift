@@ -90,6 +90,8 @@ public struct EmailMessageData: Codable, Equatable {
     public let replies: [String]?
     /// The mail in one line, for a notification or a chat list.
     public let short: String?
+    /// The box is still writing its summary or answers: the finished message comes through the change log.
+    public let pending: Bool?
     /// The whole email as its sender made it, a signed page on the box.
     public let viewUrl: String?
 }
