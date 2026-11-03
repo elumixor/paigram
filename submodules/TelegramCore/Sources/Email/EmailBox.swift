@@ -64,6 +64,12 @@ public struct EmailHeroData: Codable, Equatable {
     public let height: Int32
 }
 
+/// A link the mail asks the user to follow (register, pay, confirm), shown as a button that opens it.
+public struct EmailActionData: Codable, Equatable {
+    public let label: String
+    public let url: String
+}
+
 public struct EmailMessageData: Codable, Equatable {
     public let account: String
     public let id: String
@@ -86,6 +92,8 @@ public struct EmailMessageData: Codable, Equatable {
     /// What an automated mail says, written for the chat; nil for a person's mail or when it could not be written.
     public let digest: EmailRichTextData?
     public let hero: EmailHeroData?
+    /// Links the mail asks the user to follow, as buttons; they stay on their mail.
+    public let actions: [EmailActionData]?
     /// Answers the user might give to a mail that asks him something (button labels); gone once he wrote back.
     public let replies: [String]?
     /// The mail in one line, for a notification or a chat list.

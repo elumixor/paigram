@@ -90,15 +90,27 @@ private func emailCard(_ data: EmailMessageData, globallyUniqueId: Int64) -> Tel
 /// The prefix of a reply button's callback data; the chat drafts the rest as a reply (`ChatControllerImpl`).
 public let emailReplyCallbackPrefix = "email-reply:"
 
-/// A mail that asks something carries the answers the box offered, one button a row under its bubble.
+/// A mail that asks something carries its buttons under its bubble, one a row: the links it asks the user to
+/// follow, then the answers the box offered.
 private func replyButtons(_ data: EmailMessageData) -> ReplyMarkupMessageAttribute? {
-    guard !data.outgoing, let replies = data.replies, !replies.isEmpty else {
+    guard !data.outgoing else {
         return nil
     }
-    let rows = replies.map { label in
+    let links = (data.actions ?? []).map { action in
+        ReplyMarkupRow(buttons: [ReplyMarkupButton(title: action.label, titleWhenForwarded: nil, action: .url(action.url), style: nil)])
+    }
+    let answers = (data.replies ?? []).map { label in
         ReplyMarkupRow(buttons: [ReplyMarkupButton(title: label, titleWhenForwarded: nil, action: .callback(requiresPassword: false, data: MemoryBuffer(data: (emailReplyCallbackPrefix + label).data(using: .utf8)!)), style: nil)])
     }
-    return ReplyMarkupMessageAttribute(rows: rows, flags: [.inline], placeholder: nil)
+    let rows = links + answers
+    return rows.isEmpty ? nil : ReplyMarkupMessageAttribute(rows: rows, flags: [.inline], placeholder: nil)
+}
+
+private func isAnswer(_ button: ReplyMarkupButton) -> Bool {
+    if case .callback = button.action {
+        return true
+    }
+    return false
 }
 
 /// One message of an email: its files first, each a message of the email's group, the last one carrying the text.
@@ -187,18 +199,25 @@ func storeEmailMessage(transaction: Transaction, accountPeerId: PeerId, peerId: 
     return transaction.messageIdForGloballyUniqueMessageId(peerId: peerId, id: globallyUniqueId)
 }
 
-/// A newer message came (or the user wrote): the answers offered to earlier mail are spent.
+/// A newer message came (or the user wrote): the answers offered to earlier mail are spent. Link buttons stay.
 func clearEmailReplyButtons(transaction: Transaction, peerId: PeerId, before timestamp: Int32 = Int32.max, except globallyUniqueId: Int64? = nil) {
     var marked: [MessageId] = []
     transaction.scanTopMessages(peerId: peerId, namespace: Namespaces.Message.Box, limit: 100, { message in
-        if message.timestamp <= timestamp, message.globallyUniqueId != globallyUniqueId, message.attributes.contains(where: { $0 is ReplyMarkupMessageAttribute }) {
+        if message.timestamp <= timestamp, message.globallyUniqueId != globallyUniqueId, message.attributes.contains(where: { ($0 as? ReplyMarkupMessageAttribute)?.rows.contains(where: { $0.buttons.contains(where: isAnswer) }) == true }) {
             marked.append(message.id)
         }
         return true
     })
     for id in marked {
         transaction.updateMessage(id, update: { current in
-            return updatedBoxMessage(current, flags: { _ in }, attributes: current.attributes.filter { !($0 is ReplyMarkupMessageAttribute) })
+            let attributes: [MessageAttribute] = current.attributes.compactMap { attribute in
+                guard let markup = attribute as? ReplyMarkupMessageAttribute else {
+                    return attribute
+                }
+                let rows = markup.rows.filter { !$0.buttons.contains(where: isAnswer) }
+                return rows.isEmpty ? nil : ReplyMarkupMessageAttribute(rows: rows, flags: markup.flags, placeholder: markup.placeholder)
+            }
+            return updatedBoxMessage(current, flags: { _ in }, attributes: attributes)
         })
     }
 }
