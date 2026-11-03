@@ -55,7 +55,7 @@ The sim ignores code signing, so the unsigned `Telegram_archive-root` bundle run
 
 ## TestFlight
 
-To get a change onto the phone, use `bun run sim` first, then `bun run device`, which installs an Ad Hoc–signed release build over USB or Wi-Fi (see PAIGRAM.md). Push a TestFlight tag only for a release.
+To get a change onto the phone, use `bun run device` (skip the simulator), which installs an Ad Hoc–signed release build over USB or Wi-Fi (see PAIGRAM.md). Push a TestFlight tag only for a release.
 
 The app's display name is `Paigram`, hardcoded in `Telegram/BUILD`: `TelegramInfoPlist` for the app (`CFBundleDisplayName`/`CFBundleName`), the shared `AppNameInfoPlist` fragment for every extension, `display_name` on `TelegramWatchApp` for the watch app. Anything a user says to Siri or reads as the app's name has to match it, not upstream's "Telegram".
 
