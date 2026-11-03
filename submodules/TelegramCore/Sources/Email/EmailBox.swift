@@ -86,6 +86,8 @@ public struct EmailMessageData: Codable, Equatable {
     /// What an automated mail says, written for the chat; nil for a person's mail or when it could not be written.
     public let digest: EmailRichTextData?
     public let hero: EmailHeroData?
+    /// Answers the user might give to a mail that asks him something (button labels); gone once he wrote back.
+    public let replies: [String]?
     /// The whole email as its sender made it, a signed page on the box.
     public let viewUrl: String?
 }

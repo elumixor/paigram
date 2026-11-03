@@ -87,21 +87,50 @@ private func emailCard(_ data: EmailMessageData, globallyUniqueId: Int64) -> Tel
     return TelegramMediaWebpage(webpageId: MediaId(namespace: Namespaces.Media.LocalWebpage, id: globallyUniqueId), content: .Loaded(content))
 }
 
-private func storeMessage(transaction: Transaction, accountPeerId: PeerId, peerId: PeerId, data: EmailMessageData, globallyUniqueId: Int64, text: String, entities: [MessageTextEntity], media: [Media], isPartial: Bool) {
-    let id = BoxMessageIds.id(transaction: transaction, peerId: peerId, date: data.date, globallyUniqueId: globallyUniqueId)
-    let attributes: [MessageAttribute] = [TextEntitiesMessageAttribute(entities: entities), emailAttribute(data, isPartial: isPartial)]
-    let (tags, globalTags) = tagsForStoreMessage(incoming: !data.outgoing, attributes: attributes, media: media, textEntities: entities, isPinned: false)
-    let message = StoreMessage(id: id, customStableId: nil, globallyUniqueId: globallyUniqueId, groupingKey: nil, threadId: nil, timestamp: Int32(clamping: data.date / 1000), flags: data.outgoing ? [] : [.Incoming], tags: tags, globalTags: globalTags, localTags: [], forwardInfo: nil, authorId: data.outgoing ? accountPeerId : peerId, text: text, attributes: attributes, media: media)
-    if transaction.getMessage(id) != nil {
-        transaction.updateMessage(id, update: { _ in
-            return .update(message)
-        })
-    } else {
-        let _ = transaction.addMessages([message], location: .Random)
+/// The prefix of a reply button's callback data; the chat drafts the rest as a reply (`ChatControllerImpl`).
+public let emailReplyCallbackPrefix = "email-reply:"
+
+/// A mail that asks something carries the answers the box offered, one button a row under its bubble.
+private func replyButtons(_ data: EmailMessageData) -> ReplyMarkupMessageAttribute? {
+    guard !data.outgoing, let replies = data.replies, !replies.isEmpty else {
+        return nil
     }
+    let rows = replies.map { label in
+        ReplyMarkupRow(buttons: [ReplyMarkupButton(title: label, titleWhenForwarded: nil, action: .callback(requiresPassword: false, data: MemoryBuffer(data: (emailReplyCallbackPrefix + label).data(using: .utf8)!)), style: nil)])
+    }
+    return ReplyMarkupMessageAttribute(rows: rows, flags: [.inline], placeholder: nil)
+}
+
+/// One message of an email: its files first, each a message of the email's group, the last one carrying the text.
+private struct EmailPart {
+    let globallyUniqueId: Int64
+    let text: String
+    let entities: [MessageTextEntity]
+    let media: [Media]
+    let markup: ReplyMarkupMessageAttribute?
+}
+
+/// The ids an email's messages have, oldest first, found by its globally unique ids.
+private func storedEmailIds(transaction: Transaction, peerId: PeerId, globallyUniqueId: Int64) -> [MessageId] {
+    var ids: [MessageId] = []
+    var misses = 0
+    var offset: Int64 = 0
+    // The text message may be absent (an attachment-only mail stored the old way): its files start at offset 1.
+    while misses < 2 {
+        if let id = transaction.messageIdForGloballyUniqueMessageId(peerId: peerId, id: globallyUniqueId &+ offset) {
+            ids.append(id)
+            misses = 0
+        } else {
+            misses += 1
+        }
+        offset += 1
+    }
+    return ids.sorted()
 }
 
 /// Stores one email (and its attachments) in its chat; a full copy replaces the snippet the contact list gave.
+/// Its files and text read as one bubble: a group of file messages with the text under the last, as Telegram sends
+/// files with a caption. An automated mail's card cannot share a message with a file, so it stays on its own.
 @discardableResult
 func storeEmailMessage(transaction: Transaction, accountPeerId: PeerId, peerId: PeerId, data: EmailMessageData) -> MessageId? {
     let globallyUniqueId = emailGloballyUniqueId(gmailId: data.id)
@@ -110,18 +139,69 @@ func storeEmailMessage(transaction: Transaction, accountPeerId: PeerId, peerId: 
         // Known already, possibly in full: a summary never overwrites it.
         return existing
     }
-    let (text, entities) = emailText(data)
-    if !text.isEmpty || (data.attachments ?? []).isEmpty {
-        let card = emailCard(data, globallyUniqueId: globallyUniqueId)
-        storeMessage(transaction: transaction, accountPeerId: accountPeerId, peerId: peerId, data: data, globallyUniqueId: globallyUniqueId, text: text, entities: entities, media: card.map { [$0] } ?? [], isPartial: isPartial)
+    if data.outgoing {
+        clearEmailReplyButtons(transaction: transaction, peerId: peerId)
     }
-    for (index, attachment) in (data.attachments ?? []).enumerated() {
-        let fileId = globallyUniqueId &+ Int64(index + 1)
-        if let file = attachmentFile(attachment, data: data, globallyUniqueId: fileId) {
-            storeMessage(transaction: transaction, accountPeerId: accountPeerId, peerId: peerId, data: data, globallyUniqueId: fileId, text: "", entities: [], media: [file], isPartial: false)
+    let (text, entities) = emailText(data)
+    let markup = replyButtons(data)
+    let files = (data.attachments ?? []).enumerated().compactMap { index, attachment in
+        attachmentFile(attachment, data: data, globallyUniqueId: globallyUniqueId &+ Int64(index + 1))
+    }
+    var parts: [EmailPart] = []
+    if let card = emailCard(data, globallyUniqueId: globallyUniqueId) {
+        parts.append(EmailPart(globallyUniqueId: globallyUniqueId, text: text, entities: entities, media: [card], markup: markup))
+        parts += files.enumerated().map { EmailPart(globallyUniqueId: globallyUniqueId &+ Int64($0.offset + 1), text: "", entities: [], media: [$0.element], markup: nil) }
+    } else {
+        parts += files.dropLast().enumerated().map { EmailPart(globallyUniqueId: globallyUniqueId &+ Int64($0.offset + 1), text: "", entities: [], media: [$0.element], markup: nil) }
+        parts.append(EmailPart(globallyUniqueId: globallyUniqueId, text: text, entities: entities, media: files.last.map { [$0] } ?? [], markup: markup))
+    }
+    let groupedFiles = parts.filter { $0.media.contains(where: { $0 is TelegramMediaFile }) }
+    let groupingKey: Int64? = groupedFiles.count > 1 ? globallyUniqueId : nil
+
+    // Ids follow the order the messages were added in; an email stored another way (each file a message after the
+    // text) is laid out again in the same ids, so the text lands under the last file.
+    let existing = storedEmailIds(transaction: transaction, peerId: peerId, globallyUniqueId: globallyUniqueId)
+    let inPlace = existing.count == parts.count
+    if !inPlace && !existing.isEmpty {
+        transaction.deleteMessages(existing, forEachMedia: nil)
+    }
+    var free = existing
+    let timestamp = Int32(clamping: data.date / 1000)
+    for part in parts {
+        let id = free.isEmpty ? BoxMessageIds.id(transaction: transaction, peerId: peerId, date: data.date, globallyUniqueId: part.globallyUniqueId) : free.removeFirst()
+        var attributes: [MessageAttribute] = [TextEntitiesMessageAttribute(entities: part.entities), emailAttribute(data, isPartial: isPartial)]
+        if let markup = part.markup {
+            attributes.append(markup)
+        }
+        let (tags, globalTags) = tagsForStoreMessage(incoming: !data.outgoing, attributes: attributes, media: part.media, textEntities: part.entities, isPinned: false)
+        let isGrouped = groupingKey != nil && part.media.contains(where: { $0 is TelegramMediaFile })
+        let message = StoreMessage(id: id, customStableId: nil, globallyUniqueId: part.globallyUniqueId, groupingKey: isGrouped ? groupingKey : nil, threadId: nil, timestamp: timestamp, flags: data.outgoing ? [] : [.Incoming], tags: tags, globalTags: globalTags, localTags: [], forwardInfo: nil, authorId: data.outgoing ? accountPeerId : peerId, text: part.text, attributes: attributes, media: part.media)
+        if inPlace {
+            transaction.updateMessage(id, update: { _ in
+                return .update(message)
+            })
+        } else {
+            // Added one by one: a free id is one no message has yet.
+            let _ = transaction.addMessages([message], location: .Random)
         }
     }
     return transaction.messageIdForGloballyUniqueMessageId(peerId: peerId, id: globallyUniqueId)
+}
+
+/// The user wrote in the chat: the answers offered to earlier mail are spent.
+func clearEmailReplyButtons(transaction: Transaction, peerId: PeerId) {
+    var marked: [MessageId] = []
+    transaction.scanTopMessages(peerId: peerId, namespace: Namespaces.Message.Box, limit: 100, { message in
+        if message.attributes.contains(where: { $0 is ReplyMarkupMessageAttribute }) {
+            marked.append(message.id)
+        }
+        return true
+    })
+    for id in marked {
+        transaction.updateMessage(id, update: { current in
+            return updatedBoxMessage(current, flags: { _ in }, attributes: current.attributes.filter { !($0 is ReplyMarkupMessageAttribute) })
+        })
+    }
 }
 
 /// An email gone from the mailbox (trashed, deleted): its message and its attachments' go too.

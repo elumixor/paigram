@@ -7,6 +7,8 @@ import TextFormat
 import LocalizedPeerData
 import UndoUI
 import PaiUI
+import ChatInterfaceState
+import ChatPresentationInterfaceState
 
 extension ChatControllerImpl {
     /// Rewrites the composer's draft (or the message being edited) into what the user would actually send here:
@@ -25,6 +27,26 @@ extension ChatControllerImpl {
             return
         }
         self.runPaiCompose(peerId: peerId, draft: draft, original: original, answers: [])
+    }
+
+    /// A reply button under an email: the answer it names, drafted in the user's voice as a reply to that email.
+    /// Only drafted: the composer gets the text and the user sends it, or not.
+    func draftEmailReply(to messageId: EngineMessage.Id, intent: String) {
+        self.updateChatPresentationInterfaceState(animated: true, interactive: true, { state in
+            var state = state.updatedInterfaceState { interfaceState in
+                return interfaceState
+                    .withUpdatedReplyMessageSubject(ChatInterfaceState.ReplyMessageSubject(messageId: messageId, quote: nil, innerSubject: nil))
+                    .withUpdatedEffectiveInputState(ChatTextInputState(inputText: NSAttributedString(string: intent)))
+            }
+            if state.inputMode == .none {
+                state = state.updatedInputMode { _ in .text }
+            }
+            return state
+        })
+        // The panel takes the new text on this pass; compose reads it from there.
+        DispatchQueue.main.async { [weak self] in
+            self?.openPaiCompose()
+        }
     }
 
     @available(iOS 16.0, *)

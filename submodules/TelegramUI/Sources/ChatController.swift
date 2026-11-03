@@ -2666,6 +2666,11 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
             
             let messageId = message.id
             
+            if messageId.peerId.isEmail, let label = data.flatMap({ String(data: $0.makeData(), encoding: .utf8) }), label.hasPrefix(emailReplyCallbackPrefix) {
+                strongSelf.draftEmailReply(to: messageId, intent: String(label.dropFirst(emailReplyCallbackPrefix.count)))
+                return
+            }
+            
             guard strongSelf.presentationInterfaceState.subject != .scheduledMessages else {
                 strongSelf.present(textAlertController(context: strongSelf.context, updatedPresentationData: strongSelf.updatedPresentationData, title: nil, text: strongSelf.presentationData.strings.ScheduledMessages_BotActionUnavailable, actions: [TextAlertAction(type: .defaultAction, title: strongSelf.presentationData.strings.Common_OK, action: {})]), in: .window(.root))
                 return

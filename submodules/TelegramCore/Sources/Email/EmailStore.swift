@@ -18,7 +18,7 @@ public struct EmailState: Codable, Equatable {
     }
     
     /// How the box draws a message's text; raised when that changes, so mail stored the old way is fetched again.
-    public static let currentTextVersion: Int32 = 2
+    public static let currentTextVersion: Int32 = 3
     
     public var seq: Int64
     public var accounts: [EmailAccountData]

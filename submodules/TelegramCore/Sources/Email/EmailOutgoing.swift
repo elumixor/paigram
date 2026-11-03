@@ -79,6 +79,7 @@ private func settle(postbox: Postbox, accountPeerId: PeerId, messageId: MessageI
         })
         if let response {
             storeEmailContact(transaction: transaction, contact: response.contact)
+            clearEmailReplyButtons(transaction: transaction, peerId: messageId.peerId)
         }
         updateEmailState(transaction: transaction, { state in
             var state = state
