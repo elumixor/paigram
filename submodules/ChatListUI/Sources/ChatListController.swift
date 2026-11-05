@@ -1571,6 +1571,13 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                 return
             }
             
+            // Opens inside this controller, not pushed over it, so the tab bar stays.
+            if groupId == .email {
+                self.chatListDisplayNode.mainContainerNode.currentItemNode.clearHighlightAnimated(true)
+                self.setInlineChatList(location: .chatList(groupId: .email))
+                return
+            }
+            
             let _ = self.context.engine.privacy.updateGlobalPrivacySettings().startStandalone()
             let _ = (combineLatest(
                 ApplicationSpecificNotice.displayChatListArchiveTooltip(accountManager: self.context.sharedContext.accountManager),

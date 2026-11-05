@@ -1954,12 +1954,14 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
         var mainNavigationBarHeight = navigationBarHeight
         var cleanMainNavigationBarHeight = cleanNavigationBarHeight
         var mainInsets = insets
+        // The Email list takes the whole width; a forum's topics leave a column of the main list's avatars.
+        let inlineCoversMainList = self.inlineStackContainerNode?.location == .chatList(groupId: .email)
         if self.inlineStackContainerNode != nil && "".isEmpty {
             mainNavigationBarHeight = visualNavigationHeight
             cleanMainNavigationBarHeight = visualNavigationHeight
             mainInsets.top = visualNavigationHeight
         }
-        self.mainContainerNode.update(layout: layout, navigationBarHeight: mainNavigationBarHeight, visualNavigationHeight: visualNavigationHeight, originalNavigationHeight: navigationBarHeight, cleanNavigationBarHeight: cleanMainNavigationBarHeight, insets: mainInsets, isReorderingFilters: self.isReorderingFilters, isEditing: self.isEditing, inlineNavigationLocation: self.inlineStackContainerNode?.location, inlineNavigationTransitionFraction: self.inlineStackContainerTransitionFraction, storiesInset: storiesInset, transition: transition)
+        self.mainContainerNode.update(layout: layout, navigationBarHeight: mainNavigationBarHeight, visualNavigationHeight: visualNavigationHeight, originalNavigationHeight: navigationBarHeight, cleanNavigationBarHeight: cleanMainNavigationBarHeight, insets: mainInsets, isReorderingFilters: self.isReorderingFilters, isEditing: self.isEditing, inlineNavigationLocation: inlineCoversMainList ? nil : self.inlineStackContainerNode?.location, inlineNavigationTransitionFraction: self.inlineStackContainerTransitionFraction, storiesInset: storiesInset, transition: transition)
         
         if let inlineStackContainerNode = self.inlineStackContainerNode {
             var inlineStackContainerNodeTransition = transition
@@ -1970,18 +1972,19 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
                 animateIn = true
             }
             
-            let inlineSideInset: CGFloat = layout.safeInsets.left + 72.0
+            let inlineSideInset: CGFloat = inlineCoversMainList ? 0.0 : layout.safeInsets.left + 72.0
             var inlineStackFrame = CGRect(origin: CGPoint(x: inlineSideInset, y: 0.0), size: CGSize(width: layout.size.width - inlineSideInset, height: layout.size.height))
             inlineStackFrame.origin.x += (1.0 - self.inlineStackContainerTransitionFraction) * inlineStackFrame.width
             inlineStackContainerNodeTransition.updateFrame(node: inlineStackContainerNode, frame: inlineStackFrame)
             var inlineLayout = layout
             inlineLayout.size.width -= inlineSideInset
-            inlineLayout.safeInsets.left = 0.0
-            inlineLayout.intrinsicInsets.left = 0.0
-            inlineLayout.additionalInsets.left = 0.0
-            
             var inlineInsets = insets
-            inlineInsets.left = 0.0
+            if !inlineCoversMainList {
+                inlineLayout.safeInsets.left = 0.0
+                inlineLayout.intrinsicInsets.left = 0.0
+                inlineLayout.additionalInsets.left = 0.0
+                inlineInsets.left = 0.0
+            }
             
             let inlineNavigationHeight: CGFloat = navigationBarLayout.navigationHeight - navigationBarLayout.storiesInset
             
@@ -2340,7 +2343,7 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
                     }
                 }
                 
-                inlineStackContainerNode.leftSeparatorLayer.isHidden = false
+                inlineStackContainerNode.leftSeparatorLayer.isHidden = inlineStackContainerNode.location == .chatList(groupId: .email)
                 
                 inlineStackContainerNode.presentAlert = self.mainContainerNode.presentAlert
                 inlineStackContainerNode.present = self.mainContainerNode.present
