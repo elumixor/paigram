@@ -69,6 +69,8 @@ final class ChatListContainerItemNode: ASDisplayNode {
         self.emptyAction = emptyAction
         self.secondaryEmptyAction = secondaryEmptyAction
         self.openArchiveSettings = openArchiveSettings
+        // Inline rows are a forum's topics, without avatars; the Email list's rows are chats with them.
+        let isInlineMode = isInlineMode && location != .chatList(groupId: .email)
         self.isInlineMode = isInlineMode
         
         self.listNode = ChatListNode(context: context, location: location, chatListFilter: filter, previewing: previewing, fillPreloadItems: controlsHistoryPreload, mode: chatListMode, theme: presentationData.theme, fontSize: presentationData.listsFontSize, strings: presentationData.strings, dateTimeFormat: presentationData.dateTimeFormat, nameSortOrder: presentationData.nameSortOrder, nameDisplayOrder: presentationData.nameDisplayOrder, animationCache: animationCache, animationRenderer: animationRenderer, disableAnimations: true, isInlineMode: isInlineMode, autoSetReady: autoSetReady, isMainTab: isMainTab)
