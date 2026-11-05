@@ -89,9 +89,11 @@ private func emailCard(_ data: EmailMessageData, globallyUniqueId: Int64) -> Tel
 
 /// The prefix of a reply button's callback data; the chat drafts the rest as a reply (`ChatControllerImpl`).
 public let emailReplyCallbackPrefix = "email-reply:"
+/// The callback data of the button that leaves a mail's list through the box.
+public let emailUnsubscribeCallback = "email-unsubscribe"
 
 /// A mail that asks something carries its buttons under its bubble, one a row: the links it asks the user to
-/// follow, then the answers the box offered.
+/// follow, the way out of a subscription, then the answers the box offered.
 private func replyButtons(_ data: EmailMessageData) -> ReplyMarkupMessageAttribute? {
     guard !data.outgoing else {
         return nil
@@ -102,13 +104,17 @@ private func replyButtons(_ data: EmailMessageData) -> ReplyMarkupMessageAttribu
     let answers = (data.replies ?? []).map { label in
         ReplyMarkupRow(buttons: [ReplyMarkupButton(title: label, titleWhenForwarded: nil, action: .callback(requiresPassword: false, data: MemoryBuffer(data: (emailReplyCallbackPrefix + label).data(using: .utf8)!)), style: nil)])
     }
-    let rows = links + answers
+    let unsubscribe = data.unsubscribe.map { way -> [ReplyMarkupRow] in
+        let action: ReplyMarkupButtonAction = way.url.map { ReplyMarkupButtonAction.url($0) } ?? .callback(requiresPassword: false, data: MemoryBuffer(data: emailUnsubscribeCallback.data(using: .utf8)!))
+        return [ReplyMarkupRow(buttons: [ReplyMarkupButton(title: "Unsubscribe", titleWhenForwarded: nil, action: action, style: nil)])]
+    } ?? []
+    let rows = links + unsubscribe + answers
     return rows.isEmpty ? nil : ReplyMarkupMessageAttribute(rows: rows, flags: [.inline], placeholder: nil)
 }
 
 private func isAnswer(_ button: ReplyMarkupButton) -> Bool {
-    if case .callback = button.action {
-        return true
+    if case let .callback(_, data) = button.action {
+        return String(data: data.makeData(), encoding: .utf8)?.hasPrefix(emailReplyCallbackPrefix) == true
     }
     return false
 }

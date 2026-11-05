@@ -11,6 +11,31 @@ public extension TelegramEngine {
             self.account = account
         }
         
+        /// Leaves the list this mail came from; the mail without its button follows in the change log.
+        public func unsubscribe(messageId: EngineMessage.Id) -> Signal<Never, BoxError> {
+            struct Body: Encodable {
+                let account: String
+                let id: String
+            }
+            struct Response: Decodable {
+                let unsubscribed: Bool
+            }
+            return self.account.postbox.transaction { transaction -> Body? in
+                return transaction.getMessage(messageId)?.attributes.compactMap({ $0 as? EmailMessageAttribute }).first.map { Body(account: $0.account, id: $0.gmailId) }
+            }
+            |> castError(BoxError.self)
+            |> mapToSignal { body -> Signal<Never, BoxError> in
+                guard let body else {
+                    return .fail(.transport("the mail is gone"))
+                }
+                return (BoxClient.post("/gmail/unsubscribe", body: body) as Signal<Response, BoxError>)
+                |> mapToSignal { _ -> Signal<Never, BoxError> in
+                    requestEmailSync()
+                    return .complete()
+                }
+            }
+        }
+        
         /// Reads the box's changes now (a push arrived, the app came to the front).
         public func syncNow() {
             requestEmailSync()
@@ -45,7 +70,7 @@ public extension TelegramEngine {
                 return postbox.transaction { transaction -> EnginePeer.Id in
                     let peerId = storeEmailContact(transaction: transaction, contact: contact)
                     if case .notIncluded = transaction.getPeerChatListInclusion(peerId) {
-                        transaction.updatePeerChatListInclusion(peerId, inclusion: .ifHasMessagesOrOneOf(groupId: .root, pinningIndex: nil, minTimestamp: Int32(Date().timeIntervalSince1970)))
+                        transaction.updatePeerChatListInclusion(peerId, inclusion: .ifHasMessagesOrOneOf(groupId: Namespaces.PeerGroup.email, pinningIndex: nil, minTimestamp: Int32(Date().timeIntervalSince1970)))
                     }
                     return peerId
                 }

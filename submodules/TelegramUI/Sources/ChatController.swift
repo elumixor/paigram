@@ -2666,6 +2666,11 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
             
             let messageId = message.id
             
+            if messageId.peerId.isEmail, let label = data.flatMap({ String(data: $0.makeData(), encoding: .utf8) }), label == emailUnsubscribeCallback {
+                strongSelf.unsubscribeFromEmail(messageId, progress: progress)
+                return
+            }
+            
             if messageId.peerId.isEmail, let label = data.flatMap({ String(data: $0.makeData(), encoding: .utf8) }), label.hasPrefix(emailReplyCallbackPrefix) {
                 strongSelf.draftEmailReply(to: messageId, intent: String(label.dropFirst(emailReplyCallbackPrefix.count)))
                 return

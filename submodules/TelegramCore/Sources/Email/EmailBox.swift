@@ -70,6 +70,11 @@ public struct EmailActionData: Codable, Equatable {
     public let url: String
 }
 
+/// A subscription's way out: the box does it through `/gmail/unsubscribe`, or `url` is a page the user finishes on.
+public struct EmailUnsubscribeData: Codable, Equatable {
+    public let url: String?
+}
+
 public struct EmailMessageData: Codable, Equatable {
     public let account: String
     public let id: String
@@ -94,6 +99,7 @@ public struct EmailMessageData: Codable, Equatable {
     public let hero: EmailHeroData?
     /// Links the mail asks the user to follow, as buttons; they stay on their mail.
     public let actions: [EmailActionData]?
+    public let unsubscribe: EmailUnsubscribeData?
     /// Answers the user might give to a mail that asks him something (button labels); gone once he wrote back.
     public let replies: [String]?
     /// The mail in one line, for a notification or a chat list.

@@ -31,6 +31,25 @@ extension ChatControllerImpl {
 
     /// A reply button under an email: the answer it names, drafted in the user's voice as a reply to that email.
     /// Only drafted: the composer gets the text and the user sends it, or not.
+    func unsubscribeFromEmail(_ messageId: EngineMessage.Id, progress: Promise<Bool>?) {
+        progress?.set(.single(true))
+        let _ = (self.context.engine.email.unsubscribe(messageId: messageId)
+        |> deliverOnMainQueue).startStandalone(error: { [weak self] error in
+            progress?.set(.single(false))
+            Logger.shared.log("Email", "unsubscribe failed: \(error)")
+            guard let self else {
+                return
+            }
+            self.present(UndoOverlayController(presentationData: self.presentationData, content: .info(title: nil, text: "Could not unsubscribe", timeout: nil, customUndoText: nil), elevatedLayout: false, action: { _ in return false }), in: .current)
+        }, completed: { [weak self] in
+            progress?.set(.single(false))
+            guard let self else {
+                return
+            }
+            self.present(UndoOverlayController(presentationData: self.presentationData, content: .succeed(text: "Unsubscribed", timeout: nil, customUndoText: nil), elevatedLayout: false, action: { _ in return false }), in: .current)
+        })
+    }
+    
     func draftEmailReply(to messageId: EngineMessage.Id, intent: String) {
         self.updateChatPresentationInterfaceState(animated: true, interactive: true, { state in
             var state = state.updatedInterfaceState { interfaceState in
