@@ -606,7 +606,7 @@ struct ChatListContactPeer {
 
 func chatListNodeEntriesForView(view: EngineChatList, state: ChatListNodeState, savedMessagesPeer: EnginePeer?, foundPeers: [(EnginePeer, EnginePeer?)], hideArchivedFolderByDefault: Bool, displayArchiveIntro: Bool, mode: ChatListNodeMode, chatListLocation: ChatListControllerLocation, contacts: [ChatListContactPeer], accountPeerId: EnginePeer.Id, isMainTab: Bool) -> (entries: [ChatListNodeEntry], loading: Bool) {
     var groupItems = view.groupItems
-    if isMainTab && state.archiveStoryState != nil && groupItems.isEmpty {
+    if isMainTab && state.archiveStoryState != nil && !groupItems.contains(where: { $0.id == .archive }) {
         groupItems.append(EngineChatList.GroupItem(
             id: .archive,
             topMessage: nil,
@@ -920,10 +920,11 @@ func chatListNodeEntriesForView(view: EngineChatList, state: ChatListNodeState, 
         }
         
         if !view.hasLater, case .chatList = mode {
-            for groupReference in groupItems {
+            // Entries run bottom-up and the archive has to stay on top: it hides above the list.
+            for groupReference in groupItems.sorted(by: { $0.id == .email && $1.id != .email }) {
                 let messageIndex = EngineMessage.Index(id: EngineMessage.Id(peerId: EnginePeer.Id(0), namespace: 0, id: 0), timestamp: 1)
                 var mappedStoryState: ChatListNodeState.StoryState?
-                if let archiveStoryState = state.archiveStoryState {
+                if groupReference.id == .archive, let archiveStoryState = state.archiveStoryState {
                     mappedStoryState = archiveStoryState
                 }
                 result.append(.GroupReferenceEntry(ChatListNodeEntry.GroupReferenceEntryData(
@@ -935,7 +936,7 @@ func chatListNodeEntriesForView(view: EngineChatList, state: ChatListNodeState, 
                     editing: state.editing,
                     unreadCount: groupReference.unreadCount,
                     revealed: state.hiddenItemShouldBeTemporaryRevealed,
-                    hiddenByDefault: hideArchivedFolderByDefault,
+                    hiddenByDefault: groupReference.id == .archive && hideArchivedFolderByDefault,
                     appearsPinned: hasPinned,
                     storyState: mappedStoryState
                 )))

@@ -2570,7 +2570,7 @@ public final class ChatListNode: ListViewImpl {
                                 }
                             }
                         } else if case let .GroupReferenceEntry(groupReferenceEntry) = entry {
-                            didIncludeHiddenByDefaultArchive = groupReferenceEntry.hiddenByDefault
+                            didIncludeHiddenByDefaultArchive = didIncludeHiddenByDefaultArchive || groupReferenceEntry.hiddenByDefault
                         }
                     }
                 }
@@ -2603,8 +2603,8 @@ public final class ChatListNode: ListViewImpl {
                             }
                         }
                     } else if case let .GroupReferenceEntry(groupReferenceEntry) = entry {
-                        doesIncludeArchive = true
-                        doesIncludeHiddenByDefaultArchive = groupReferenceEntry.hiddenByDefault
+                        doesIncludeArchive = doesIncludeArchive || groupReferenceEntry.groupId == .archive
+                        doesIncludeHiddenByDefaultArchive = doesIncludeHiddenByDefaultArchive || groupReferenceEntry.hiddenByDefault
                     }
                 }
                 if previousPinnedChats != updatedPinnedChats || previousPinnedThreads != updatedPinnedThreads {
@@ -2717,8 +2717,10 @@ public final class ChatListNode: ListViewImpl {
                                 }
                             
                                 break
-                            case .GroupReferenceEntry:
-                                isHiddenItemVisible = true
+                            case let .GroupReferenceEntry(groupReferenceEntry):
+                                if groupReferenceEntry.groupId == .archive {
+                                    isHiddenItemVisible = true
+                                }
                             default:
                                 break
                         }
@@ -3499,7 +3501,7 @@ public final class ChatListNode: ListViewImpl {
                         loop: for entry in transition.chatListView.filteredEntries {
                             switch entry {
                             case .GroupReferenceEntry, .HoleEntry, .PeerEntry, .ContactEntry:
-                                if case .GroupReferenceEntry = entry {
+                                if case let .GroupReferenceEntry(groupReferenceEntry) = entry, groupReferenceEntry.groupId == .archive {
                                     hasArchive = true
                                 } else {
                                     containsChats = true

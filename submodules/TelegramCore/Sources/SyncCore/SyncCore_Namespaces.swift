@@ -176,6 +176,8 @@ public struct Namespaces {
     
     public struct PeerGroup {
         public static let archive = PeerGroupId(rawValue: 1)
+        /// Every email chat, behind one row in the chat list. Local: Telegram's server has no such folder.
+        public static let email = PeerGroupId(rawValue: 2)
     }
 }
 

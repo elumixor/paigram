@@ -294,6 +294,8 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
         case let .chatList(groupId):
             if groupId == .root {
                 title = self.presentationData.strings.DialogList_Title
+            } else if groupId == .email {
+                title = "Email"
             } else {
                 title = self.presentationData.strings.ChatList_ArchivedChatsTitle
             }
@@ -1590,7 +1592,7 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                     navigationController.pushViewController(chatListController)
                 }
                 
-                if !didDisplayTip, chatListHead.items.count < 10 {
+                if groupId == .archive, !didDisplayTip, chatListHead.items.count < 10 {
                     #if DEBUG
                     #else
                     let _ = ApplicationSpecificNotice.setDisplayChatListArchiveTooltip(accountManager: self.context.sharedContext.accountManager).startStandalone()
@@ -2160,7 +2162,7 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                 }
             })
             
-            if self.previewing {
+            if self.previewing || self.location == .chatList(groupId: .email) {
                 self.storiesReady.set(.single(true))
             } else {
                 self.storySubscriptionsDisposable = (self.context.engine.messages.storySubscriptions(isHidden: self.location == .chatList(groupId: .archive))
@@ -5222,7 +5224,7 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
             switch self.chatListDisplayNode.effectiveContainerNode.location {
             case let .chatList(groupId):
                 if !peerIds.isEmpty {
-                    if groupId == .root {
+                    if groupId != .archive {
                         self.donePressed()
                         self.archiveChats(peerIds: Array(peerIds))
                     } else {
@@ -7154,6 +7156,8 @@ private final class ChatListLocationContext {
         case let .chatList(groupId):
             if groupId == .root {
                 defaultTitle = presentationData.strings.DialogList_Title
+            } else if groupId == .email {
+                defaultTitle = "Email"
             } else {
                 defaultTitle = presentationData.strings.ChatList_ArchivedChatsTitle
             }

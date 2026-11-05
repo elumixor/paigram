@@ -44,6 +44,9 @@ public final class SynchronizePinnedChatsOperation: PostboxCoding {
 }
 
 public func addSynchronizePinnedChatsOperation(transaction: Transaction, groupId: PeerGroupId) {
+    if groupId == Namespaces.PeerGroup.email {
+        return
+    }
     let rawId: Int32 = groupId.rawValue
     var previousItemIds = transaction.getPinnedItemIds(groupId: groupId)
     var updateLocalIndex: Int32?

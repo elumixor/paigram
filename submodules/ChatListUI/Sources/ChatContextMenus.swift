@@ -37,6 +37,10 @@ func archiveContextMenuItems(context: AccountContext, group: EngineChatList.Grou
             })))
         }
         
+        if group != .archive {
+            return items
+        }
+        
         let settings = chatArchiveSettingsPreference?.get(ChatArchiveSettings.self) ?? ChatArchiveSettings.default
         let isPinned = !settings.isHiddenByDefault
         items.append(.action(ContextMenuActionItem(text: isPinned ? strings.ChatList_Context_HideArchive : strings.ChatList_Context_UnhideArchive, icon: { theme in generateTintedImage(image: UIImage(bundleImageName: isPinned ? "Chat/Context Menu/Unpin": "Chat/Context Menu/Pin"), color: theme.contextMenu.primaryColor) }, action: { [weak chatListController] _, f in

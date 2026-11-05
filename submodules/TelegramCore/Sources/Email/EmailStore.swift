@@ -26,19 +26,22 @@ public struct EmailState: Codable, Equatable {
     public var sending: [Sending]
     /// The `currentTextVersion` the stored mail was drawn with; 0 before there was one.
     public var textVersion: Int32
+    /// Whether the chats stored before the Email row existed have moved behind it.
+    public var movedToEmailGroup: Bool
     
-    public static let empty = EmailState(seq: 0, accounts: [], contacts: [], sending: [], textVersion: EmailState.currentTextVersion)
+    public static let empty = EmailState(seq: 0, accounts: [], contacts: [], sending: [], textVersion: EmailState.currentTextVersion, movedToEmailGroup: true)
     
     private enum CodingKeys: String, CodingKey {
-        case seq, accounts, contacts, sending, textVersion
+        case seq, accounts, contacts, sending, textVersion, movedToEmailGroup
     }
     
-    init(seq: Int64, accounts: [EmailAccountData], contacts: [Contact], sending: [Sending], textVersion: Int32) {
+    init(seq: Int64, accounts: [EmailAccountData], contacts: [Contact], sending: [Sending], textVersion: Int32, movedToEmailGroup: Bool) {
         self.seq = seq
         self.accounts = accounts
         self.contacts = contacts
         self.sending = sending
         self.textVersion = textVersion
+        self.movedToEmailGroup = movedToEmailGroup
     }
     
     public init(from decoder: Decoder) throws {
@@ -48,6 +51,7 @@ public struct EmailState: Codable, Equatable {
         self.contacts = try container.decode([Contact].self, forKey: .contacts)
         self.sending = try container.decode([Sending].self, forKey: .sending)
         self.textVersion = try container.decodeIfPresent(Int32.self, forKey: .textVersion) ?? 0
+        self.movedToEmailGroup = try container.decodeIfPresent(Bool.self, forKey: .movedToEmailGroup) ?? false
     }
     
     public func contact(id: Int64) -> Contact? {
@@ -107,14 +111,39 @@ func storeEmailContactPeer(transaction: Transaction, contact: EmailContactData) 
     switch transaction.getPeerChatListInclusion(peerId) {
     case .notIncluded:
         if contact.included {
-            transaction.updatePeerChatListInclusion(peerId, inclusion: .ifHasMessagesOrOneOf(groupId: .root, pinningIndex: nil, minTimestamp: nil))
+            transaction.updatePeerChatListInclusion(peerId, inclusion: .ifHasMessagesOrOneOf(groupId: Namespaces.PeerGroup.email, pinningIndex: nil, minTimestamp: nil))
         }
     case let .ifHasMessagesOrOneOf(_, pinningIndex, _):
         if !contact.included && pinningIndex == nil {
             transaction.updatePeerChatListInclusion(peerId, inclusion: .notIncluded)
+        } else {
+            moveEmailChatToGroup(transaction: transaction, peerId: peerId)
         }
     }
     return peerId
+}
+
+/// A chat in the main list goes behind the Email row; one the user archived stays archived.
+private func moveEmailChatToGroup(transaction: Transaction, peerId: PeerId) {
+    if case let .ifHasMessagesOrOneOf(groupId, pinningIndex, minTimestamp) = transaction.getPeerChatListInclusion(peerId), groupId == .root {
+        transaction.updatePeerChatListInclusion(peerId, inclusion: .ifHasMessagesOrOneOf(groupId: Namespaces.PeerGroup.email, pinningIndex: pinningIndex, minTimestamp: minTimestamp))
+    }
+}
+
+/// Once, for the chats this device stored in the main list.
+func moveStoredEmailChatsToGroup(transaction: Transaction) {
+    let state = currentEmailState(transaction: transaction)
+    guard !state.movedToEmailGroup else {
+        return
+    }
+    for contact in state.contacts {
+        moveEmailChatToGroup(transaction: transaction, peerId: emailPeerId(contactId: contact.id))
+    }
+    updateEmailState(transaction: transaction, { state in
+        var state = state
+        state.movedToEmailGroup = true
+        return state
+    })
 }
 
 /// The addresses of these chats, for their titles.

@@ -103,6 +103,7 @@ private func syncContacts(postbox: Postbox, accountPeerId: PeerId) -> Signal<Voi
 /// drew text its current way, starts from the contact list.
 private func syncChanges(postbox: Postbox, accountPeerId: PeerId) -> Signal<Void, BoxError> {
     return postbox.transaction { transaction -> EmailState in
+        moveStoredEmailChatsToGroup(transaction: transaction)
         return currentEmailState(transaction: transaction)
     }
     |> castError(BoxError.self)

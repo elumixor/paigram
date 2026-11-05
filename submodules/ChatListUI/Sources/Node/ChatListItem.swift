@@ -776,7 +776,7 @@ private func revealOptions(strings: PresentationStrings, theme: PresentationThem
                 }
             } else {
                 if case let .chatList(groupId) = location {
-                    if case .root = groupId {
+                    if groupId != .archive {
                         canArchive = true
                     } else {
                         canUnarchive = true
@@ -793,6 +793,13 @@ private func revealOptions(strings: PresentationStrings, theme: PresentationThem
         }
     }
     return options
+}
+
+private func groupReferenceTitle(item: ChatListItem) -> String {
+    if case let .groupReference(groupReferenceData) = item.content, groupReferenceData.groupId == .email {
+        return "Email"
+    }
+    return item.presentationData.strings.ChatList_ArchivedChatsTitle
 }
 
 private func groupReferenceRevealOptions(strings: PresentationStrings, theme: PresentationTheme, isEditing: Bool, hiddenByDefault: Bool) -> [ItemListRevealOption] {
@@ -868,7 +875,7 @@ private func forumThreadRevealOptions(strings: PresentationStrings, theme: Prese
 private func leftRevealOptions(strings: PresentationStrings, theme: PresentationTheme, isUnread: Bool, isEditing: Bool, isPinned: Bool, isSavedMessages: Bool, location: ChatListControllerLocation, peer: EnginePeer, filterData: ChatListItemFilterData?) -> [ItemListRevealOption] {
     switch location {
     case let .chatList(groupId):
-        if case .root = groupId {
+        if groupId != .archive {
             var options: [ItemListRevealOption] = []
             let canToggleReadState: Bool
             if case .community = peer {
@@ -1507,7 +1514,7 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                 case .loading:
                     return nil
                 case let .groupReference(groupReferenceData):
-                    var result = item.presentationData.strings.ChatList_ArchivedChatsTitle
+                    var result = groupReferenceTitle(item: item)
                 let allCount = groupReferenceData.unreadCount
                     if allCount > 0 {
                         result += "\n\(item.presentationData.strings.VoiceOver_Chat_UnreadMessages(Int32(allCount)))"
@@ -1885,7 +1892,7 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                 UIView.transition(with: self.avatarNode.view, duration: 0.3, options: [.transitionCrossDissolve], animations: {
                 }, completion: nil)
             }
-            self.avatarNode.setPeer(context: item.context, theme: item.presentationData.theme, peer: peer, overrideImage: .archivedChatsIcon(hiddenByDefault: groupReferenceData.hiddenByDefault), emptyColor: item.presentationData.theme.list.mediaPlaceholderColor, synchronousLoad: synchronousLoads)
+            self.avatarNode.setPeer(context: item.context, theme: item.presentationData.theme, peer: peer, overrideImage: groupReferenceData.groupId == .email ? .emailChatsIcon : .archivedChatsIcon(hiddenByDefault: groupReferenceData.hiddenByDefault), emptyColor: item.presentationData.theme.list.mediaPlaceholderColor, synchronousLoad: synchronousLoads)
         }
         
         if item.interaction.activateChatPreview == nil {
@@ -3321,7 +3328,7 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                     } else if let message = messages.last, case let .user(author) = message.author, displayAsMessage {
                         titleAttributedString = NSAttributedString(string: author.id == account.peerId ? item.presentationData.strings.DialogList_You : EnginePeer.user(author).displayTitle(strings: item.presentationData.strings, displayOrder: item.presentationData.nameDisplayOrder), font: titleFont, textColor: theme.titleColor)
                     } else if isPeerGroup {
-                        titleAttributedString = NSAttributedString(string: item.presentationData.strings.ChatList_ArchivedChatsTitle, font: titleFont, textColor: theme.titleColor)
+                        titleAttributedString = NSAttributedString(string: groupReferenceTitle(item: item), font: titleFont, textColor: theme.titleColor)
                     } else if itemPeer.chatMainPeer?.id == item.context.account.peerId {
                         if case .savedMessagesChats = item.chatListLocation {
                             titleAttributedString = NSAttributedString(string: item.presentationData.strings.DialogList_MyNotes, font: titleFont, textColor: theme.titleColor)
@@ -3345,7 +3352,7 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                         titleAttributedString = NSAttributedString(string: displayTitle, font: titleFont, textColor: textColor)
                     }
                 case .group:
-                    titleAttributedString = NSAttributedString(string: item.presentationData.strings.ChatList_ArchivedChatsTitle, font: titleFont, textColor: theme.titleColor)
+                    titleAttributedString = NSAttributedString(string: groupReferenceTitle(item: item), font: titleFont, textColor: theme.titleColor)
             }
             
             attributedText = renderInstantPagePreviewIcons(attributedText, font: textFont, textColor: theme.messageTextColor)
@@ -4026,8 +4033,8 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                         peerRevealOptions = []
                         peerLeftRevealOptions = []
                     }
-                case .groupReference:
-                    peerRevealOptions = groupReferenceRevealOptions(strings: item.presentationData.strings, theme: item.presentationData.theme, isEditing: item.editing, hiddenByDefault: groupHiddenByDefault)
+                case let .groupReference(groupReferenceData):
+                    peerRevealOptions = groupReferenceData.groupId == .archive ? groupReferenceRevealOptions(strings: item.presentationData.strings, theme: item.presentationData.theme, isEditing: item.editing, hiddenByDefault: groupHiddenByDefault) : []
                     peerLeftRevealOptions = []
             }
             
@@ -5805,7 +5812,7 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
     }
     
     func playArchiveAnimation() {
-        guard let item = self.item, case .groupReference = item.content else {
+        guard let item = self.item, case let .groupReference(groupReferenceData) = item.content, groupReferenceData.groupId == .archive else {
             return
         }
         self.avatarNode.playArchiveAnimation()

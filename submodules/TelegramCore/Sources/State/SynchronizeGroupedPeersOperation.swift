@@ -3,6 +3,8 @@ import Postbox
 import SwiftSignalKit
 
 func _internal_updatePeerGroupIdInteractively(transaction: Transaction, peerId: PeerId, groupId: PeerGroupId) {
+    // An email chat leaving the archive goes back behind the Email row.
+    let groupId = peerId.isEmail && groupId == .root ? Namespaces.PeerGroup.email : groupId
     let initialInclusion = transaction.getPeerChatListInclusion(peerId)
     var updatedInclusion = initialInclusion
     switch initialInclusion {
