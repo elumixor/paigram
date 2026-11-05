@@ -1,32 +1,30 @@
 {
-  "fill": {
-    "linear-gradient": [
-      "display-p3:0.54000,0.30000,1.00000,1.00000",
-      "display-p3:0.17000,0.52000,1.00000,1.00000"
-    ],
-    "orientation": {
-      "start": {
-        "x": 0.5,
-        "y": 0
-      },
-      "stop": {
-        "x": 0.5,
-        "y": 1
-      }
-    }
-  },
   "groups": [
     {
       "layers": [
         {
-          "glass": true,
-          "image-name": "Sparkle.svg",
-          "name": "Sparkle"
-        },
-        {
-          "glass": true,
-          "image-name": "Bubble.svg",
-          "name": "Bubble"
+          "glass": false,
+          "image-name": "Pai.svg",
+          "name": "Pai",
+          "fill-specializations": [
+            {
+              "value": {
+                "solid": "srgb:0.00000,0.00000,0.00000,1.00000"
+              }
+            },
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "srgb:1.00000,1.00000,1.00000,1.00000"
+              }
+            },
+            {
+              "appearance": "tinted",
+              "value": {
+                "solid": "srgb:1.00000,1.00000,1.00000,1.00000"
+              }
+            }
+          ]
         }
       ],
       "lighting": "combined",
@@ -42,15 +40,7 @@
           }
         }
       ],
-      "shadow": {
-        "kind": "neutral",
-        "opacity": 0.5
-      },
-      "specular": true,
-      "translucency": {
-        "enabled": true,
-        "value": 0.4
-      }
+      "specular": true
     }
   ],
   "supported-platforms": {
@@ -58,5 +48,24 @@
       "watchOS"
     ],
     "squares": "shared"
-  }
+  },
+  "fill-specializations": [
+    {
+      "value": {
+        "solid": "srgb:1.00000,1.00000,1.00000,1.00000"
+      }
+    },
+    {
+      "appearance": "dark",
+      "value": {
+        "solid": "srgb:0.00000,0.00000,0.00000,1.00000"
+      }
+    },
+    {
+      "appearance": "tinted",
+      "value": {
+        "solid": "srgb:0.00000,0.00000,0.00000,1.00000"
+      }
+    }
+  ]
 }
