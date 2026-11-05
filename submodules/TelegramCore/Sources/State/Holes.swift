@@ -1183,6 +1183,13 @@ func groupBoundaryPeer(_ peerId: PeerId, accountPeerId: PeerId) -> Api.Peer {
 }
 
 func fetchChatListHole(postbox: Postbox, network: Network, accountPeerId: PeerId, groupId: PeerGroupId, hole: ChatListHole) -> Signal<Never, NoError> {
+    // Postbox seeds every new group with a hole; Telegram has no such folder to fill this one from.
+    if groupId == Namespaces.PeerGroup.email {
+        return postbox.transaction { transaction -> Void in
+            transaction.replaceChatListHole(groupId: groupId, index: hole.index, hole: nil)
+        }
+        |> ignoreValues
+    }
     let location: FetchChatListLocation
     switch groupId {
         case .root:

@@ -7287,6 +7287,8 @@ private final class ChatListLocationContext {
                 } else {
                     self.storyButton = nil
                 }
+            } else if case .chatList(.email) = self.location {
+                self.rightButton = nil
             } else {
                 let parentController = self.parentController
                 self.rightButton = AnyComponentWithIdentity(id: "more", component: AnyComponent(NavigationButtonComponent(
