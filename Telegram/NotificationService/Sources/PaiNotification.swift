@@ -96,6 +96,23 @@ enum PaiNotification {
         }
     }
 
+    // MARK: Asks pushed by the box
+
+    /// A question the box pushed itself (an ask, a session's AskUserQuestion): it carries `paiNeed` with the options,
+    /// so no `/needs` round trip is needed. The buttons show on the paired watch too.
+    static func isBoxNeed(_ userInfo: [AnyHashable: Any]) -> Bool {
+        return userInfo["paiNeed"] is [String: Any] && userInfo["from_id"] == nil
+    }
+
+    static func decorateBoxNeed(_ content: UNNotificationContent, completion: @escaping (UNNotificationContent) -> Void) {
+        guard let info = content.userInfo["paiNeed"] as? [String: Any], let id = info["id"] as? String, !id.isEmpty else {
+            completion(content)
+            return
+        }
+        let need = Need(id: id, question: info["question"] as? String ?? content.body, options: info["options"] as? [String] ?? [], freeText: info["freeText"] as? Bool, createdAt: 0)
+        attach(need, to: content, completion: completion)
+    }
+
     // MARK: Mail and WhatsApp
 
     /// A push the box sent itself (mail, WhatsApp), not one of Telegram's: it carries `pai` with who wrote, the chat
