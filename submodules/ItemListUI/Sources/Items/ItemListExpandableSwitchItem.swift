@@ -81,10 +81,10 @@ public class ItemListExpandableSwitchItem: ListViewItem, ItemListItem {
         self.tag = tag
     }
     
-    public func nodeConfiguredForParams(async: @escaping (@escaping () -> Void) -> Void, params: ListViewItemLayoutParams, synchronousLoads: Bool, previousItem: ListViewItem?, nextItem: ListViewItem?, completion: @escaping (ListViewItemNode, @escaping () -> (Signal<Void, NoError>?, (ListViewItemApply) -> Void)) -> Void) {
+    public func nodeConfiguredForParams(async: @escaping (@escaping () -> Void) -> Void, params: ListViewItemLayoutParams, synchronousLoads: Bool, neighbors: ListViewItemNeighbors, completion: @escaping (ListViewItemNode, @escaping () -> (Signal<Void, NoError>?, (ListViewItemApply) -> Void)) -> Void) {
         async {
             let node = ItemListExpandableSwitchItemNode(type: self.type)
-            let (layout, apply) = node.asyncLayout()(self, params, itemListNeighbors(item: self, topItem: previousItem as? ItemListItem, bottomItem: nextItem as? ItemListItem))
+            let (layout, apply) = node.asyncLayout()(self, params, itemListNeighbors(item: self, topFacet: neighbors.previous?.base(ItemListNeighborFacet.self), bottomFacet: neighbors.next?.base(ItemListNeighborFacet.self)))
             
             node.contentSize = layout.contentSize
             node.insets = layout.insets
@@ -103,13 +103,13 @@ public class ItemListExpandableSwitchItem: ListViewItem, ItemListItem {
         self.selectAction()
     }
     
-    public func updateNode(async: @escaping (@escaping () -> Void) -> Void, node: @escaping () -> ListViewItemNode, params: ListViewItemLayoutParams, previousItem: ListViewItem?, nextItem: ListViewItem?, animation: ListViewItemUpdateAnimation, completion: @escaping (ListViewItemNodeLayout, @escaping (ListViewItemApply) -> Void) -> Void) {
+    public func updateNode(async: @escaping (@escaping () -> Void) -> Void, node: @escaping () -> ListViewItemNode, params: ListViewItemLayoutParams, neighbors: ListViewItemNeighbors, animation: ListViewItemUpdateAnimation, completion: @escaping (ListViewItemNodeLayout, @escaping (ListViewItemApply) -> Void) -> Void) {
         Queue.mainQueue().async {
             if let nodeValue = node() as? ItemListExpandableSwitchItemNode {
                 let makeLayout = nodeValue.asyncLayout()
                 
                 async {
-                    let (layout, apply) = makeLayout(self, params, itemListNeighbors(item: self, topItem: previousItem as? ItemListItem, bottomItem: nextItem as? ItemListItem))
+                    let (layout, apply) = makeLayout(self, params, itemListNeighbors(item: self, topFacet: neighbors.previous?.base(ItemListNeighborFacet.self), bottomFacet: neighbors.next?.base(ItemListNeighborFacet.self)))
                     Queue.mainQueue().async {
                         completion(layout, { _ in
                             apply(animation)
@@ -189,6 +189,17 @@ private final class SubItemNode: HighlightTrackingButtonNode {
         self.textNode.frame = CGRect(origin: CGPoint(x: leftInset, y: floor((size.height - titleSize.height) / 2.0)), size: titleSize)
         
         self.alpha = item.isEnabled ? 1.0 : 0.5
+        
+        // VoiceOver: a check row, ticked while selected; the check mark itself is not read separately.
+        self.accessibilityLabel = item.title
+        var accessibilityTraits: UIAccessibilityTraits = .button
+        if item.isSelected {
+            accessibilityTraits.insert(.selected)
+        }
+        if !item.isEnabled {
+            accessibilityTraits.insert(.notEnabled)
+        }
+        self.accessibilityTraits = accessibilityTraits
     }
 }
 
@@ -304,7 +315,7 @@ public class ItemListExpandableSwitchItemNode: ListViewItemNode, ItemListItemNod
         let currentItem = self.item
         var currentDisabledOverlayNode = self.disabledOverlayNode
         
-        return { item, params, neighbors in
+        return { [weak self] item, params, neighbors in
             var contentSize: CGSize
             var insets: UIEdgeInsets
             let separatorHeight = UIScreenPixel
@@ -387,10 +398,26 @@ public class ItemListExpandableSwitchItemNode: ListViewItemNode, ItemListItemNod
                     
                     strongSelf.activateArea.frame = CGRect(origin: CGPoint(x: params.leftInset, y: 0.0), size: CGSize(width: params.width - params.leftInset - params.rightInset, height: mainContentHeight))
                     
+                    // VoiceOver: the row is the switch (activation toggles it, as the switch does) and reads the
+                    // count it shows ("10/10"); the switch control is not read on its own. The tap on the row's
+                    // title expands the sub-items: that is the "Expand"/"Collapse" custom action.
                     strongSelf.activateArea.accessibilityLabel = item.title
-                    strongSelf.activateArea.accessibilityValue = item.value ? item.presentationData.strings.VoiceOver_Common_On : item.presentationData.strings.VoiceOver_Common_Off
+                    let switchValue = item.value ? item.presentationData.strings.VoiceOver_Common_On : item.presentationData.strings.VoiceOver_Common_Off
+                    strongSelf.activateArea.accessibilityValue = item.subItems.isEmpty ? switchValue : "\(titleValue), \(switchValue)"
                     strongSelf.activateArea.accessibilityHint = item.presentationData.strings.VoiceOver_Common_SwitchHint
-                    var accessibilityTraits = UIAccessibilityTraits()
+                    strongSelf.switchNode.view.accessibilityElementsHidden = true
+                    strongSelf.switchGestureNode.view.accessibilityElementsHidden = true
+                    let expandActionName = item.isExpanded ? item.presentationData.strings.VoiceOver_Common_Collapse : item.presentationData.strings.VoiceOver_Common_Expand
+                    if strongSelf.activateArea.view.accessibilityCustomActions?.first?.name != expandActionName {
+                        strongSelf.activateArea.view.accessibilityCustomActions = [UIAccessibilityCustomAction(name: expandActionName, actionHandler: { [weak strongSelf] _ in
+                            guard let strongSelf, let item = strongSelf.item else {
+                                return false
+                            }
+                            item.selectAction()
+                            return true
+                        })]
+                    }
+                    var accessibilityTraits: UIAccessibilityTraits = .button
                     if item.enabled {
                     } else {
                         accessibilityTraits.insert(.notEnabled)
@@ -511,7 +538,7 @@ public class ItemListExpandableSwitchItemNode: ListViewItemNode, ItemListItemNod
                             
                             let backgroundFrame = CGRect(origin: CGPoint(x: 0.0, y: -min(insets.top, separatorHeight)), size: CGSize(width: params.width, height: contentSize.height + min(insets.top, separatorHeight) + min(insets.bottom, separatorHeight)))
                             animation.animator.updateFrame(layer: strongSelf.backgroundNode.layer, frame: backgroundFrame, completion: nil)
-                            animation.animator.updateFrame(layer: strongSelf.maskNode.layer, frame: backgroundFrame.insetBy(dx: params.leftInset, dy: 0.0), completion: nil)
+                            animation.animator.updateFrame(layer: strongSelf.maskNode.layer, frame: backgroundFrame.inset(by: UIEdgeInsets(top: 0.0, left: params.leftInset, bottom: 0.0, right: params.rightInset)), completion: nil)
                             animation.animator.updateFrame(layer: strongSelf.topStripeNode.layer, frame: CGRect(origin: CGPoint(x: 0.0, y: -min(insets.top, separatorHeight)), size: CGSize(width: layoutSize.width, height: separatorHeight)), completion: nil)
                             animation.animator.updateFrame(layer: strongSelf.bottomTopStripeNode.layer, frame: CGRect(origin: CGPoint(x: bottomStripeInset, y: mainContentHeight - separatorHeight), size: CGSize(width: layoutSize.width - bottomStripeInset, height: separatorHeight)), completion: nil)
                             animation.animator.updateFrame(layer: strongSelf.bottomStripeNode.layer, frame: CGRect(origin: CGPoint(x: bottomStripeInset, y: contentSize.height - separatorHeight), size: CGSize(width: layoutSize.width - bottomStripeInset - params.rightInset - separatorRightInset, height: separatorHeight)), completion: nil)

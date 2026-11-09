@@ -12,15 +12,21 @@ import LottieComponent
 private final class ArchiveInfoSheetContentComponent: Component {
     typealias EnvironmentType = ViewControllerComponentContainer.Environment
     
+    let context: AccountContext
+    
     let settings: GlobalPrivacySettings
     let openSettings: () -> Void
     let dismiss: () -> Void
     
     init(
+    
+        context: AccountContext,
         settings: GlobalPrivacySettings,
         openSettings: @escaping () -> Void,
         dismiss: @escaping () -> Void
     ) {
+    
+        self.context = context
         self.settings = settings
         self.openSettings = openSettings
         self.dismiss = dismiss
@@ -198,7 +204,7 @@ private final class ArchiveInfoScreenComponent: Component {
                 metrics: environment.metrics,
                 deviceMetrics: environment.deviceMetrics,
                 isDisplaying: environment.isVisible,
-                isCentered: environment.metrics.widthClass == .regular,
+                isCentered: environment.presentsFloatingPanels,
                 hasInputHeight: !environment.inputHeight.isZero,
                 regularMetricsSize: CGSize(width: 430.0, height: 900.0),
                 dismiss: { [weak self] _ in
@@ -216,6 +222,7 @@ private final class ArchiveInfoScreenComponent: Component {
                 transition: transition,
                 component: AnyComponent(SheetComponent(
                     content: AnyComponent(ArchiveInfoSheetContentComponent(
+                        context: component.context,
                         settings: component.settings,
                         openSettings: { [weak self] in
                             guard let self, let component = self.component, let controller = self.environment?.controller() else {

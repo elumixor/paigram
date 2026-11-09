@@ -25,6 +25,7 @@ import PassKit
 import AlertComponent
 import UIKitRuntimeUtils
 import AuthConfirmationScreen
+import WalletContext
 
 private final class TonSchemeHandler: NSObject, WKURLSchemeHandler {
     private final class PendingTask {
@@ -237,6 +238,7 @@ final class BrowserWebContent: UIView, BrowserContent, WKNavigationDelegate, WKU
     
     private var tempFile: EngineTempBoxFile?
     private var disposeTrustedDomain: (() -> Void)?
+    private var pendingMainFrameUrl: URL?
     
     init(context: AccountContext, presentationData: PresentationData, url: String, preferredConfiguration: WKWebViewConfiguration? = nil) {
         self.context = context
@@ -334,6 +336,7 @@ final class BrowserWebContent: UIView, BrowserContent, WKNavigationDelegate, WKU
         
         self._state = BrowserContentState(title: title, url: url, estimatedProgress: 0.1, readingProgress: 0.0, contentType: .webPage)
         self.statePromise = Promise<BrowserContentState>(self._state)
+        self.pendingMainFrameUrl = request?.url
         
         super.init(frame: .zero)
         
@@ -920,6 +923,13 @@ final class BrowserWebContent: UIView, BrowserContent, WKNavigationDelegate, WKU
             self.ignoreUpdatesUntilScrollingStopped = true
         }
     }
+
+    private func updatePendingMainFrameUrl(for navigationAction: WKNavigationAction) {
+        guard navigationAction.targetFrame?.isMainFrame == true, let url = navigationAction.request.url, let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme) else {
+            return
+        }
+        self.pendingMainFrameUrl = url
+    }
         
     @available(iOS 13.0, *)
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, preferences: WKWebpagePreferences, decisionHandler: @escaping (WKNavigationActionPolicy, WKWebpagePreferences) -> Void) {
@@ -940,7 +950,7 @@ final class BrowserWebContent: UIView, BrowserContent, WKNavigationDelegate, WKU
                 if (navigationAction.targetFrame == nil || navigationAction.targetFrame?.isMainFrame == true) && (isTelegramMeLink(url) || url.hasPrefix("tg://")) && !url.contains("/auth/push?") && !self._state.url.contains("/auth/push?") {
                     decisionHandler(.cancel, preferences)
                     if !url.contains("domain=oauth") {
-                        self.minimize()
+                        self.minimizeBeforeOpening(url)
                     }
                     self.openAppUrl(url)
                 } else {
@@ -951,10 +961,12 @@ final class BrowserWebContent: UIView, BrowserContent, WKNavigationDelegate, WKU
                         }
                         self.context.sharedContext.openExternalUrl(context: self.context, urlContext: .generic, url: url, forceExternal: true, presentationData: self.presentationData, navigationController: nil, dismissInput: {})
                     } else {
+                        self.updatePendingMainFrameUrl(for: navigationAction)
                         decisionHandler(.allow, preferences)
                     }
                 }
             } else {
+                self.updatePendingMainFrameUrl(for: navigationAction)
                 decisionHandler(.allow, preferences)
             }
         }
@@ -989,12 +1001,14 @@ final class BrowserWebContent: UIView, BrowserContent, WKNavigationDelegate, WKU
         if let url = navigationAction.request.url?.absoluteString {
             if (navigationAction.targetFrame == nil || navigationAction.targetFrame?.isMainFrame == true) && (isTelegramMeLink(url) || isTelegraPhLink(url) || url.hasPrefix("tg://")) {
                 decisionHandler(.cancel)
-                self.minimize()
+                self.minimizeBeforeOpening(url)
                 self.openAppUrl(url)
             } else {
+                self.updatePendingMainFrameUrl(for: navigationAction)
                 decisionHandler(.allow)
             }
         } else {
+            self.updatePendingMainFrameUrl(for: navigationAction)
             decisionHandler(.allow)
         }
     }
@@ -1077,9 +1091,13 @@ final class BrowserWebContent: UIView, BrowserContent, WKNavigationDelegate, WKU
             completionHandler(.performDefaultHandling, nil)
             return
         }
+        let topLevelUrl = self.pendingMainFrameUrl ?? webView.url
+        guard browserHTTPAuthChallengeMatchesTopLevelOrigin(topLevelUrl: topLevelUrl, protectionSpace: challenge.protectionSpace) else {
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
         var completed = false
-                
-        let host = webView.url?.host ?? ""
+        let host = challenge.protectionSpace.host
         
         let authController = authController(
             sharedContext: self.context.sharedContext,
@@ -1119,6 +1137,7 @@ final class BrowserWebContent: UIView, BrowserContent, WKNavigationDelegate, WKU
     private var instantPageResources: [Any]?
     
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        self.pendingMainFrameUrl = nil
         if let _ = self.currentError {
             self.currentError = nil
             if let (size, insets, fullInsets, safeInsets) = self.validLayout {
@@ -1202,7 +1221,11 @@ final class BrowserWebContent: UIView, BrowserContent, WKNavigationDelegate, WKU
     }
     
     func requestSaveToFiles() {
-        self.webView.evaluateJavaScript("document.contentType") { result, _ in
+        self.webView.evaluateJavaScript("document.contentType") { [weak self] result, _ in
+            guard let self else {
+                return
+            }
+
             guard let contentType = result as? String else {
                 return
             }
@@ -1364,6 +1387,7 @@ final class BrowserWebContent: UIView, BrowserContent, WKNavigationDelegate, WKU
     
     
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        self.pendingMainFrameUrl = nil
         if [-1003, -1100].contains((error as NSError).code) {
             if let url = (error as NSError).userInfo["NSErrorFailingURLKey"] as? URL, url.absoluteString.hasPrefix("itms-appss:") {
             } else {
@@ -1381,7 +1405,7 @@ final class BrowserWebContent: UIView, BrowserContent, WKNavigationDelegate, WKU
         if navigationAction.targetFrame == nil {
             if let url = navigationAction.request.url?.absoluteString {
                 if isTelegramMeLink(url) || isTelegraPhLink(url) || url.hasPrefix("tg://") {
-                    self.minimize()
+                    self.minimizeBeforeOpening(url)
                     self.openAppUrl(url)
                 } else {
                     return self.open(url: url, configuration: configuration, new: true)
@@ -1389,6 +1413,13 @@ final class BrowserWebContent: UIView, BrowserContent, WKNavigationDelegate, WKU
             }
         }
         return nil
+    }
+    
+    // A TON Connect request presents its sheet over the page, which stays open behind it.
+    private func minimizeBeforeOpening(_ url: String) {
+        if !WalletContext.isTonConnectUrl(url) {
+            self.minimize()
+        }
     }
     
     func webViewDidClose(_ webView: WKWebView) {
@@ -1571,7 +1602,7 @@ final class BrowserWebContent: UIView, BrowserContent, WKNavigationDelegate, WKU
     
     private func share(url: String) {
         let presentationData = self.context.sharedContext.currentPresentationData.with { $0 }
-        let shareController = self.context.sharedContext.makeShareController(context: self.context, params: ShareControllerParams(subject: .url(url), actionCompleted: { [weak self] in
+        let shareController = self.context.sharedContext.makeShareScreen(context: self.context, params: ShareControllerParams(subject: .url(url), actionCompleted: { [weak self] in
             self?.present(UndoOverlayController(presentationData: presentationData, content: .linkCopied(title: nil, text: presentationData.strings.Conversation_LinkCopied), elevatedLayout: false, animateInAsReplacement: false, action: { _ in return false }), nil)
         }))
         self.present(shareController, nil)
@@ -1745,6 +1776,7 @@ private final class ErrorComponent: CombinedComponent {
     let text: String
     let insets: UIEdgeInsets
   
+
     init(
         theme: PresentationTheme,
         title: String,

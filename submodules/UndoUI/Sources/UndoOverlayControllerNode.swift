@@ -515,7 +515,7 @@ final class UndoOverlayControllerNode: ViewControllerTracingNode {
                 
                 displayUndo = undo
                 self.originalRemainingSeconds = 5
-            case let .emoji(name, text):
+            case let .emoji(name, text, interactive):
                 self.avatarNode = nil
                 self.iconNode = nil
                 self.iconCheckNode = nil
@@ -525,12 +525,13 @@ final class UndoOverlayControllerNode: ViewControllerTracingNode {
                 self.animatedStickerNode?.setup(source: AnimatedStickerNodeLocalFileSource(name: name), width: 100, height: 100, playbackMode: .once, mode: .direct(cachePathPrefix: nil))
                 
                 let body = MarkdownAttributeSet(font: Font.regular(14.0), textColor: .white)
-                let bold = MarkdownAttributeSet(font: Font.semibold(14.0), textColor: .white)
+                let bold = MarkdownAttributeSet(font: Font.semibold(14.0), textColor: interactive ? undoTextColor : .white)
                 let attributedText = parseMarkdownIntoAttributedString(text, attributes: MarkdownAttributes(body: body, bold: bold, link: body, linkAttribute: { _ in return nil }), textAlignment: .natural)
                 self.textNode.attributedText = attributedText
                 self.textNode.maximumNumberOfLines = 10
                 displayUndo = false
                 self.originalRemainingSeconds = 5
+                isUserInteractionEnabled = interactive
             case let .swipeToReply(title, text):
                 self.avatarNode = nil
                 self.iconNode = nil
@@ -1934,19 +1935,14 @@ final class UndoOverlayControllerNode: ViewControllerTracingNode {
         var contentHeight: CGFloat = 20.0
         
         let margin: CGFloat = self.appearance?.sideInset ?? 12.0
-        let leftMargin = margin + layout.insets(options: []).left
         
         let buttonTextSize = self.undoButtonTextNode.updateLayout(CGSize(width: 200.0, height: .greatestFiniteMagnitude))
-        let buttonMinX: CGFloat
-        if self.undoButtonNode.supernode != nil {
-            buttonMinX = layout.size.width - layout.safeInsets.left - rightInset - buttonTextSize.width - leftMargin * 2.0
-        } else {
-            buttonMinX = layout.size.width - layout.safeInsets.left - rightInset
-        }
+        let horizontalLayout = undoOverlayHorizontalLayout(width: layout.size.width, safeInsets: layout.safeInsets, intrinsicInsets: layout.insets(options: []), metrics: layout.metrics, margin: margin, leadingInset: leftInset, trailingInset: rightInset, buttonWidth: self.undoButtonNode.supernode != nil ? buttonTextSize.width : nil, isNarrow: self.appearance?.isNarrow == true)
+        let leftMargin = horizontalLayout.sideMargin
         
-        let titleSize = self.titleNode.updateLayout(CGSize(width: buttonMinX - 8.0 - leftInset - layout.safeInsets.left - leftMargin, height: .greatestFiniteMagnitude))
+        let titleSize = self.titleNode.updateLayout(CGSize(width: horizontalLayout.textMaxWidth, height: .greatestFiniteMagnitude))
         
-        let maxTextSize = CGSize(width: buttonMinX - 8.0 - leftInset - layout.safeInsets.left - leftMargin, height: .greatestFiniteMagnitude)
+        let maxTextSize = CGSize(width: horizontalLayout.textMaxWidth, height: .greatestFiniteMagnitude)
         
         let textSize: CGSize
         if let animatedTextItems = self.animatedTextItems {
@@ -2000,13 +1996,10 @@ final class UndoOverlayControllerNode: ViewControllerTracingNode {
             }
         }
         
-        var panelWidth = layout.size.width - leftMargin * 2.0 - layout.safeInsets.left - layout.safeInsets.right
-        if self.appearance?.isNarrow == true {
-            panelWidth = 210.0
-        }
-        
-        var panelFrame = CGRect(origin: CGPoint(x: floorToScreenPixels((layout.size.width - panelWidth) / 2.0), y: layout.size.height - contentHeight - insets.bottom - margin), size: CGSize(width: panelWidth, height: contentHeight))
-        var panelWrapperFrame = CGRect(origin: CGPoint(x: floorToScreenPixels((layout.size.width - panelWidth) / 2.0), y: layout.size.height - contentHeight - insets.bottom - margin), size: CGSize(width: panelWidth, height: contentHeight))
+        let panelWidth = horizontalLayout.panelWidth
+        let panelX = horizontalLayout.panelX
+        var panelFrame = CGRect(origin: CGPoint(x: panelX, y: layout.size.height - contentHeight - insets.bottom - margin), size: CGSize(width: panelWidth, height: contentHeight))
+        var panelWrapperFrame = CGRect(origin: CGPoint(x: panelX, y: layout.size.height - contentHeight - insets.bottom - margin), size: CGSize(width: panelWidth, height: contentHeight))
         
         if case .top = self.placementPosition {
             var topInset = insets.top
@@ -2021,8 +2014,8 @@ final class UndoOverlayControllerNode: ViewControllerTracingNode {
         transition.updateFrame(node: self.panelWrapperNode, frame: panelWrapperFrame)
         self.effectView.frame = CGRect(x: 0.0, y: 0.0, width: panelWidth, height: contentHeight)
         
-        var buttonTextFrame = CGRect(origin: CGPoint(x: layout.size.width - layout.safeInsets.left - layout.safeInsets.right - rightInset - buttonTextSize.width - leftMargin * 2.0, y: floor((contentHeight - buttonTextSize.height) / 2.0)), size: buttonTextSize)
-        var undoButtonFrame = CGRect(origin: CGPoint(x: layout.size.width - layout.safeInsets.left - layout.safeInsets.right - rightInset - buttonTextSize.width - 8.0 - leftMargin * 2.0, y: 0.0), size: CGSize(width: layout.safeInsets.right + rightInset + buttonTextSize.width + 8.0 + leftMargin, height: contentHeight))
+        var buttonTextFrame = CGRect(origin: CGPoint(x: horizontalLayout.contentWidth - rightInset - buttonTextSize.width, y: floor((contentHeight - buttonTextSize.height) / 2.0)), size: buttonTextSize)
+        var undoButtonFrame = CGRect(origin: CGPoint(x: horizontalLayout.contentWidth - rightInset - buttonTextSize.width - 8.0, y: 0.0), size: CGSize(width: layout.safeInsets.right + rightInset + buttonTextSize.width + 8.0 + leftMargin, height: contentHeight))
         if case .starsSent = self.content {
             let buttonOffset: CGFloat = -34.0
             undoButtonFrame.origin.x += buttonOffset
@@ -2147,7 +2140,7 @@ final class UndoOverlayControllerNode: ViewControllerTracingNode {
    
         let timerTextSize = self.timerTextNode.updateLayout(CGSize(width: 100.0, height: 100.0))
         if case .starsSent = self.content {
-            transition.updateFrame(node: self.timerTextNode, frame: CGRect(origin: CGPoint(x: floor((layout.size.width - layout.safeInsets.left - layout.safeInsets.right - rightInset + floor((rightInset - timerTextSize.width) * 0.5) - 46.0)), y: floor((contentHeight - timerTextSize.height) / 2.0)), size: timerTextSize))
+            transition.updateFrame(node: self.timerTextNode, frame: CGRect(origin: CGPoint(x: floor((horizontalLayout.contentWidth + leftMargin * 2.0 - rightInset + floor((rightInset - timerTextSize.width) * 0.5) - 46.0)), y: floor((contentHeight - timerTextSize.height) / 2.0)), size: timerTextSize))
         } else {
             transition.updateFrame(node: self.timerTextNode, frame: CGRect(origin: CGPoint(x: floor((leftInset - timerTextSize.width) / 2.0), y: floor((contentHeight - timerTextSize.height) / 2.0)), size: timerTextSize))
         }
@@ -2156,7 +2149,7 @@ final class UndoOverlayControllerNode: ViewControllerTracingNode {
             let statusSize: CGFloat = 30.0
             var statusFrame = CGRect(origin: CGPoint(x: floor((leftInset - statusSize) / 2.0), y: floor((contentHeight - statusSize) / 2.0)), size: CGSize(width: statusSize, height: statusSize))
             if case .starsSent = self.content {
-                statusFrame.origin.x = layout.size.width - layout.safeInsets.left - layout.safeInsets.right - rightInset - statusSize - 23.0
+                statusFrame.origin.x = horizontalLayout.contentWidth + leftMargin * 2.0 - rightInset - statusSize - 23.0
             }
             transition.updateFrame(node: statusNode, frame: statusFrame)
             if !self.didStartStatusNode {

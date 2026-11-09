@@ -44,6 +44,12 @@ public final class RichTextMediaContentComponent: Component {
     /// including it does not defeat the fetch-binds-once optimization.
     var isSpoiler: Bool
 
+    /// Where the "more" button sits, in this cell's coordinates: top-left, or lower on a tile under the
+    /// container's own buttons (`MediaChromeLayout.moreButtonOrigin`). Part of `==` like `isSpoiler`: it can
+    /// change without a size change (the container's "+" appearing or going), and it changes only with the
+    /// container's layout, never per frame, so the fetch still binds once.
+    var moreButtonOrigin: CGPoint
+
     /// Set by `MediaItemNodeView`; fired when an interactive control is tapped. Not part of `==` (identity
     /// equality must hold across resizes so the fetch binds once).
     var onControlTapped: ((RichTextMediaControlKind, UIView, CGRect) -> Void)?
@@ -54,6 +60,7 @@ public final class RichTextMediaContentComponent: Component {
         self.showsMoreButton = showsMoreButton
         self.usesAspectFit = usesAspectFit
         self.isSpoiler = isSpoiler
+        self.moreButtonOrigin = CGPoint(x: MediaChromeLayout.inset, y: MediaChromeLayout.inset)
     }
 
     public static func ==(lhs: RichTextMediaContentComponent, rhs: RichTextMediaContentComponent) -> Bool {
@@ -64,6 +71,9 @@ public final class RichTextMediaContentComponent: Component {
             return false
         }
         if lhs.isSpoiler != rhs.isSpoiler {
+            return false
+        }
+        if lhs.moreButtonOrigin != rhs.moreButtonOrigin {
             return false
         }
         return true
@@ -97,6 +107,14 @@ public final class RichTextMediaContentComponent: Component {
 
         private var boundMediaId: EngineMedia.Id?
         private var didBind = false
+
+        // Pre-upload progress is owned HERE, not passed in by the host. The editor re-provides a media
+        // view only when its item signature changes (DocumentCanvasView+Media.syncMediaItemViews), and
+        // upload progress is not — and cannot be — part of that signature, so a host-pushed value never
+        // arrives during an upload. Subscribing here mirrors how this view already owns its own fetch.
+        private let preuploadDisposable = MetaDisposable()
+        private var boundPreuploadMediaId: EngineMedia.Id?
+        private var preuploadProgress: Float?
         private var dimensions: PixelDimensions?
         private var isVideo = false
         private var currentSize: CGSize?
@@ -114,6 +132,7 @@ public final class RichTextMediaContentComponent: Component {
             self.addSubview(self.imageNode.view)
             
             self.moreButtonBackground.isUserInteractionEnabled = false
+            self.moreButtonBackground.morphsIntoContextMenu = true
             self.moreButton.addSubview(self.moreButtonBackground)
             self.moreButtonBackgroundContainer.contentView.addSubview(self.moreButton)
             self.addSubview(self.moreButtonBackgroundContainer)
@@ -134,6 +153,74 @@ public final class RichTextMediaContentComponent: Component {
         
         deinit {
             self.fetchDisposable.dispose()
+            self.preuploadDisposable.dispose()
+        }
+
+        /// Subscribe once per media id. Holds NO pre-upload need — observing must never keep an
+        /// orphaned upload alive; the need belongs to whatever owns the content.
+        private func bindPreuploadIfNeeded(context: AccountContext, media: EngineMedia) {
+            guard let mediaId = media.id else {
+                return
+            }
+            if self.boundPreuploadMediaId == mediaId {
+                return
+            }
+            self.boundPreuploadMediaId = mediaId
+            self.preuploadProgress = nil
+            self.preuploadDisposable.set((context.engine.messages.mediaPreuploadState(id: mediaId)
+            |> deliverOnMainQueue).start(next: { [weak self] state in
+                guard let self else {
+                    return
+                }
+                let progress: Float?
+                switch state {
+                case let .progress(value):
+                    progress = value
+                case .done, .failed, .none:
+                    progress = nil
+                }
+                guard self.preuploadProgress != progress else {
+                    return
+                }
+                self.preuploadProgress = progress
+                // Refresh the status node DIRECTLY rather than via `state.updated()`. A component
+                // re-render re-runs `update`, which re-issues the image fetch unconditionally
+                // (`fetchDisposable.set(...)`), so driving per-tick progress through the component
+                // would refetch the poster on every tick.
+                if let size = self.currentSize {
+                    self.updateStatusNode(availableSize: size, isSpoiler: self.component?.isSpoiler ?? false)
+                }
+            }))
+        }
+
+        /// The centre overlay: upload progress while pre-uploading, else a play button for video.
+        private func updateStatusNode(availableSize: CGSize, isSpoiler: Bool) {
+            guard self.isVideo || self.preuploadProgress != nil else {
+                self.statusNode?.view.isHidden = true
+                return
+            }
+            let statusNode: RadialStatusNode
+            if let existing = self.statusNode {
+                statusNode = existing
+            } else {
+                statusNode = RadialStatusNode(backgroundNodeColor: UIColor(white: 0.0, alpha: 0.6))
+                self.addSubview(statusNode.view)   // RadialStatusNode is an ASControlNode; host its .view
+                self.statusNode = statusNode
+            }
+            // Chosen every pass rather than once at construction: a medium transitions from uploading
+            // to idle in place, and a photo has no resting state at all.
+            let state: RadialStatusNodeState
+            if let progress = self.preuploadProgress {
+                state = .progress(color: .white, lineWidth: nil, value: CGFloat(progress), cancelEnabled: false, animateRotation: true)
+            } else {
+                state = .play(.white)
+            }
+            statusNode.transitionToState(state, animated: true, completion: {})
+            let statusSize: CGFloat = max(18.0, min(50.0, floor(min(availableSize.width, availableSize.height) * 0.7)))
+            statusNode.frame = CGRect(x: floorToScreenPixels((availableSize.width - statusSize) / 2.0), y: floorToScreenPixels((availableSize.height - statusSize) / 2.0), width: statusSize, height: statusSize)
+            // A spoilered video hides its play button under the blur (mirrors the message side);
+            // upload progress stays visible, since a spoiler is about the recipient, not the sender.
+            statusNode.view.isHidden = isSpoiler && self.preuploadProgress == nil
         }
 
         /// Only the interactive chrome (the more button) claims a touch; the image/video poster area
@@ -147,8 +234,9 @@ public final class RichTextMediaContentComponent: Component {
         }
 
         @objc private func moreButtonPressed() {
-            self.component?.onControlTapped?(.more, self.moreButtonBackgroundContainer,
-                                             self.moreButtonBackgroundContainer.bounds)
+            // The button's glass is the menu's anchor: the menu morphs out of it.
+            self.component?.onControlTapped?(.more, self.moreButtonBackground,
+                                             self.moreButtonBackground.bounds)
         }
         
         func update(component: RichTextMediaContentComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
@@ -243,27 +331,12 @@ public final class RichTextMediaContentComponent: Component {
                 self.dustNode?.view.isHidden = true
             }
 
-            if self.isVideo {
-                let statusNode: RadialStatusNode
-                if let existing = self.statusNode {
-                    statusNode = existing
-                } else {
-                    statusNode = RadialStatusNode(backgroundNodeColor: UIColor(white: 0.0, alpha: 0.6))
-                    statusNode.transitionToState(.play(.white), animated: false, completion: {})
-                    self.addSubview(statusNode.view)   // RadialStatusNode is an ASControlNode; host its .view
-                    self.statusNode = statusNode
-                }
-                let statusSize: CGFloat = max(18.0, min(50.0, floor(min(availableSize.width, availableSize.height) * 0.7)))
-                statusNode.frame = CGRect(x: floorToScreenPixels((availableSize.width - statusSize) / 2.0), y: floorToScreenPixels((availableSize.height - statusSize) / 2.0), width: statusSize, height: statusSize)
-                // A spoilered video hides its play button under the blur (mirrors the message side).
-                statusNode.view.isHidden = component.isSpoiler
-            }
+            self.currentSize = availableSize
+            self.bindPreuploadIfNeeded(context: context, media: component.media)
+            self.updateStatusNode(availableSize: availableSize, isSpoiler: component.isSpoiler)
             
-            let buttonSize = CGSize(width: 36.0, height: 36.0)
-            let buttonHorizontalInset: CGFloat = 8.0
-            let buttonVerticalInset: CGFloat = 8.0
-            
-            let moreButtonFrame = CGRect(origin: CGPoint(x: buttonHorizontalInset, y: buttonVerticalInset), size: buttonSize)
+            let buttonSize = MediaChromeLayout.buttonSize
+            let moreButtonFrame = CGRect(origin: component.moreButtonOrigin, size: buttonSize)
             
             transition.setFrame(view: self.moreButtonBackgroundContainer, frame: moreButtonFrame)
             self.moreButtonBackgroundContainer.update(size: buttonSize, isDark: true, transition: transition)

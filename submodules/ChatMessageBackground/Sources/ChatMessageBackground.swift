@@ -72,6 +72,9 @@ public class ChatMessageBackground: ASDisplayNode {
     private var imageFrame: CGRect?
     private var imageView: UIImageView?
     private var imageViewImage: UIImage?
+
+    private var tearBands: [BubbleTearBand] = []
+    private var tearMaskView: BubbleTearMaskView?
     
     public var customHighlightColor: UIColor? {
         didSet {
@@ -118,25 +121,82 @@ public class ChatMessageBackground: ASDisplayNode {
             transition.updateFrame(view: imageView, frame: imageFrame)
         }
         transition.updateFrame(node: self.outlineImageNode, frame: CGRect(origin: CGPoint(), size: size).insetBy(dx: -1.0, dy: -1.0))
+        self.updateTearMask(size: size, animation: .None)
     }
-    
+
     public func updateLayout(size: CGSize, transition: ListViewItemUpdateAnimation) {
         let imageFrame = CGRect(origin: CGPoint(), size: size).insetBy(dx: -1.0, dy: -1.0)
         self.imageFrame = imageFrame
         if let imageView = self.imageView {
             transition.animator.updateFrame(layer: imageView.layer, frame: imageFrame, completion: nil)
         }
-        
+
         transition.animator.updateFrame(layer: self.outlineImageNode.layer, frame: CGRect(origin: CGPoint(), size: size).insetBy(dx: -1.0, dy: -1.0), completion: nil)
+        self.updateTearMask(size: size, animation: transition)
     }
-    
+
     public func setMaskMode(_ maskMode: Bool) {
         if let type = self.type, let hasWallpaper = self.hasWallpaper, let highlighted = self.currentHighlighted, let graphics = self.graphics, let backgroundNode = self.backgroundNode {
             self.setType(type: type, highlighted: highlighted, graphics: graphics, maskMode: maskMode, hasWallpaper: hasWallpaper, transition: .immediate, backgroundNode: backgroundNode)
         }
     }
+
+    /// Cuts full-width bands out of the bubble. Bands are in this node's own coordinate space and
+    /// must already have been through `resolveBubbleTearBands`.
+    public func setTearBands(_ bands: [BubbleTearBand], animation: ListViewItemUpdateAnimation) {
+        self.tearBands = bands
+        self.updateTearMask(size: self.bounds.size, animation: animation)
+    }
+
+    /// `size` is passed rather than read from `bounds` because the layout passes above set the
+    /// node's own frame afterwards — reading `bounds` here would mask against the previous size.
+    private func updateTearMask(size: CGSize, animation: ListViewItemUpdateAnimation) {
+        if self.tearBands.isEmpty {
+            if let tearMaskView = self.tearMaskView {
+                self.tearMaskView = nil
+                self.view.mask = nil
+                tearMaskView.removeFromSuperview()
+            }
+            return
+        }
+
+        let tearMaskView: BubbleTearMaskView
+        if let current = self.tearMaskView {
+            tearMaskView = current
+        } else if let created = BubbleTearMaskView.make() {
+            tearMaskView = created
+            self.tearMaskView = created
+            self.view.mask = created
+        } else {
+            // No `luminanceToAlpha` on this build: leave the bubble whole rather than mask it with
+            // a surface that cannot punch holes.
+            return
+        }
+
+        // The image view and the outline node are both inset by -1, and a mask layer clips to its
+        // own bounds, so the mask has to cover more than `bounds`.
+        let maskFrame = CGRect(origin: CGPoint(), size: size).insetBy(dx: -bubbleTearMaskInset, dy: -bubbleTearMaskInset)
+        tearMaskView.frame = maskFrame
+        tearMaskView.update(
+            bands: self.tearBands.map { $0.offsetBy(dx: -maskFrame.minX, dy: -maskFrame.minY) },
+            tailInsets: BubbleTearTailInsets(type: self.type ?? .none),
+            animation: animation
+        )
+    }
     
     public func currentCorners(bubbleCorners: PresentationChatBubbleCorners) -> (topLeftRadius: CGFloat, topRightRadius: CGFloat, bottomLeftRadius: CGFloat, bottomRightRadius: CGFloat, drawTail: Bool)? {
+        if !bubbleCorners.bubbleMode {
+            // Bubble mode off draws bubbles without a tail (see PrincipalThemeEssentialGraphics).
+            guard var corners = self.currentCornersWithTail(bubbleCorners: bubbleCorners) else {
+                return nil
+            }
+            corners.drawTail = false
+            return corners
+        }
+        return self.currentCornersWithTail(bubbleCorners: bubbleCorners)
+    }
+    
+    private func currentCornersWithTail(bubbleCorners: PresentationChatBubbleCorners) -> (topLeftRadius: CGFloat, topRightRadius: CGFloat, bottomLeftRadius: CGFloat, bottomRightRadius: CGFloat, drawTail: Bool)? {
         guard let type = self.type else {
             return nil
         }
@@ -182,6 +242,10 @@ public class ChatMessageBackground: ASDisplayNode {
     
     public func setType(type: ChatMessageBackgroundType, highlighted: Bool, graphics: PrincipalThemeEssentialGraphics, maskMode: Bool, hasWallpaper: Bool, transition: ContainedViewLayoutTransition, backgroundNode: WallpaperBackgroundNode?) {
         let previousType = self.type
+        // `self.maskMode` is never stored, so this never returns and the image below follows the
+        // wallpaper's `hasBubbleBackground` on every pass. `ChatMessageBubbleBackdrop.updateContent`
+        // follows the same answer; a guard that returns here must also compare that answer, or a
+        // flip leaves the bubble drawn by neither.
         if let currentType = previousType, currentType == type, self.currentHighlighted == highlighted, self.graphics === graphics, backgroundNode === self.backgroundNode, self.maskMode == maskMode, self.hasWallpaper == hasWallpaper {
             return
         }
@@ -498,14 +562,23 @@ public final class ChatMessageBubbleBackdrop: ASDisplayNode {
     
     private var currentType: ChatMessageBackgroundType?
     private var currentMaskMode: Bool?
+    /// The wallpaper's `hasBubbleBackground` answer `backgroundContent` was built for.
+    private var contentDrawsBubble: Bool?
     private var theme: ChatPresentationThemeData?
     private var essentialGraphics: PrincipalThemeEssentialGraphics?
     private weak var backgroundNode: WallpaperBackgroundNode?
     
-    public var maskView: UIImageView?
+    // Not a bare `UIImageView` any more: when the bubble is torn this view also carries the
+    // `luminanceToAlpha` filter and the black bands. See `BubbleBackdropMaskView`.
+    //
+    // Still public — `ChatMessageInstantVideoBubbleContentNode` sets `overrideMask` and adds its
+    // own round `BubbleMaskLayer` as a sublayer here. That keeps working: the extra layer lands
+    // above the (now empty) shape image, and an instant-video bubble never carries unsupported
+    // content, so it is never torn and never filtered.
+    public var maskView: BubbleBackdropMaskView?
     private var fixedMaskMode: Bool?
+    private var tearBands: [BubbleTearBand] = []
 
-    private var absolutePosition: (CGRect, CGSize)?
     
     public var overrideMask: Bool = false {
         didSet {
@@ -527,12 +600,6 @@ public final class ChatMessageBubbleBackdrop: ASDisplayNode {
             }
             if let backgroundContent = self.backgroundContent {
                 backgroundContent.frame = self.bounds
-                if let (rect, containerSize) = self.absolutePosition {
-                    var backgroundFrame = backgroundContent.frame
-                    backgroundFrame.origin.x += rect.minX
-                    backgroundFrame.origin.y += rect.minY
-                    backgroundContent.update(rect: backgroundFrame, within: containerSize, transition: .immediate)
-                }
             }
         }
     }
@@ -548,12 +615,34 @@ public final class ChatMessageBubbleBackdrop: ASDisplayNode {
             self.setType(type: currentType, theme: theme, essentialGraphics: essentialGraphics, maskMode: maskMode, backgroundNode: backgroundNode)
         }
     }
+
+    /// Cuts full-width bands out of the wallpaper backdrop. Bands are in this node's own
+    /// coordinate space and must already have been through `resolveBubbleTearBands`.
+    public func setTearBands(_ bands: [BubbleTearBand], animation: ListViewItemUpdateAnimation) {
+        self.tearBands = bands
+        self.updateTearBands(animation: animation)
+    }
+
+    private func updateTearBands(animation: ListViewItemUpdateAnimation) {
+        guard let maskView = self.maskView else {
+            return
+        }
+        // The mask sits at `bounds.insetBy(-maskInset, -maskInset)`, so its origin is a constant
+        // (-1, -1) offset from the node's own space regardless of size.
+        let maskOrigin = maskView.frame.origin
+        maskView.update(
+            bands: self.tearBands.map { $0.offsetBy(dx: -maskOrigin.x, dy: -maskOrigin.y) },
+            tailInsets: BubbleTearTailInsets(type: self.currentType ?? .none),
+            animation: animation
+        )
+    }
         
     public func setType(type: ChatMessageBackgroundType, theme: ChatPresentationThemeData, essentialGraphics: PrincipalThemeEssentialGraphics, maskMode inputMaskMode: Bool, backgroundNode: WallpaperBackgroundNode?) {
         let maskMode = self.fixedMaskMode ?? inputMaskMode
 
+        var typeUpdated = false
         if self.currentType != type || self.theme != theme || self.currentMaskMode != maskMode || self.essentialGraphics !== essentialGraphics || self.backgroundNode !== backgroundNode {
-            let typeUpdated = self.currentType != type || self.theme != theme || self.currentMaskMode != maskMode || self.backgroundNode !== backgroundNode
+            typeUpdated = self.currentType != type || self.theme != theme || self.currentMaskMode != maskMode || self.backgroundNode !== backgroundNode
 
             self.currentType = type
             self.theme = theme
@@ -564,11 +653,11 @@ public final class ChatMessageBubbleBackdrop: ASDisplayNode {
                 self.currentMaskMode = maskMode
                 
                 if maskMode {
-                    let maskView: UIImageView
+                    let maskView: BubbleBackdropMaskView
                     if let current = self.maskView {
                         maskView = current
                     } else {
-                        maskView = UIImageView()
+                        maskView = BubbleBackdropMaskView()
                         maskView.frame = self.bounds.insetBy(dx: -maskInset, dy: -maskInset)
                         self.maskView = maskView
                         self.view.mask = maskView
@@ -583,86 +672,71 @@ public final class ChatMessageBubbleBackdrop: ASDisplayNode {
 
             if let backgroundContent = self.backgroundContent {
                 backgroundContent.frame = self.bounds
-                if let (rect, containerSize) = self.absolutePosition {
-                    var backgroundFrame = backgroundContent.frame
-                    backgroundFrame.origin.x += rect.minX
-                    backgroundFrame.origin.y += rect.minY
-                    backgroundContent.update(rect: backgroundFrame, within: containerSize, transition: .immediate)
-                }
             }
 
-            if typeUpdated {
-                if let backgroundContent = self.backgroundContent {
-                    self.backgroundContent = nil
-                    backgroundContent.removeFromSupernode()
-                }
-
-                switch type {
-                case .none:
-                    break
-                case .incoming:
-                    if let backgroundContent = backgroundNode?.makeBubbleBackground(for: .incoming) {
-                        backgroundContent.frame = self.bounds
-                        if let (rect, containerSize) = self.absolutePosition {
-                            var backgroundFrame = backgroundContent.frame
-                            backgroundFrame.origin.x += rect.minX
-                            backgroundFrame.origin.y += rect.minY
-                            backgroundContent.update(rect: backgroundFrame, within: containerSize, transition: .immediate)
-                        }
-                        self.backgroundContent = backgroundContent
-                        self.insertSubnode(backgroundContent, at: 0)
-                    }
-                case .outgoing:
-                    if let backgroundContent = backgroundNode?.makeBubbleBackground(for: .outgoing) {
-                        backgroundContent.frame = self.bounds
-                        if let (rect, containerSize) = self.absolutePosition {
-                            var backgroundFrame = backgroundContent.frame
-                            backgroundFrame.origin.x += rect.minX
-                            backgroundFrame.origin.y += rect.minY
-                            backgroundContent.update(rect: backgroundFrame, within: containerSize, transition: .immediate)
-                        }
-                        self.backgroundContent = backgroundContent
-                        self.insertSubnode(backgroundContent, at: 0)
-                    }
-                }
-            }
-            
             if let maskView = self.maskView {
                 maskView.image = self.overrideMask ? nil : bubbleMaskForType(type, graphics: essentialGraphics)
+            }
+
+            // A mask created or re-imaged just now has no bands yet.
+            self.updateTearBands(animation: .None)
+        }
+
+        // Outside the block above on purpose: see `updateContent`.
+        self.updateContent(type: type, backgroundNode: backgroundNode, typeUpdated: typeUpdated)
+    }
+
+    /// Runs on every pass, not only when the type changes, because `ChatMessageBackground.setType`
+    /// re-asks `hasBubbleBackground` on every pass and drops its own image when the wallpaper says
+    /// yes. If the answer flips after a bubble's first layout and only one of the two follows it,
+    /// neither draws: the bubble's contents sit on the bare wallpaper.
+    ///
+    /// Internal for the tests; everything else goes through `setType`.
+    func updateContent(type: ChatMessageBackgroundType, backgroundNode: WallpaperBackgroundNode?, typeUpdated: Bool) {
+        let drawsBubble: Bool
+        switch type {
+        case .none:
+            drawsBubble = false
+        case .incoming:
+            drawsBubble = backgroundNode?.hasBubbleBackground(for: .incoming) ?? false
+        case .outgoing:
+            drawsBubble = backgroundNode?.hasBubbleBackground(for: .outgoing) ?? false
+        }
+        if !typeUpdated && self.contentDrawsBubble == drawsBubble {
+            return
+        }
+        self.contentDrawsBubble = drawsBubble
+
+        if let backgroundContent = self.backgroundContent {
+            self.backgroundContent = nil
+            backgroundContent.removeFromSupernode()
+        }
+
+        switch type {
+        case .none:
+            break
+        case .incoming:
+            if let backgroundContent = backgroundNode?.makeBubbleBackground(for: .incoming) {
+                backgroundContent.frame = self.bounds
+                self.backgroundContent = backgroundContent
+                self.insertSubnode(backgroundContent, at: 0)
+            }
+        case .outgoing:
+            if let backgroundContent = backgroundNode?.makeBubbleBackground(for: .outgoing) {
+                backgroundContent.frame = self.bounds
+                self.backgroundContent = backgroundContent
+                self.insertSubnode(backgroundContent, at: 0)
             }
         }
     }
         
-    public func update(rect: CGRect, within containerSize: CGSize, transition: ContainedViewLayoutTransition = .immediate) {
-        self.absolutePosition = (rect, containerSize)
-        if let backgroundContent = self.backgroundContent {
-            var backgroundFrame = backgroundContent.frame
-            backgroundFrame.origin.x += rect.minX
-            backgroundFrame.origin.y += rect.minY
-            backgroundContent.update(rect: backgroundFrame, within: containerSize, transition: transition)
-        }
-    }
-    
-    public func offset(value: CGPoint, animationCurve: ContainedViewLayoutTransitionCurve, duration: Double) {
-        self.backgroundContent?.offset(value: value, animationCurve: animationCurve, duration: duration)
-    }
-    
-    public func offsetSpring(value: CGFloat, duration: Double, damping: CGFloat) {
-        self.backgroundContent?.offsetSpring(value: value, duration: duration, damping: damping)
-    }
     
     public func updateFrame(_ value: CGRect, animator: ControlledTransitionAnimator, completion: @escaping () -> Void = {}) {
         if let maskView = self.maskView {
-            animator.updateFrame(layer: maskView.layer, frame: CGRect(origin: CGPoint(x: 0.0, y: 0.0), size: CGSize(width: value.size.width, height: value.size.height)).insetBy(dx: -maskInset, dy: -maskInset), completion: nil)
+            maskView.updateFrame(CGRect(origin: CGPoint(x: 0.0, y: 0.0), size: CGSize(width: value.size.width, height: value.size.height)).insetBy(dx: -maskInset, dy: -maskInset), animator: animator)
         }
         if let backgroundContent = self.backgroundContent {
             animator.updateFrame(layer: backgroundContent.layer, frame: CGRect(origin: CGPoint(x: 0.0, y: 0.0), size: CGSize(width: value.size.width, height: value.size.height)), completion: nil)
-            if let (rect, containerSize) = self.absolutePosition {
-                var backgroundFrame = backgroundContent.frame
-                backgroundFrame.origin.x += rect.minX
-                backgroundFrame.origin.y += rect.minY
-                backgroundContent.update(rect: backgroundFrame, within: containerSize, animator: animator)
-            }
         }
         animator.updateFrame(layer: self.layer, frame: value, completion: { _ in
             completion()
@@ -671,16 +745,10 @@ public final class ChatMessageBubbleBackdrop: ASDisplayNode {
     
     public func updateFrame(_ value: CGRect, transition: ContainedViewLayoutTransition, completion: @escaping () -> Void = {}) {
         if let maskView = self.maskView {
-            transition.updateFrame(view: maskView, frame: CGRect(origin: CGPoint(x: 0.0, y: 0.0), size: CGSize(width: value.size.width, height: value.size.height)).insetBy(dx: -maskInset, dy: -maskInset))
+            maskView.updateFrame(CGRect(origin: CGPoint(x: 0.0, y: 0.0), size: CGSize(width: value.size.width, height: value.size.height)).insetBy(dx: -maskInset, dy: -maskInset), transition: transition)
         }
         if let backgroundContent = self.backgroundContent {
             transition.updateFrame(layer: backgroundContent.layer, frame: CGRect(origin: CGPoint(x: 0.0, y: 0.0), size: CGSize(width: value.size.width, height: value.size.height)))
-            if let (rect, containerSize) = self.absolutePosition {
-                var backgroundFrame = backgroundContent.frame
-                backgroundFrame.origin.x += rect.minX
-                backgroundFrame.origin.y += rect.minY
-                backgroundContent.update(rect: backgroundFrame, within: containerSize, transition: transition)
-            }
         }
         transition.updateFrame(node: self, frame: value, completion: { _ in
             completion()
@@ -689,16 +757,10 @@ public final class ChatMessageBubbleBackdrop: ASDisplayNode {
 
     public func updateFrame(_ value: CGRect, transition: CombinedTransition, completion: @escaping () -> Void = {}) {
         if let maskView = self.maskView {
-            transition.updateFrame(layer: maskView.layer, frame: CGRect(origin: CGPoint(x: 0.0, y: 0.0), size: CGSize(width: value.size.width, height: value.size.height)).insetBy(dx: -maskInset, dy: -maskInset))
+            maskView.updateFrame(CGRect(origin: CGPoint(x: 0.0, y: 0.0), size: CGSize(width: value.size.width, height: value.size.height)).insetBy(dx: -maskInset, dy: -maskInset), transition: transition)
         }
         if let backgroundContent = self.backgroundContent {
             transition.updateFrame(layer: backgroundContent.layer, frame: CGRect(origin: CGPoint(x: 0.0, y: 0.0), size: CGSize(width: value.size.width, height: value.size.height)))
-            if let (rect, containerSize) = self.absolutePosition {
-                var backgroundFrame = backgroundContent.frame
-                backgroundFrame.origin.x += rect.minX
-                backgroundFrame.origin.y += rect.minY
-                backgroundContent.update(rect: backgroundFrame, within: containerSize, transition: transition)
-            }
         }
         transition.updateFrame(layer: self.layer, frame: value, completion: { _ in
             completion()

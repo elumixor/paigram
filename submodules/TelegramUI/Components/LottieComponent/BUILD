@@ -12,7 +12,7 @@ swift_library(
         "//submodules/Display",
         "//submodules/ComponentFlow",
         "//submodules/Components/HierarchyTrackingLayer",
-        "//submodules/rlottie:RLottieBinding",
+        "//submodules/LottieBinding:LottieBinding",
         "//submodules/SSignalKit/SwiftSignalKit",
         "//submodules/AppBundle",
         "//submodules/GZip",

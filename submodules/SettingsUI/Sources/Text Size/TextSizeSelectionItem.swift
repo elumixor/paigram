@@ -6,10 +6,11 @@ import SwiftSignalKit
 import TelegramCore
 import TelegramPresentationData
 import TelegramUIPreferences
-import LegacyComponents
 import ItemListUI
 import PresentationDataUtils
 import AppBundle
+import ComponentFlow
+import SliderComponent
 
 class BubbleSettingsRadiusItem: ListViewItem, ItemListItem {
     let theme: PresentationTheme
@@ -36,10 +37,10 @@ class BubbleSettingsRadiusItem: ListViewItem, ItemListItem {
         self.tag = tag
     }
     
-    func nodeConfiguredForParams(async: @escaping (@escaping () -> Void) -> Void, params: ListViewItemLayoutParams, synchronousLoads: Bool, previousItem: ListViewItem?, nextItem: ListViewItem?, completion: @escaping (ListViewItemNode, @escaping () -> (Signal<Void, NoError>?, (ListViewItemApply) -> Void)) -> Void) {
+    func nodeConfiguredForParams(async: @escaping (@escaping () -> Void) -> Void, params: ListViewItemLayoutParams, synchronousLoads: Bool, neighbors: ListViewItemNeighbors, completion: @escaping (ListViewItemNode, @escaping () -> (Signal<Void, NoError>?, (ListViewItemApply) -> Void)) -> Void) {
         async {
             let node = BubbleSettingsRadiusItemNode()
-            let (layout, apply) = node.asyncLayout()(self, params, itemListNeighbors(item: self, topItem: previousItem as? ItemListItem, bottomItem: nextItem as? ItemListItem))
+            let (layout, apply) = node.asyncLayout()(self, params, itemListNeighbors(item: self, topFacet: neighbors.previous?.base(ItemListNeighborFacet.self), bottomFacet: neighbors.next?.base(ItemListNeighborFacet.self)))
             
             node.contentSize = layout.contentSize
             node.insets = layout.insets
@@ -52,13 +53,13 @@ class BubbleSettingsRadiusItem: ListViewItem, ItemListItem {
         }
     }
     
-    func updateNode(async: @escaping (@escaping () -> Void) -> Void, node: @escaping () -> ListViewItemNode, params: ListViewItemLayoutParams, previousItem: ListViewItem?, nextItem: ListViewItem?, animation: ListViewItemUpdateAnimation, completion: @escaping (ListViewItemNodeLayout, @escaping (ListViewItemApply) -> Void) -> Void) {
+    func updateNode(async: @escaping (@escaping () -> Void) -> Void, node: @escaping () -> ListViewItemNode, params: ListViewItemLayoutParams, neighbors: ListViewItemNeighbors, animation: ListViewItemUpdateAnimation, completion: @escaping (ListViewItemNodeLayout, @escaping (ListViewItemApply) -> Void) -> Void) {
         Queue.mainQueue().async {
             if let nodeValue = node() as? BubbleSettingsRadiusItemNode {
                 let makeLayout = nodeValue.asyncLayout()
                 
                 async {
-                    let (layout, apply) = makeLayout(self, params, itemListNeighbors(item: self, topItem: previousItem as? ItemListItem, bottomItem: nextItem as? ItemListItem))
+                    let (layout, apply) = makeLayout(self, params, itemListNeighbors(item: self, topFacet: neighbors.previous?.base(ItemListNeighborFacet.self), bottomFacet: neighbors.next?.base(ItemListNeighborFacet.self)))
                     Queue.mainQueue().async {
                         completion(layout, { _ in
                             apply()
@@ -76,7 +77,7 @@ class BubbleSettingsRadiusItemNode: ListViewItemNode, ItemListItemNode {
     private let bottomStripeNode: ASDisplayNode
     private let maskNode: ASImageNode
     
-    private var sliderView: TGPhotoEditorSliderView?
+    private let slider = ComponentView<Empty>()
     private let leftIconNode: ASImageNode
     private let rightIconNode: ASImageNode
     private let disabledOverlayNode: ASDisplayNode
@@ -122,48 +123,16 @@ class BubbleSettingsRadiusItemNode: ListViewItemNode, ItemListItemNode {
         super.didLoad()
         
         self.accessibilityTraits = [.adjustable]
-        
-        let sliderView = TGPhotoEditorSliderView()
-        sliderView.enablePanHandling = true
-        sliderView.enablePanHandling = true
-        sliderView.trackCornerRadius = 2.0
-        sliderView.lineSize = 4.0
-        sliderView.dotSize = 8.0
-        sliderView.minimumValue = 0.0
-        sliderView.maximumValue = 4.0
-        sliderView.startValue = 0.0
-        sliderView.positionsCount = 5
-        sliderView.useLinesForPositions = true
-        sliderView.disablesInteractiveTransitionGestureRecognizer = true
-        if let item = self.item, let params = self.layoutParams {
-            sliderView.isUserInteractionEnabled = item.enabled
-            
-            sliderView.value = CGFloat((item.value - 8) / 2)
-            sliderView.backgroundColor = item.theme.list.itemBlocksBackgroundColor
-            sliderView.backColor = item.theme.list.itemSwitchColors.frameColor
-            sliderView.trackColor = item.enabled ? item.theme.list.itemAccentColor : item.theme.list.itemDisabledTextColor
-            sliderView.knobImage = PresentationResourcesItemList.knobImage(item.theme)
-            
-            let sliderInset: CGFloat = item.displayIcons ? 38.0 : 16.0
-            
-            sliderView.frame = CGRect(origin: CGPoint(x: params.leftInset + sliderInset, y: 8.0), size: CGSize(width: params.width - params.leftInset - params.rightInset - sliderInset * 2.0, height: 44.0))
-        }
-        self.view.insertSubview(sliderView, belowSubview: self.disabledOverlayNode.view)
-        sliderView.addTarget(self, action: #selector(self.sliderValueChanged), for: .valueChanged)
-        self.sliderView = sliderView
     }
     
     func asyncLayout() -> (_ item: BubbleSettingsRadiusItem, _ params: ListViewItemLayoutParams, _ neighbors: ItemListNeighbors) -> (ListViewItemNodeLayout, () -> Void) {
         let currentItem = self.item
         
-        return { item, params, neighbors in
+        return { [weak self] item, params, neighbors in
             var updatedLeftIcon: UIImage?
             var updatedRightIcon: UIImage?
             
-            var themeUpdated = false
             if currentItem?.theme !== item.theme {
-                themeUpdated = true
-                
                 updatedLeftIcon = generateTintedImage(image: UIImage(bundleImageName: "Instant View/SettingsFontMinIcon"), color: item.theme.list.itemPrimaryTextColor)
                 updatedRightIcon = generateTintedImage(image: UIImage(bundleImageName: "Instant View/SettingsFontMaxIcon"), color: item.theme.list.itemPrimaryTextColor)
             }
@@ -185,7 +154,6 @@ class BubbleSettingsRadiusItemNode: ListViewItemNode, ItemListItemNode {
             
             return (layout, { [weak self] in
                 if let strongSelf = self {
-                    let firstTime = strongSelf.item == nil || item.force
                     strongSelf.item = item
                     strongSelf.layoutParams = params
                     
@@ -243,7 +211,7 @@ class BubbleSettingsRadiusItemNode: ListViewItemNode, ItemListItemNode {
                     strongSelf.maskNode.image = hasCorners ? PresentationResourcesItemList.cornersImage(item.theme, top: hasTopCorners, bottom: hasBottomCorners) : nil
                     
                     strongSelf.backgroundNode.frame = CGRect(origin: CGPoint(x: 0.0, y: -min(insets.top, separatorHeight)), size: CGSize(width: params.width, height: contentSize.height + min(insets.top, separatorHeight) + min(insets.bottom, separatorHeight)))
-                    strongSelf.maskNode.frame = strongSelf.backgroundNode.frame.insetBy(dx: params.leftInset, dy: 0.0)
+                    strongSelf.maskNode.frame = strongSelf.backgroundNode.frame.inset(by: UIEdgeInsets(top: 0.0, left: params.leftInset, bottom: 0.0, right: params.rightInset))
                     strongSelf.topStripeNode.frame = CGRect(origin: CGPoint(x: 0.0, y: -min(insets.top, separatorHeight)), size: CGSize(width: layoutSize.width, height: separatorHeight))
                     strongSelf.bottomStripeNode.frame = CGRect(origin: CGPoint(x: bottomStripeInset, y: contentSize.height + bottomStripeOffset), size: CGSize(width: layoutSize.width - bottomStripeInset, height: separatorHeight))
                     
@@ -263,23 +231,39 @@ class BubbleSettingsRadiusItemNode: ListViewItemNode, ItemListItemNode {
                     strongSelf.leftIconNode.isHidden = !item.displayIcons
                     strongSelf.rightIconNode.isHidden = !item.displayIcons
                     
-                    if let sliderView = strongSelf.sliderView {
+                    let sliderInset: CGFloat = item.displayIcons ? 38.0 : 16.0
+                    let sliderSize = strongSelf.slider.update(
+                        transition: .immediate,
+                        component: AnyComponent(
+                            SliderComponent(
+                                content: .discrete(.init(
+                                    valueCount: 5,
+                                    value: (item.value - 8) / 2,
+                                    markPositions: true,
+                                    valueUpdated: { [weak self] position in
+                                        guard let self, let item = self.item else {
+                                            return
+                                        }
+                                        let value = position * 2 + 8
+                                        if value != item.value {
+                                            item.updated(value)
+                                        }
+                                    }
+                                )),
+                                useNative: true,
+                                trackBackgroundColor: item.theme.list.itemSwitchColors.frameColor,
+                                trackForegroundColor: item.enabled ? item.theme.list.itemAccentColor : item.theme.list.itemDisabledTextColor
+                            )
+                        ),
+                        environment: {},
+                        containerSize: CGSize(width: params.width - params.leftInset - params.rightInset - sliderInset * 2.0, height: 44.0)
+                    )
+                    if let sliderView = strongSelf.slider.view {
+                        if sliderView.superview == nil {
+                            strongSelf.view.insertSubview(sliderView, belowSubview: strongSelf.disabledOverlayNode.view)
+                        }
+                        sliderView.frame = CGRect(origin: CGPoint(x: params.leftInset + sliderInset, y: 8.0), size: sliderSize)
                         sliderView.isUserInteractionEnabled = item.enabled
-                        sliderView.trackColor = item.enabled ? item.theme.list.itemAccentColor : item.theme.list.itemDisabledTextColor
-                        
-                        if themeUpdated {
-                            sliderView.backgroundColor = item.theme.list.itemBlocksBackgroundColor
-                            sliderView.backColor = item.theme.list.itemSwitchColors.frameColor
-                            sliderView.knobImage = PresentationResourcesItemList.knobImage(item.theme)
-                        }
-                        
-                        let value: CGFloat = CGFloat((item.value - 8) / 2)
-                        if firstTime {
-                            sliderView.value = value
-                        }
-                        
-                        let sliderInset: CGFloat = item.displayIcons ? 38.0 : 16.0
-                        sliderView.frame = CGRect(origin: CGPoint(x: params.leftInset + sliderInset, y: 8.0), size: CGSize(width: params.width - params.leftInset - params.rightInset - sliderInset * 2.0, height: 44.0))
                     }
                 }
             })
@@ -292,13 +276,5 @@ class BubbleSettingsRadiusItemNode: ListViewItemNode, ItemListItemNode {
     
     override func animateRemoved(_ currentTimestamp: Double, duration: Double) {
         self.layer.animateAlpha(from: 1.0, to: 0.0, duration: 0.15, removeOnCompletion: false)
-    }
-    
-    @objc func sliderValueChanged() {
-        guard let sliderView = self.sliderView else {
-            return
-        }
-        let value = Int(sliderView.value) * 2 + 8
-        self.item?.updated(value)
     }
 }

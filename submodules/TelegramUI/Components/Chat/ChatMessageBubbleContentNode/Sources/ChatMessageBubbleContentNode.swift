@@ -162,6 +162,7 @@ public struct ChatMessageBubbleContentTapAction {
         case timecode(Double, String)
         case tooltip(String, ASDisplayNode?, CGRect?)
         case bankCard(String)
+        case tonAddress(String)
         case ignore
         case openPollResults(Data)
         case copy(String)
@@ -198,8 +199,10 @@ public final class ChatMessageBubbleContentItem {
     public let attributes: ChatMessageEntryAttributes
     public let isItemPinned: Bool
     public let isItemEdited: Bool
+    /// The item's style (`ChatMessageItem.bubbleStyle`): content nodes read it rather than deciding again.
+    public let bubbleStyle: ChatMessageBubbleStyle
     
-    public init(context: AccountContext, controllerInteraction: ChatControllerInteraction, message: EngineRawMessage, topMessage: EngineRawMessage, content: ChatMessageItemContent, read: Bool, chatLocation: ChatLocation, presentationData: ChatPresentationData, associatedData: ChatMessageItemAssociatedData, attributes: ChatMessageEntryAttributes, isItemPinned: Bool, isItemEdited: Bool) {
+    public init(context: AccountContext, controllerInteraction: ChatControllerInteraction, message: EngineRawMessage, topMessage: EngineRawMessage, content: ChatMessageItemContent, read: Bool, chatLocation: ChatLocation, presentationData: ChatPresentationData, associatedData: ChatMessageItemAssociatedData, attributes: ChatMessageEntryAttributes, isItemPinned: Bool, isItemEdited: Bool, bubbleStyle: ChatMessageBubbleStyle = .bubble) {
         self.context = context
         self.controllerInteraction = controllerInteraction
         self.message = message
@@ -212,6 +215,7 @@ public final class ChatMessageBubbleContentItem {
         self.attributes = attributes
         self.isItemPinned = isItemPinned
         self.isItemEdited = isItemEdited
+        self.bubbleStyle = bubbleStyle
     }
 }
 
@@ -233,12 +237,24 @@ open class ChatMessageBubbleContentNode: ASDisplayNode {
     public var updateIsTextSelectionActive: ((Bool) -> Void)?
     public var requestInlineUpdate: (() -> Void)?
     public var requestFullUpdate: ((ControlledTransition?) -> Void)?
+    /// Performs a message-button action on behalf of a content node. Wired by
+    /// `ChatMessageBubbleItemNode`, which owns `performMessageButtonAction` — a content node cannot
+    /// reach its item view directly, and the dispatch is not on `ControllerInteraction`.
+    public var performRichTextButtonAction: ((ReplyMarkupButton, Promise<Bool>) -> Void)?
+    /// Fires when a downloaded `.document` row in a rich message is tapped, with that exact file.
+    public var openRichTextDocument: ((TelegramMediaFile) -> Void)?
+    /// A secondary click the content took itself (a message widget's, whose touches are its own), at its point in the
+    /// content node: the bubble opens the message's menu as for a secondary click of its own. Wired by
+    /// `ChatMessageBubbleItemNode`.
+    public var secondaryTap: ((CGPoint) -> Void)?
     
     open var disablesClipping: Bool {
         return false
     }
     
+
     required public override init() {
+
         super.init()
     }
     
@@ -272,6 +288,22 @@ open class ChatMessageBubbleContentNode: ASDisplayNode {
         return nil
     }
 
+    /// Rects, in this node's own coordinate space, that the host bubble should tear out of its
+    /// background — so that content this node cannot render sits in a gap rather than on top of a
+    /// bubble. Read after this node's apply closure has run.
+    ///
+    /// Plural because one message can hold two runs of unsupported blocks separated by supported
+    /// content: a run collapses to one pill, but two runs stay two pills.
+    open func unsupportedContentAreas() -> [CGRect] {
+        return []
+    }
+    
+    /// Without bubbles: what this node shows, in its own coordinates, for the card a pressed message lifts on (spec 5.9,
+    /// 6.9). From frames the node already laid out; the default is the whole node as a block.
+    open func bubblelessLiftParts() -> [ChatMessageBubblelessLiftPart] {
+        return [.block(self.bounds)]
+    }
+
     open func updateHiddenMedia(_ media: [EngineRawMedia]?) -> Bool {
         return false
     }
@@ -289,6 +321,18 @@ open class ChatMessageBubbleContentNode: ASDisplayNode {
     open func tapActionAtPoint(_ point: CGPoint, gesture: TapLongTapOrDoubleTapGesture, isEstimating: Bool) -> ChatMessageBubbleContentTapAction {
         return ChatMessageBubbleContentTapAction(content: .none)
     }
+
+    /// Whether a horizontal drag starting at `point` (in the content node) is the content's own, so the bubble's swipe to
+    /// reply leaves it alone. Asked when the swipe's touch begins.
+    open func claimsHorizontalDrag(at point: CGPoint) -> Bool {
+        return false
+    }
+
+    /// The edge of the bubble that stays put on screen when the content's next height change lands (a message widget's
+    /// resize anchor), or nil for the list's own placement.
+    open var resizeAnchor: ListViewItemResizeAnchor? {
+        return nil
+    }
     
     open func updateTouchesAtPoint(_ point: CGPoint?) {
     }
@@ -303,15 +347,14 @@ open class ChatMessageBubbleContentNode: ASDisplayNode {
     open func updateIsExtractedToContextPreview(_ value: Bool) {
     }
 
+    /// Clears this node's text selection, if it has one: another content node of the bubble began one (a bubble shows one
+    /// selection at a time).
+    open func resignTextSelection() {
+    }
+
     open func updateAbsoluteRect(_ rect: CGRect, within containerSize: CGSize) {
     }
 
-    open func applyAbsoluteOffset(value: CGPoint, animationCurve: ContainedViewLayoutTransitionCurve, duration: Double) {
-    }
-
-    open func applyAbsoluteOffsetSpring(value: CGFloat, duration: Double, damping: CGFloat) {
-    }
-    
     open func unreadMessageRangeUpdated() {
     }
     

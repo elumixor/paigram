@@ -9,6 +9,8 @@ swift_library(
     copts = [
     ],
     deps = [
+        "//submodules/TelegramUI/Components/OpenUserGeneratedUrl:OpenUserGeneratedUrl",
+        "//submodules/UrlWhitelist",
         "//submodules/AccountContext",
         "//submodules/AlertUI",
         "//submodules/AsyncDisplayKit",

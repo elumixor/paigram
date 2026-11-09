@@ -20,7 +20,7 @@ import TelegramUIPreferences
 import GenerateStickerPlaceholderImage
 import UIKitRuntimeUtils
 import ComponentFlow
-import RLottieBinding
+import LottieBinding
 import GZip
 
 public func generateTopicIcon(title: String, backgroundColors: [UIColor], strokeColors: [UIColor], size: CGSize) -> UIImage? {
@@ -716,13 +716,13 @@ public final class InlineStickerItemLayer: MultiAnimationRenderTarget {
             if !arguments.renderer.loadFirstFrameSynchronously(target: self, cache: arguments.cache, itemId: name, size: arguments.pixelSize) {
             }
             
-            self.loadAnimation()
+            self.loadLocalAnimation()
         } else {
             self.loadDisposable = arguments.renderer.loadFirstFrame(target: self, cache: arguments.cache, itemId: name, size: arguments.pixelSize, fetch: animationCacheLoadLocalFile(name: name, type: .lottie, keyframeOnly: true, customColor: nil), completion: { [weak self] result, isFinal in
                 guard let strongSelf = self else {
                     return
                 }
-                strongSelf.loadAnimation()
+                strongSelf.loadLocalAnimation()
             })
         }
     }
@@ -742,7 +742,7 @@ public final class InlineStickerItemLayer: MultiAnimationRenderTarget {
             if let unpackedData = TGGUnzipData(data, 5 * 1024 * 1024) {
                 data = unpackedData
             }
-            guard let instance = LottieInstance(data: data, fitzModifier: .none, colorReplacements: nil, cacheKey: "") else {
+            guard let instance = makeLottieInstance(data: data, fitzModifier: .none, colorReplacements: nil) else {
                 return nil
             }
             let size = CGSize(width: 128.0, height: 128.0)
@@ -773,7 +773,8 @@ public final class InlineStickerItemLayer: MultiAnimationRenderTarget {
         guard let name = self.localAnimationName else {
             return
         }
-                
+
+        self.disposable?.dispose()
         let keyframeOnly = arguments.pixelSize.width >= 120.0
         self.disposable = arguments.renderer.add(target: self, cache: arguments.cache, itemId: name, unique: self.isUnique, size: arguments.pixelSize, fetch: animationCacheLoadLocalFile(name: name, type: .lottie, keyframeOnly: keyframeOnly, customColor: nil))
     }

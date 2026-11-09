@@ -1,4 +1,5 @@
 import Foundation
+import AccountContext
 import UIKit
 import Display
 import ComponentFlow
@@ -12,15 +13,20 @@ import TelegramCore
 import LottieComponent
 
 public final class NewSessionInfoContentComponent: Component {
+    let context: AccountContext
     public let theme: PresentationTheme
     public let strings: PresentationStrings
     public let newSessionReview: NewSessionReview
     
     public init(
+    
+        context: AccountContext,
         theme: PresentationTheme,
         strings: PresentationStrings,
         newSessionReview: NewSessionReview
     ) {
+    
+        self.context = context
         self.theme = theme
         self.strings = strings
         self.newSessionReview = newSessionReview

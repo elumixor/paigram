@@ -73,10 +73,10 @@ public class ItemListTextItem: ListViewItem, ItemListItem {
         self.tag = tag
     }
     
-    public func nodeConfiguredForParams(async: @escaping (@escaping () -> Void) -> Void, params: ListViewItemLayoutParams, synchronousLoads: Bool, previousItem: ListViewItem?, nextItem: ListViewItem?, completion: @escaping (ListViewItemNode, @escaping () -> (Signal<Void, NoError>?, (ListViewItemApply) -> Void)) -> Void) {
+    public func nodeConfiguredForParams(async: @escaping (@escaping () -> Void) -> Void, params: ListViewItemLayoutParams, synchronousLoads: Bool, neighbors: ListViewItemNeighbors, completion: @escaping (ListViewItemNode, @escaping () -> (Signal<Void, NoError>?, (ListViewItemApply) -> Void)) -> Void) {
         async {
             let node = ItemListTextItemNode()
-            let (layout, apply) = node.asyncLayout()(self, params, itemListNeighbors(item: self, topItem: previousItem as? ItemListItem, bottomItem: nextItem as? ItemListItem))
+            let (layout, apply) = node.asyncLayout()(self, params, itemListNeighbors(item: self, topFacet: neighbors.previous?.base(ItemListNeighborFacet.self), bottomFacet: neighbors.next?.base(ItemListNeighborFacet.self)))
             
             node.contentSize = layout.contentSize
             node.insets = layout.insets
@@ -89,7 +89,7 @@ public class ItemListTextItem: ListViewItem, ItemListItem {
         }
     }
     
-    public func updateNode(async: @escaping (@escaping () -> Void) -> Void, node: @escaping () -> ListViewItemNode, params: ListViewItemLayoutParams, previousItem: ListViewItem?, nextItem: ListViewItem?, animation: ListViewItemUpdateAnimation, completion: @escaping (ListViewItemNodeLayout, @escaping (ListViewItemApply) -> Void) -> Void) {
+    public func updateNode(async: @escaping (@escaping () -> Void) -> Void, node: @escaping () -> ListViewItemNode, params: ListViewItemLayoutParams, neighbors: ListViewItemNeighbors, animation: ListViewItemUpdateAnimation, completion: @escaping (ListViewItemNodeLayout, @escaping (ListViewItemApply) -> Void) -> Void) {
         Queue.mainQueue().async {
             guard let nodeValue = node() as? ItemListTextItemNode else {
                 assertionFailure()
@@ -99,7 +99,7 @@ public class ItemListTextItem: ListViewItem, ItemListItem {
             let makeLayout = nodeValue.asyncLayout()
             
             async {
-                let (layout, apply) = makeLayout(self, params, itemListNeighbors(item: self, topItem: previousItem as? ItemListItem, bottomItem: nextItem as? ItemListItem))
+                let (layout, apply) = makeLayout(self, params, itemListNeighbors(item: self, topFacet: neighbors.previous?.base(ItemListNeighborFacet.self), bottomFacet: neighbors.next?.base(ItemListNeighborFacet.self)))
                 Queue.mainQueue().async {
                     completion(layout, { _ in
                         apply()
@@ -223,7 +223,15 @@ public class ItemListTextItemNode: ListViewItemNode, ItemListItemNode {
                     strongSelf.chevronImage = chevronImage
                     
                     strongSelf.activateArea.frame = CGRect(origin: CGPoint(x: params.leftInset, y: 0.0), size: CGSize(width: params.width - params.leftInset - params.rightInset, height: layout.contentSize.height))
-                    strongSelf.activateArea.accessibilityLabel = attributedText.string
+                    // Footers with links: activating follows the link (as a tap does), several links are custom actions.
+                    let linkAction = item.linkAction
+                    strongSelf.activateArea.applyAccessibilityText(attributedText, linkAttribute: NSAttributedString.Key(rawValue: TelegramTextAttributes.URL), open: linkAction.flatMap { linkAction in
+                        return { value in
+                            if let url = value as? String {
+                                linkAction(.tap(url))
+                            }
+                        }
+                    })
                     
                     var textArguments: TextNodeWithEntities.Arguments?
                     if case let .custom(context, _) = item.text {
@@ -242,7 +250,7 @@ public class ItemListTextItemNode: ListViewItemNode, ItemListItemNode {
                     case .natural:
                         titleOrigin = leftInset + params.leftInset
                     case .center:
-                        titleOrigin = floorToScreenPixels((contentSize.width - titleLayout.size.width) / 2.0)
+                        titleOrigin = params.leftInset + floorToScreenPixels((contentSize.width - params.leftInset - params.rightInset - titleLayout.size.width) / 2.0)
                     }
 
                     strongSelf.textNode.textNode.frame = CGRect(origin: CGPoint(x: titleOrigin, y: topInset), size: titleLayout.size)

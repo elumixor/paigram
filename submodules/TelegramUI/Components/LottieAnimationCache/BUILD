@@ -12,7 +12,7 @@ swift_library(
         "//submodules/SSignalKit/SwiftSignalKit:SwiftSignalKit",
         "//submodules/TelegramUI/Components/AnimationCache:AnimationCache",
         "//submodules/Display:Display",
-        "//submodules/rlottie:RLottieBinding",
+        "//submodules/LottieBinding:LottieBinding",
         "//submodules/GZip:GZip",
         "//submodules/WebPBinding:WebPBinding",
     ],

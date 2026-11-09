@@ -67,7 +67,7 @@ public final class MessageReactionButtonsNode: ASDisplayNode {
         constrainedWidth: CGFloat,
         type: DisplayType
     ) -> (proposedWidth: CGFloat, continueLayout: (CGFloat) -> (size: CGSize, apply: (ListViewItemUpdateAnimation) -> Void)) {
-        let reactionColors: ReactionButtonComponent.Colors
+        var reactionColors: ReactionButtonComponent.Colors
         let themeColors: PresentationThemeBubbleColorComponents
         switch type {
         case .incoming:
@@ -132,6 +132,29 @@ public final class MessageReactionButtonsNode: ASDisplayNode {
                 selectedMediaPlaceholder: themeColors.reactionActiveMediaPlaceholder.argb,
                 isDark: presentationData.theme.theme.overallDarkAppearance
             )
+        }
+        
+        // Without bubbles reactions on the page are glass capsules with the body's text colour; a chosen one is filled as
+        // in an incoming bubble (the freeform style is a white plate meant for wallpapers, which vanishes on the page).
+        var isInsideOutgoingBubble = false
+        if case .outgoing = type {
+            isInsideOutgoingBubble = true
+        }
+        if chatMessageBubblelessReactionsAreGlass(bubbleMode: presentationData.chatBubbleCorners.bubbleMode, isInsideOutgoingBubble: isInsideOutgoingBubble) {
+            reactionColors.isGlass = true
+            reactionColors.deselectedBackground = 0
+            reactionColors.deselectedStarsBackground = 0
+            reactionColors.deselectedForeground = presentationData.theme.theme.list.itemPrimaryTextColor.argb
+            let incomingColors = bubbleColorComponents(theme: presentationData.theme.theme, incoming: true, wallpaper: !presentationData.theme.wallpaper.isEmpty)
+            reactionColors.selectedBackground = incomingColors.reactionActiveBackground.argb
+            // A clear count is cut out of a filled pill; on tinted glass nothing is filled, so it takes the page's
+            // colour, as a cut-out would show it (the monochrome look's ink pill).
+            if incomingColors.reactionActiveForeground.alpha.isZero {
+                reactionColors.selectedForeground = bubblelessPageColor(presentationData.theme.theme).argb
+            } else {
+                reactionColors.selectedForeground = incomingColors.reactionActiveForeground.argb
+            }
+            reactionColors.selectedIconTintColor = 0
         }
         
         var totalReactionCount: Int = 0
@@ -308,9 +331,6 @@ public final class MessageReactionButtonsNode: ASDisplayNode {
                         let bubbleBackgroundFrame = CGRect(origin: CGPoint(), size: size).insetBy(dx: -backgroundInsets, dy: -backgroundInsets)
                         if let bubbleBackgroundNode = strongSelf.bubbleBackgroundNode {
                             animation.animator.updateFrame(layer: bubbleBackgroundNode.layer, frame: bubbleBackgroundFrame, completion: nil)
-                            if let (rect, containerSize) = strongSelf.absoluteRect {
-                                bubbleBackgroundNode.update(rect: rect, within: containerSize, transition: animation.transition)
-                            }
                         } else if strongSelf.bubbleBackgroundNode == nil {
                             if let bubbleBackgroundNode = backgroundNode.makeBubbleBackground(for: .free) {
                                 strongSelf.bubbleBackgroundNode = bubbleBackgroundNode
@@ -522,29 +542,11 @@ public final class MessageReactionButtonsNode: ASDisplayNode {
     public func update(rect: CGRect, within containerSize: CGSize, transition: ContainedViewLayoutTransition) {
         self.absoluteRect = (rect, containerSize)
         
-        if let bubbleBackgroundNode = self.bubbleBackgroundNode {
-            bubbleBackgroundNode.update(rect: rect, within: containerSize, transition: transition)
-        }
     }
     
     public func update(rect: CGRect, within containerSize: CGSize, transition: CombinedTransition) {
         self.absoluteRect = (rect, containerSize)
         
-        if let bubbleBackgroundNode = self.bubbleBackgroundNode {
-            bubbleBackgroundNode.update(rect: rect, within: containerSize, transition: transition)
-        }
-    }
-    
-    public func offset(value: CGPoint, animationCurve: ContainedViewLayoutTransitionCurve, duration: Double) {
-        if let bubbleBackgroundNode = self.bubbleBackgroundNode {
-            bubbleBackgroundNode.offset(value: value, animationCurve: animationCurve, duration: duration)
-        }
-    }
-    
-    public func offsetSpring(value: CGFloat, duration: Double, damping: CGFloat) {
-        if let bubbleBackgroundNode = self.bubbleBackgroundNode {
-            bubbleBackgroundNode.offsetSpring(value: value, duration: duration, damping: damping)
-        }
     }
     
     public func reactionTargetView(value: MessageReaction.Reaction) -> UIView? {
@@ -615,7 +617,7 @@ public final class ChatMessageReactionsFooterContentNode: ChatMessageBubbleConte
     override public func asyncLayoutContent() -> (_ item: ChatMessageBubbleContentItem, _ layoutConstants: ChatMessageItemLayoutConstants, _ preparePosition: ChatMessageBubblePreparePosition, _ messageSelection: Bool?, _ constrainedSize: CGSize, _ avatarInset: CGFloat) -> (ChatMessageBubbleContentProperties, CGSize?, CGFloat, (CGSize, ChatMessageBubbleContentPosition) -> (CGFloat, (CGFloat) -> (CGSize, (ListViewItemUpdateAnimation, Bool, ListViewItemApply?) -> Void))) {
         let buttonsNode = self.buttonsNode
         
-        return { item, layoutConstants, preparePosition, _, constrainedSize, _ in
+        return { [weak self] item, layoutConstants, preparePosition, _, constrainedSize, _ in
             let contentProperties = ChatMessageBubbleContentProperties(hidesSimpleAuthorHeader: false, headerSpacing: 0.0, hidesBackground: .never, forceFullCorners: false, forceAlignment: .none)
             
             let topOffset: CGFloat
@@ -625,7 +627,7 @@ public final class ChatMessageReactionsFooterContentNode: ChatMessageBubbleConte
                 topOffset = 0.0
             }
             
-            return (contentProperties, nil, CGFloat.greatestFiniteMagnitude, { constrainedSize, position in
+            return (contentProperties, nil, CGFloat.greatestFiniteMagnitude, { [weak self] constrainedSize, position in
                 let reactionsAttribute = mergedMessageReactions(attributes: item.message.attributes, isTags: item.message.areReactionsTags(accountPeerId: item.context.account.peerId)) ?? ReactionsMessageAttribute(canViewList: false, isTags: false, reactions: [], recentPeers: [], topPeers: [])
                 let buttonsUpdate = buttonsNode.prepareUpdate(
                     context: item.context,
@@ -633,7 +635,7 @@ public final class ChatMessageReactionsFooterContentNode: ChatMessageBubbleConte
                     presentationContext: item.controllerInteraction.presentationContext,
                     availableReactions: item.associatedData.availableReactions, savedMessageTags: item.associatedData.savedMessageTags, reactions: reactionsAttribute, accountPeer: item.associatedData.accountPeer, message: EngineMessage(item.message), associatedData: item.associatedData, alignment: .left, constrainedWidth: constrainedSize.width - layoutConstants.text.bubbleInsets.left - layoutConstants.text.bubbleInsets.right, type: item.message.effectivelyIncoming(item.context.account.peerId) ? .incoming : .outgoing)
                      
-                return (layoutConstants.text.bubbleInsets.left + layoutConstants.text.bubbleInsets.right + buttonsUpdate.proposedWidth, { boundingWidth in
+                return (layoutConstants.text.bubbleInsets.left + layoutConstants.text.bubbleInsets.right + buttonsUpdate.proposedWidth, { [weak self] boundingWidth in
                     var boundingSize = CGSize()
                     
                     let buttonsSizeAndApply = buttonsUpdate.continueLayout(boundingWidth - (layoutConstants.text.bubbleInsets.left + layoutConstants.text.bubbleInsets.right))
@@ -717,6 +719,9 @@ public final class ChatMessageReactionButtonsNode: ASDisplayNode {
         public let isIncoming: Bool
         public let constrainedWidth: CGFloat
         public let centerAligned: Bool
+        /// The colours the buttons take: a plate over the wallpaper by default. Without bubbles the row stands on the
+        /// plain page, where that plate vanishes, so it takes an incoming bubble's reaction colours.
+        public let colorType: MessageReactionButtonsNode.DisplayType
 
         public init(
             context: AccountContext,
@@ -730,7 +735,8 @@ public final class ChatMessageReactionButtonsNode: ASDisplayNode {
             accountPeer: EnginePeer?,
             isIncoming: Bool,
             constrainedWidth: CGFloat,
-            centerAligned: Bool
+            centerAligned: Bool,
+            colorType: MessageReactionButtonsNode.DisplayType = .freeform
         ) {
             self.context = context
             self.presentationData = presentationData
@@ -744,6 +750,7 @@ public final class ChatMessageReactionButtonsNode: ASDisplayNode {
             self.isIncoming = isIncoming
             self.constrainedWidth = constrainedWidth
             self.centerAligned = centerAligned
+            self.colorType = colorType
         }
     }
     
@@ -791,7 +798,7 @@ public final class ChatMessageReactionButtonsNode: ASDisplayNode {
                 associatedData: arguments.associatedData,
                 alignment: alignment,
                 constrainedWidth: arguments.constrainedWidth,
-                type: .freeform
+                type: arguments.colorType
             )
             
             return (buttonsUpdate.proposedWidth, { constrainedWidth in
@@ -839,11 +846,4 @@ public final class ChatMessageReactionButtonsNode: ASDisplayNode {
         self.buttonsNode.update(rect: rect, within: containerSize, transition: transition)
     }
     
-    public func offset(value: CGPoint, animationCurve: ContainedViewLayoutTransitionCurve, duration: Double) {
-        self.buttonsNode.offset(value: value, animationCurve: animationCurve, duration: duration)
-    }
-    
-    public func offsetSpring(value: CGFloat, duration: Double, damping: CGFloat) {
-        self.buttonsNode.offsetSpring(value: value, duration: duration, damping: damping)
-    }
 }

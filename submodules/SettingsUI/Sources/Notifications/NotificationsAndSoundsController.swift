@@ -15,6 +15,7 @@ import TelegramNotices
 import NotificationSoundSelectionUI
 import TelegramStringFormatting
 import NotificationPeerExceptionController
+import AlertComponent
 
 private struct CounterTagSettings: OptionSet {
     var rawValue: Int32
@@ -535,30 +536,28 @@ private func notificationsAndSoundsEntries(authorizationStatus: AccessType, warn
         entries.append(.accountsInfo(presentationData.theme, inAppSettings.displayNotificationsFromAllAccounts ? presentationData.strings.NotificationSettings_ShowNotificationsAllAccountsInfoOn : presentationData.strings.NotificationSettings_ShowNotificationsAllAccountsInfoOff))
     }
     
-    if #available(iOSApplicationExtension 10.0, iOS 10.0, *) {
-        let title: String
-        let text: String
-        if case .unreachable = authorizationStatus {
-            title = presentationData.strings.Notifications_PermissionsUnreachableTitle
-            text = presentationData.strings.Notifications_PermissionsUnreachableText
-        } else {
-            title = presentationData.strings.Notifications_PermissionsTitle
-            text = presentationData.strings.Notifications_PermissionsText
-        }
-    
-        switch (authorizationStatus, warningSuppressed) {
-            case (.denied, _):
-                entries.append(.permissionInfo(presentationData.theme, title, text, true))
-                entries.append(.permissionEnable(presentationData.theme, presentationData.strings.Notifications_PermissionsAllowInSettings))
-            case (.unreachable, false):
-                entries.append(.permissionInfo(presentationData.theme, title, text, false))
-                entries.append(.permissionEnable(presentationData.theme, presentationData.strings.Notifications_PermissionsOpenSettings))
-            case (.notDetermined, _):
-                entries.append(.permissionInfo(presentationData.theme, title, text, true))
-                entries.append(.permissionEnable(presentationData.theme, presentationData.strings.Notifications_PermissionsAllow))
-            default:
-                break
-        }
+    let title: String
+    let text: String
+    if case .unreachable = authorizationStatus {
+        title = presentationData.strings.Notifications_PermissionsUnreachableTitle
+        text = presentationData.strings.Notifications_PermissionsUnreachableText
+    } else {
+        title = presentationData.strings.Notifications_PermissionsTitle
+        text = presentationData.strings.Notifications_PermissionsText
+    }
+
+    switch (authorizationStatus, warningSuppressed) {
+        case (.denied, _):
+            entries.append(.permissionInfo(presentationData.theme, title, text, true))
+            entries.append(.permissionEnable(presentationData.theme, presentationData.strings.Notifications_PermissionsAllowInSettings))
+        case (.unreachable, false):
+            entries.append(.permissionInfo(presentationData.theme, title, text, false))
+            entries.append(.permissionEnable(presentationData.theme, presentationData.strings.Notifications_PermissionsOpenSettings))
+        case (.notDetermined, _):
+            entries.append(.permissionInfo(presentationData.theme, title, text, true))
+            entries.append(.permissionEnable(presentationData.theme, presentationData.strings.Notifications_PermissionsAllow))
+        default:
+            break
     }
     
     entries.append(.categoriesHeader(presentationData.theme, presentationData.strings.Notifications_MessageNotifications.uppercased()))
@@ -741,26 +740,24 @@ public func notificationsAndSoundsController(context: AccountContext, exceptions
         }).start()
     }, resetNotifications: {
         let presentationData = context.sharedContext.currentPresentationData.with { $0 }
-        let actionSheet = ActionSheetController(presentationData: presentationData)
-        actionSheet.setItemGroups([ActionSheetItemGroup(items: [
-            ActionSheetTextItem(title: presentationData.strings.Notifications_ResetAllNotificationsText),
-            ActionSheetButtonItem(title: presentationData.strings.Notifications_Reset, color: .destructive, action: { [weak actionSheet] in
-                actionSheet?.dismissAnimated()
-                
-                let modifyPeers = context.engine.peers.resetAllPeerNotificationSettings()
-                let updateGlobal = updateGlobalNotificationSettingsInteractively(postbox: context.account.postbox, { _ in
-                    return GlobalNotificationSettingsSet.defaultSettings
-                })
-                let reset = resetPeerNotificationSettings(network: context.account.network)
-                let signal = combineLatest(modifyPeers, updateGlobal, reset)
-                let _ = signal.start()
-            })
-        ]), ActionSheetItemGroup(items: [
-            ActionSheetButtonItem(title: presentationData.strings.Common_Cancel, color: .accent, font: .bold, action: { [weak actionSheet] in
-                actionSheet?.dismissAnimated()
-            })
-        ])])
-        presentControllerImpl?(actionSheet, nil)
+        let controller = AlertScreen(
+            context: context,
+            configuration: AlertScreen.Configuration(actionAlignment: .vertical),
+            text: presentationData.strings.Notifications_ResetAllNotificationsText,
+            actions: [
+                .init(title: presentationData.strings.Notifications_Reset, type: .defaultDestructive, action: {
+                    let modifyPeers = context.engine.peers.resetAllPeerNotificationSettings()
+                    let updateGlobal = updateGlobalNotificationSettingsInteractively(postbox: context.account.postbox, { _ in
+                        return GlobalNotificationSettingsSet.defaultSettings
+                    })
+                    let reset = resetPeerNotificationSettings(network: context.account.network)
+                    let signal = combineLatest(modifyPeers, updateGlobal, reset)
+                    let _ = signal.start()
+                }),
+                .init(title: presentationData.strings.Common_Cancel)
+            ]
+        )
+        presentControllerImpl?(controller, nil)
     }, openAppSettings: {
         context.sharedContext.applicationBindings.openSettings()
     }, updateJoinedNotifications: { value in

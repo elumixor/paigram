@@ -34,10 +34,13 @@ import SettingsUI
 import TextNodeWithEntities
 import ChatControllerInteraction
 import ChatMessageItemCommon
+import ChatMessageDateAndStatusNode
 import ChatMessageItemView
 import ChatMessageBubbleItemNode
 import AdsInfoScreen
 import AdsReportScreen
+import WalletContext
+import WalletSendScreen
  
 private struct MessageContextMenuData {
     let starStatus: Bool?
@@ -51,141 +54,6 @@ private struct MessageContextMenuData {
 
 func canEditMessage(context: AccountContext, limitsConfiguration: EngineConfiguration.Limits, message: EngineRawMessage) -> Bool {
     return canEditMessage(accountPeerId: context.account.peerId, limitsConfiguration: limitsConfiguration, message: message)
-}
-
-private func canEditMessage(accountPeerId: EnginePeer.Id, limitsConfiguration: EngineConfiguration.Limits, message: EngineRawMessage, reschedule: Bool = false) -> Bool {
-    // A sent email cannot be changed, nor (yet) a WhatsApp message.
-    if message.id.peerId.isBridged {
-        return false
-    }
-    var hasEditRights = false
-    var unlimitedInterval = reschedule
-    
-    if message.id.namespace == Namespaces.Message.ScheduledCloud {
-        if let peer = message.peers[message.id.peerId], let channel = peer as? TelegramChannel {
-            switch channel.info {
-                case .broadcast:
-                    if channel.hasPermission(.editAllMessages) || !message.flags.contains(.Incoming) {
-                        hasEditRights = true
-                    }
-                default:
-                    hasEditRights = true
-            }
-        } else {
-            hasEditRights = true
-        }
-    } else if message.id.namespace == Namespaces.Message.QuickReplyCloud {
-        hasEditRights = true
-    } else if message.id.peerId.namespace == Namespaces.Peer.SecretChat || message.id.namespace != Namespaces.Message.Cloud {
-        hasEditRights = false
-    } else if let author = message.author, author.id == accountPeerId, let peer = message.peers[message.id.peerId] {
-        hasEditRights = true
-        if let peer = peer as? TelegramChannel {
-            if peer.flags.contains(.isGigagroup) {
-                if peer.flags.contains(.isCreator) || peer.adminRights != nil {
-                    hasEditRights = true
-                } else {
-                    hasEditRights = false
-                }
-            }
-            switch peer.info {
-            case .broadcast:
-                if peer.hasPermission(.editAllMessages) || !message.flags.contains(.Incoming) {
-                    unlimitedInterval = true
-                }
-            case .group:
-                if peer.hasPermission(.pinMessages) {
-                    unlimitedInterval = true
-                }
-            }
-        }
-    } else if let author = message.author, message.author?.id != message.id.peerId, author.id.namespace == Namespaces.Peer.CloudChannel && message.id.peerId.namespace == Namespaces.Peer.CloudChannel, !message.flags.contains(.Incoming) {
-        if message.media.contains(where: { $0 is TelegramMediaInvoice }) {
-            hasEditRights = false
-        } else {
-            hasEditRights = true
-        }
-    } else if message.author?.id == message.id.peerId, let peer = message.peers[message.id.peerId] {
-        if let peer = peer as? TelegramChannel {
-            switch peer.info {
-            case .broadcast:
-                if peer.hasPermission(.editAllMessages) || !message.flags.contains(.Incoming) {
-                    unlimitedInterval = true
-                    hasEditRights = true
-                }
-            case .group:
-                if peer.hasPermission(.pinMessages) {
-                    unlimitedInterval = true
-                    hasEditRights = true
-                }
-            }
-        }
-    }
-    
-    var hasUneditableAttributes = false
-    
-    if hasEditRights {
-        for attribute in message.attributes {
-            if let _ = attribute as? InlineBotMessageAttribute {
-                hasUneditableAttributes = true
-                break
-            } else if let _ = attribute as? PublishedSuggestedPostMessageAttribute, message.timestamp > Int32(Date().timeIntervalSince1970) - 60 * 60 * 24 {
-                hasUneditableAttributes = true
-                break
-            }
-        }
-        if message.forwardInfo != nil {
-            hasUneditableAttributes = true
-        }
-        
-        for media in message.media {
-            if let file = media as? TelegramMediaFile {
-                if file.isSticker || file.isAnimatedSticker || file.isInstantVideo {
-                    hasUneditableAttributes = true
-                    break
-                }
-            } else if let _ = media as? TelegramMediaContact {
-                hasUneditableAttributes = true
-                break
-            } else if let _ = media as? TelegramMediaExpiredContent {
-                hasUneditableAttributes = true
-                break
-            } else if let _ = media as? TelegramMediaMap {
-                hasUneditableAttributes = true
-                break
-            } else if let _ = media as? TelegramMediaPoll {
-                hasUneditableAttributes = true
-                break
-            } else if let _ = media as? TelegramMediaDice {
-                hasUneditableAttributes = true
-                break
-            } else if let _ = media as? TelegramMediaGame {
-                hasUneditableAttributes = true
-                break
-            } else if let _ = media as? TelegramMediaInvoice {
-                hasUneditableAttributes = true
-                break
-            } else if let _ = media as? TelegramMediaStory {
-                hasUneditableAttributes = true
-                break
-            } else if let _ = media as? TelegramMediaGiveaway {
-                hasUneditableAttributes = true
-                break
-            } else if let _ = media as? TelegramMediaGiveawayResults {
-                hasUneditableAttributes = true
-                break
-            } else if let _ = media as? TelegramMediaTodo {
-                unlimitedInterval = true
-            }
-        }
-        
-        if !hasUneditableAttributes || reschedule {
-            if canPerformEditingActions(limits: limitsConfiguration._asLimits(), accountPeerId: accountPeerId, message: message, unlimitedInterval: unlimitedInterval) {
-                return true
-            }
-        }
-    }
-    return false
 }
 
 private func canEditFactCheck(appConfig: AppConfiguration) -> Bool {
@@ -409,32 +277,35 @@ func messageMediaEditingOptions(message: EngineRawMessage) -> MessageMediaEditin
     }
     
     var options: MessageMediaEditingOptions = []
+    // The media class the server files a grouped item under: a photo or a (non-animated) video belongs to a
+    // photo/video album, any other document to a file album. This is deliberately not the bubble's rendering
+    // test (`isVideo || (isAnimated && dimensions != nil)`): a GIF sent as a file is tagged animated with a
+    // size by the server yet stays a document, and its album stays a file album.
+    var isPhotoOrVideo = false
     
     for media in message.media {
         if let _ = media as? TelegramMediaImage {
+            isPhotoOrVideo = true
             options.formUnion([.imageOrVideo, .file])
         } else if let file = media as? TelegramMediaFile {
+            if file.isVideo && !file.isAnimated {
+                isPhotoOrVideo = true
+            }
             for attribute in file.attributes {
                 switch attribute {
                     case .Sticker:
                         return []
-                    case .Animated:
-                        break
                     case let .Video(_, _, flags, _, _, _):
                         if flags.contains(.instantRoundVideo) {
                             return []
-                        } else {
-                            options.formUnion([.imageOrVideo, .file])
                         }
                     case let .Audio(isVoice, _, _, _, _):
                         if isVoice {
                             return []
-                        } else {
-                            if let _ = message.groupingKey {
-                                return []
-                            } else {
-                                options.formUnion([.imageOrVideo, .file])
-                            }
+                        }
+                        // Album audio cannot be replaced piecemeal.
+                        if let _ = message.groupingKey {
+                            return []
                         }
                     default:
                         break
@@ -444,8 +315,10 @@ func messageMediaEditingOptions(message: EngineRawMessage) -> MessageMediaEditin
         }
     }
     
+    // An album holds one kind of media, so a replacement must stay in that kind: photo/video albums take
+    // only photos and videos, file albums only files (music albums refused above).
     if message.groupingKey != nil {
-        options.remove(.file)
+        options.remove(isPhotoOrVideo ? .file : .imageOrVideo)
     }
     
     return options
@@ -495,6 +368,128 @@ func updatedChatEditInterfaceMessageState(context: AccountContext, state: ChatPr
     )
 }
 
+private func ephemeralReplacementContextMenuItems(chatPresentationInterfaceState: ChatPresentationInterfaceState, context: AccountContext, message: EngineRawMessage, controllerInteraction: ChatControllerInteraction, interfaceInteraction: ChatPanelInterfaceInteraction) -> Signal<ContextController.Items, NoError> {
+    let presentationData = context.sharedContext.currentPresentationData.with { $0 }
+    let isCopyProtected = chatPresentationInterfaceState.copyProtectionEnabled || message.isCopyProtected()
+    let replacementMessage = message.activeEphemeralReplacementMessage
+
+    var richMessageInstantPage: InstantPage?
+    if let richTextAttribute = message.attributes.first(where: { $0 is RichTextMessageAttribute }) as? RichTextMessageAttribute {
+        richMessageInstantPage = richTextAttribute.instantPage
+    }
+
+    var imageResource: TelegramMediaResource?
+    var isExpired = false
+    var isPoll = false
+    var diceEmoji: String?
+    for media in message.effectiveMedia {
+        if media is TelegramMediaExpiredContent {
+            isExpired = true
+        } else if media is TelegramMediaPoll {
+            isPoll = true
+        } else if let dice = media as? TelegramMediaDice {
+            diceEmoji = dice.emoji
+        } else if let image = media as? TelegramMediaImage, let largest = largestImageRepresentation(image.representations) {
+            imageResource = largest.resource
+        }
+    }
+
+    let resourceStatus: Signal<EngineMediaResource.FetchStatus?, NoError>
+    if let imageResource {
+        resourceStatus = context.engine.resources.status(resource: EngineMediaResource(imageResource))
+        |> take(1)
+        |> map(Optional.init)
+    } else {
+        resourceStatus = .single(nil)
+    }
+
+    return resourceStatus
+    |> map { resourceStatus -> ContextController.Items in
+        let resourceAvailable: Bool
+        if let resourceStatus, case .Local = resourceStatus {
+            resourceAvailable = true
+        } else {
+            resourceAvailable = false
+        }
+
+        var actions: [ContextMenuItem] = []
+
+        let noAction: ((ContextMenuActionItem.Action) -> Void)? = nil
+        actions.append(.action(ContextMenuActionItem(text: chatPresentationInterfaceState.strings.Chat_EphemeralMessage_AnchoredInfo, textFont: .small, icon: { _ in return nil }, action: noAction)))
+        actions.append(.separator)
+        
+        let hasCopyableContent = !message.text.isEmpty || richMessageInstantPage != nil || diceEmoji != nil || (resourceAvailable && imageResource != nil)
+        if hasCopyableContent && !isCopyProtected && !isExpired && !isPoll {
+            actions.append(.action(ContextMenuActionItem(text: chatPresentationInterfaceState.strings.Conversation_ContextMenuCopy, icon: { theme in
+                return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Copy"), color: theme.contextMenu.primaryColor)
+            }, action: { _, f in
+                let copyText = {
+                    if let richMessageInstantPage {
+                        UIPasteboard.general.items = [richMessagePasteboardItem(fromInstantPage: richMessageInstantPage)]
+                    } else if let diceEmoji {
+                        UIPasteboard.general.string = diceEmoji
+                    } else {
+                        let entities = (message.attributes.first(where: { $0 is TextEntitiesMessageAttribute }) as? TextEntitiesMessageAttribute)?.entities
+                        if let restricted = message.attributes.first(where: { $0 is RestrictedContentMessageAttribute }) as? RestrictedContentMessageAttribute, let restrictedText = restricted.platformText(platform: "ios", contentSettings: context.currentContentSettings.with { $0 }) {
+                            storeMessageTextInPasteboard(restrictedText, entities: nil)
+                        } else {
+                            storeMessageTextInPasteboard(message.text, entities: entities)
+                        }
+                    }
+                    Queue.mainQueue().after(0.2, {
+                        controllerInteraction.displayUndo(.copy(text: chatPresentationInterfaceState.strings.Conversation_MessageCopied))
+                    })
+                }
+
+                if message.text.isEmpty, richMessageInstantPage == nil, diceEmoji == nil, resourceAvailable, let imageResource {
+                    let _ = (context.engine.resources.data(resource: EngineMediaResource(imageResource), incremental: true)
+                    |> take(1)
+                    |> deliverOnMainQueue).startStandalone(next: { data in
+                        if data.isComplete, let imageData = try? Data(contentsOf: URL(fileURLWithPath: data.path)), let image = UIImage(data: imageData) {
+                            UIPasteboard.general.image = image
+                            Queue.mainQueue().after(0.2, {
+                                controllerInteraction.displayUndo(.copy(text: chatPresentationInterfaceState.strings.Conversation_ImageCopied))
+                            })
+                        }
+                    })
+                } else {
+                    copyText()
+                }
+                f(.default)
+            })))
+        }
+
+        if let replacementMessage {
+            let isForwardingDisabled = (replacementMessage.attributes.first(where: { $0 is EphemeralMessageAttribute }) as? EphemeralMessageAttribute)?.isForwardingDisabled ?? false
+            if !isForwardingDisabled && !isCopyProtected && !replacementMessage.containsSecretMedia && !replacementMessage.media.contains(where: { $0 is TelegramMediaAction || $0 is TelegramMediaExpiredContent }) {
+                actions.append(.action(ContextMenuActionItem(text: chatPresentationInterfaceState.strings.Conversation_ContextMenuForward, icon: { theme in
+                    return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Forward"), color: theme.actionSheet.primaryTextColor)
+                }, action: { _, f in
+                    interfaceInteraction.forwardMessages([replacementMessage])
+                    f(.dismissWithoutContent)
+                })))
+            }
+
+            actions.append(.action(ContextMenuActionItem(text: chatPresentationInterfaceState.strings.Conversation_ContextMenuReport, icon: { theme in
+                return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Report"), color: theme.contextMenu.primaryColor)
+            }, action: { controller, _ in
+                interfaceInteraction.reportMessages([replacementMessage], controller)
+            })))
+        }
+
+        let subtitleFont = Font.regular(presentationData.listsFontSize.baseDisplaySize * 13.0 / 17.0)
+        let revertSubtitle = NSAttributedString(string: presentationData.strings.Chat_EphemeralMessage_RevertInfo, font: subtitleFont, textColor: presentationData.theme.contextMenu.destructiveColor)
+        actions.append(.action(ContextMenuActionItem(text: presentationData.strings.Chat_EphemeralMessage_Revert, textColor: .destructive, textLayout: .secondLineWithAttributedValue(revertSubtitle), icon: { theme in
+            return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Reload"), color: theme.contextMenu.destructiveColor, flipHorizontally: true)
+        }, action: { _, f in
+            f(.default)
+            let _ = context.engine.messages.revertAnchoredEphemeralMessage(messageId: message.id).startStandalone()
+        })))
+
+        return ContextController.Items(content: .list(actions))
+    }
+}
+
 func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState: ChatPresentationInterfaceState, context: AccountContext, messages: [EngineRawMessage], controllerInteraction: ChatControllerInteraction?, selectAll: Bool, interfaceInteraction: ChatPanelInterfaceInteraction?, readStats: MessageReadStats? = nil, messageNode: ChatMessageItemView? = nil) -> Signal<ContextController.Items, NoError> {
     guard let interfaceInteraction = interfaceInteraction, let controllerInteraction = controllerInteraction else {
         return .single(ContextController.Items(content: .list([])))
@@ -506,6 +501,9 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
         if message.id.namespace == Namespaces.Message.Local && message.attributes.contains(where: { $0 is TypingDraftMessageAttribute }) {
             return .single(ContextController.Items(content: .list([])))
         }
+    }
+    if let message = messages.first, message.activeEphemeralReplacementMessage != nil {
+        return ephemeralReplacementContextMenuItems(chatPresentationInterfaceState: chatPresentationInterfaceState, context: context, message: message, controllerInteraction: controllerInteraction, interfaceInteraction: interfaceInteraction)
     }
     
     var isEmbeddedMode = false
@@ -539,7 +537,7 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
         if adAttribute.sponsorInfo != nil || adAttribute.additionalInfo != nil {
             actions.append(.action(ContextMenuActionItem(text: presentationData.strings.Chat_ContextMenu_AdSponsorInfo, textColor: .primary, icon: { theme in
                 return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Channels"), color: theme.actionSheet.primaryTextColor)
-            }, iconSource: nil, action: { c, _ in
+            }, iconSource: nil, action: { [controllerInteraction] c, _ in
                 var subItems: [ContextMenuItem] = []
                 
                 subItems.append(.action(ContextMenuActionItem(text: presentationData.strings.Common_Back, textColor: .primary, icon: { theme in
@@ -594,7 +592,7 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
                 f(.default)
                 
                 let _ = (context.engine.messages.reportAdMessage(opaqueId: adAttribute.opaqueId, option: nil)
-                |> deliverOnMainQueue).start(next: { result in
+                |> deliverOnMainQueue).start(next: { [interfaceInteraction] result in
                     if case let .options(title, options) = result {
                         controllerInteraction.navigationController()?.pushViewController(
                             AdsReportScreen(
@@ -963,7 +961,7 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
     
     return dataSignal
     |> deliverOnMainQueue
-    |> map { data, updatingMessageMedia, infoSummaryData, appConfig, isMessageRead, messageViewsPrivacyTips, availableReactions, translationSettings, loggingSettings, notificationSoundList, accountPeer -> ContextController.Items in
+    |> map { [context] data, updatingMessageMedia, infoSummaryData, appConfig, isMessageRead, messageViewsPrivacyTips, availableReactions, translationSettings, loggingSettings, notificationSoundList, accountPeer -> ContextController.Items in
         let isPremium = accountPeer?.isPremium ?? false
 
         var actions: [ContextMenuItem] = []
@@ -1187,11 +1185,28 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
             }
         }
         
+        var isReplyThreadHead = false
+        if case let .replyThread(replyThreadMessage) = chatPresentationInterfaceState.chatLocation {
+            isReplyThreadHead = messages[0].id == replyThreadMessage.effectiveTopId
+        }
+        
+        if !isPinnedMessages, !isReplyThreadHead, data.canReply {
+            actions.append(.action(ContextMenuActionItem(text: chatPresentationInterfaceState.strings.Conversation_ContextMenuReply, icon: { theme in
+                return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Reply"), color: theme.actionSheet.primaryTextColor)
+            }, action: { c, _ in
+                interfaceInteraction.setupReplyMessage(messages[0].id, nil, { transition, completed in
+                    c?.dismiss(result: .custom(transition), completion: {
+                        completed()
+                    })
+                })
+            })))
+        }
+        
         if data.messageActions.options.contains(.sendGift), !message.id.peerId.isTelegramNotifications {
             let sendGiftTitle: String
             var isIncoming = message.effectivelyIncoming(context.account.peerId)
             for media in message.media {
-                if let action = media as? TelegramMediaAction, case let .starGiftUnique(_, isUpgrade, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = action.action {
+                if let action = media as? TelegramMediaAction, case let .starGiftUnique(_, isUpgrade, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) = action.action {
                     if isUpgrade && message.author?.id == context.account.peerId {
                         isIncoming = true
                     }
@@ -1213,20 +1228,26 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
             })))
         }
         
-        var isReplyThreadHead = false
-        if case let .replyThread(replyThreadMessage) = chatPresentationInterfaceState.chatLocation {
-            isReplyThreadHead = messages[0].id == replyThreadMessage.effectiveTopId
-        }
-        
-        if !isPinnedMessages, !isReplyThreadHead, data.canReply {
-            actions.append(.action(ContextMenuActionItem(text: chatPresentationInterfaceState.strings.Conversation_ContextMenuReply, icon: { theme in
-                return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Reply"), color: theme.actionSheet.primaryTextColor)
-            }, action: { c, _ in
-                interfaceInteraction.setupReplyMessage(messages[0].id, nil, { transition, completed in
-                    c?.dismiss(result: .custom(transition), completion: {
-                        completed()
-                    })
-                })
+        if WalletConfiguration.with(appConfiguration: context.currentAppConfiguration.with { $0 }).isAvailable,
+           let peerAddress = message.media.lazy.compactMap({ media -> String? in
+               if let action = media as? TelegramMediaAction, case let .gramTransfer(_, peerAddress, _, _, _) = action.action {
+                   return peerAddress
+               }
+               return nil
+           }).first,
+           let transferRecipient = walletTransferMessageRecipient(chatPeer: message.peers[message.id.peerId].flatMap(EnginePeer.init), accountPeerId: context.account.peerId, peerAddress: peerAddress) {
+            let recipient: WalletSendRequest.Recipient
+            switch transferRecipient {
+            case let .peer(peer):
+                recipient = .peer(peer)
+            case let .address(address):
+                recipient = .address(address)
+            }
+            actions.append(.action(ContextMenuActionItem(text: chatPresentationInterfaceState.strings.Wallet_SendMoney, icon: { theme in
+                return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Ton"), color: theme.actionSheet.primaryTextColor)
+            }, action: { _, f in
+                f(.dismissWithoutContent)
+                (interfaceInteraction.chatController() as? ChatControllerImpl)?.openResolved(result: .sendGrams(transfer: WalletSendRequest(recipient: recipient, amountNanograms: nil)), sourceMessageId: message.id)
             })))
         }
         
@@ -1412,7 +1433,14 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
                                             |> deliverOnMainQueue).startStandalone(next: { data in
                                                 if data.isComplete, let imageData = try? Data(contentsOf: URL(fileURLWithPath: data.path)) {
                                                     if let image = UIImage(data: imageData) {
-                                                        if !messageText.isEmpty {
+                                                        // A rich message is sent with `text: ""`, so `messageText` is
+                                                        // empty even when the bubble is full of content — copying the
+                                                        // bare image would throw the whole document away. Treat a rich
+                                                        // page like non-empty text (`copyTextWithEntities` short-circuits
+                                                        // to the rich clipboard formats). Matches the sibling Copy action
+                                                        // in `chatAnchoredMessageContextMenuItems`, which already gates on
+                                                        // `richMessageInstantPage == nil`.
+                                                        if !messageText.isEmpty || richMessageInstantPage != nil {
                                                             copyTextWithEntities()
                                                         } else {
                                                             UIPasteboard.general.image = image
@@ -1797,17 +1825,23 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
             }
         }
         
-        if let message = messages.first, message.id.namespace == Namespaces.Message.Cloud, let channel = message.peers[message.id.peerId] as? TelegramChannel, !channel.isMonoForum, !(message.media.first is TelegramMediaAction), !isReplyThreadHead, !isMigrated {
+        if let message = messages.first, let copyLinkKind = chatMessageCopyLinkKind(message: message), let channel = message.peers[message.id.peerId] as? TelegramChannel, !isReplyThreadHead, !isMigrated {
             actions.append(.action(ContextMenuActionItem(text: chatPresentationInterfaceState.strings.Conversation_ContextMenuCopyLink, icon: { theme in
                 return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Link"), color: theme.actionSheet.primaryTextColor)
             }, action: { _, f in
                 var threadMessageId: EngineMessage.Id?
-                if case let .replyThread(replyThreadMessage) = chatPresentationInterfaceState.chatLocation {
+                // A direct-messages conversation is a sublist keyed by the user's peer id, not a reply thread.
+                if case let .replyThread(replyThreadMessage) = chatPresentationInterfaceState.chatLocation, copyLinkKind != .directMessages {
                     threadMessageId = replyThreadMessage.effectiveMessageId
                 }
                 let _ = (context.engine.messages.exportMessageLink(peerId: message.id.peerId, messageId: message.id, isThread: threadMessageId != nil)
                 |> map { result -> String? in
-                    return result
+                    switch copyLinkKind {
+                    case .channelMessage:
+                        return result
+                    case .directMessages:
+                        return directMessagesMessageLink(exportedLink: result, messageId: message.id)
+                    }
                 }
                 |> deliverOnMainQueue).startStandalone(next: { link in
                     if let link = link {
@@ -1816,7 +1850,9 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
                         let presentationData = context.sharedContext.currentPresentationData.with { $0 }
                         
                         var warnAboutPrivate = false
-                        if case .peer = chatPresentationInterfaceState.chatLocation {
+                        if copyLinkKind == .directMessages {
+                            warnAboutPrivate = true
+                        } else if case .peer = chatPresentationInterfaceState.chatLocation {
                             if channel.addressName == nil {
                                 warnAboutPrivate = true
                             }
@@ -2051,7 +2087,7 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
             for attribute in message.attributes {
                 if let attribute = attribute as? AutoremoveTimeoutMessageAttribute {
                     if let countdownBeginTime = attribute.countdownBeginTime {
-                        autoremoveDeadline = countdownBeginTime + attribute.timeout
+                        autoremoveDeadline = autoremoveExpiryTimestamp(countdownBeginTime: countdownBeginTime, timeout: attribute.timeout)
                     }
                     break
                 }
@@ -2219,7 +2255,7 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
                     readStats = MessageReadStats(reactionCount: 0, peers: [], readTimestamps: [:])
                 }
 
-                actions.insert(.custom(ChatReadReportContextItem(context: context, message: message, hasReadReports: hasReadReports, isEdit: false, stats: readStats, action: { c, f, stats, customReactionEmojiPacks, firstCustomEmojiReaction in
+                actions.insert(.custom(ChatReadReportContextItem(context: context, message: message, hasReadReports: hasReadReports, info: nil, stats: readStats, action: { c, f, stats, customReactionEmojiPacks, firstCustomEmojiReaction in
                     if message.id.peerId.namespace == Namespaces.Peer.CloudUser {
                         if let stats, stats.peers.isEmpty {
                             c.dismiss(completion: {
@@ -2315,11 +2351,43 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
             }
         }
         
+        // Bubble mode off: a message shows no time of its own (the first of a run has it next to the name) and a post no
+        // signature, so an incoming message's menu starts with them, in one block with the other rows about the message
+        // (spec 5.9).
+        var isMessageOptions = false
+        if case .messageOptions = chatPresentationInterfaceState.subject {
+            isMessageOptions = true
+        }
+        let showsBubblelessInfoRows = !chatPresentationInterfaceState.bubbleCorners.bubbleMode && chatMessageBubblelessMenuShowsInfoRows(bubbleMode: false, isMessageOptions: isMessageOptions, incoming: message.effectivelyIncoming(context.account.peerId), isAd: message.adAttribute != nil, isService: chatMessageMediaKind(message) == .service)
+        
         if isEdited {
             if !actions.isEmpty {
                 actions.insert(.separator, at: 0)
             }
-            actions.insert(.custom(ChatReadReportContextItem(context: context, message: message, hasReadReports: false, isEdit: true, stats: MessageReadStats(reactionCount: 0, peers: [], readTimestamps: [:]), action: nil), false), at: 0)
+            actions.insert(.custom(ChatReadReportContextItem(context: context, message: message, hasReadReports: false, info: .edited, usesInfoRowMetrics: showsBubblelessInfoRows, stats: MessageReadStats(reactionCount: 0, peers: [], readTimestamps: [:]), action: nil), false), at: 0)
+        }
+        
+        if showsBubblelessInfoRows {
+            let noStats = MessageReadStats(reactionCount: 0, peers: [], readTimestamps: [:])
+            var authorTitle = messageTimestampStatusAuthorTitle(context: context, message: EngineMessage(message), strings: chatPresentationInterfaceState.strings, nameDisplayOrder: chatPresentationInterfaceState.nameDisplayOrder)
+            if authorTitle?.isEmpty == true {
+                authorTitle = nil
+            }
+            // The "Edited" row shows when the message was sent where the server asks for it (`infoText()`).
+            let editedRowShowsSentTime = isEdited && (context.getAppConfigValue("message_primary_edited_date") as? Bool ?? false)
+            let infoRows: [ContextMenuItem] = chatMessageBubblelessMenuInfoRows(hasAuthor: authorTitle != nil, editedRowShowsSentTime: editedRowShowsSentTime).map { row in
+                switch row {
+                case .sent:
+                    return .custom(ChatReadReportContextItem(context: context, message: message, hasReadReports: false, info: .sent, usesInfoRowMetrics: true, stats: noStats, action: nil), false)
+                case .author:
+                    return .custom(ChatReadReportContextItem(context: context, message: message, hasReadReports: false, info: .author(authorTitle ?? ""), usesInfoRowMetrics: true, stats: noStats, action: nil), false)
+                }
+            }
+            if let first = actions.first, case let .custom(firstItem, _) = first, firstItem is ChatReadReportContextItem {
+            } else if !actions.isEmpty && !infoRows.isEmpty {
+                actions.insert(.separator, at: 0)
+            }
+            actions.insert(contentsOf: infoRows, at: editedRowShowsSentTime ? 1 : 0)
         }
         
         if !actions.isEmpty, case .separator = actions[0] {
@@ -2330,12 +2398,29 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
             switch customChatContents.kind {
             case .hashTagSearch:
                 break
-            case .quickReplyMessageInput:
+            case .quickReplyMessageInput, .welcomeMessages:
                 actions.removeAll()
-                if !messageText.isEmpty || (resourceAvailable && isImage) || diceEmoji != nil {
+                if message.id.namespace == Namespaces.Message.WelcomeMessageLocal, message.attributes.contains(where: { ($0 as? EphemeralOutgoingMessageAttribute)?.state == .failed }) {
+                    actions.append(.action(ContextMenuActionItem(text: chatPresentationInterfaceState.strings.Conversation_MessageDialogRetry, icon: { theme in
+                        return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Resend"), color: theme.actionSheet.primaryTextColor)
+                    }, action: { _, f in
+                        let _ = context.engine.messages.retryEphemeralOutgoingMessage(messageId: message.id).startStandalone()
+                        f(.dismissWithoutContent)
+                    })))
+                }
+                if !messageText.isEmpty || richMessageMarkdown != nil || (resourceAvailable && isImage) || diceEmoji != nil {
                     actions.append(.action(ContextMenuActionItem(text: chatPresentationInterfaceState.strings.Conversation_ContextMenuCopy, icon: { theme in
                         return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Copy"), color: theme.actionSheet.primaryTextColor)
                     }, action: { _, f in
+                        if let richMessageInstantPage {
+                            UIPasteboard.general.items = [richMessagePasteboardItem(fromInstantPage: richMessageInstantPage)]
+                            Queue.mainQueue().after(0.2, {
+                                let content: UndoOverlayContent = .copy(text: chatPresentationInterfaceState.strings.Conversation_MessageCopied)
+                                controllerInteraction.displayUndo(content)
+                            })
+                            f(.default)
+                            return
+                        }
                         var messageEntities: [MessageTextEntity]?
                         var restrictedText: String?
                         for attribute in message.attributes {
@@ -2372,7 +2457,7 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
                     })))
                 }
                 
-                if message.id.namespace == Namespaces.Message.QuickReplyCloud {
+                if message.id.namespace == Namespaces.Message.QuickReplyCloud || message.id.namespace == Namespaces.Message.WelcomeMessageCloud {
                     if data.canEdit {
                         actions.append(.action(ContextMenuActionItem(text: chatPresentationInterfaceState.strings.Conversation_MessageDialogEdit, icon: { theme in
                             return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Edit"), color: theme.actionSheet.primaryTextColor)
@@ -2457,23 +2542,6 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
     }
 }
 
-func canPerformEditingActions(limits: LimitsConfiguration, accountPeerId: EnginePeer.Id, message: EngineRawMessage, unlimitedInterval: Bool) -> Bool {
-    if message.id.peerId == accountPeerId {
-        return true
-    }
-    
-    if unlimitedInterval {
-        return true
-    }
-    
-    let timestamp = Int32(CFAbsoluteTimeGetCurrent() + NSTimeIntervalSince1970)
-    if Int64(message.timestamp) + Int64(limits.maxMessageEditingInterval) > Int64(timestamp) {
-        return true
-    }
-    
-    return false
-}
-
 private func canPerformDeleteActions(limits: LimitsConfiguration, accountPeerId: EnginePeer.Id, message: EngineRawMessage) -> Bool {
     if message.id.peerId == accountPeerId {
         return true
@@ -2498,6 +2566,22 @@ private func canPerformDeleteActions(limits: LimitsConfiguration, accountPeerId:
     return false
 }
 
+/// Whether a channel that authored a message or a reaction in `chatPeerId` can be banned there.
+///
+/// A channel that posts in a group via "send as" is a participant and can be banned. The group itself
+/// (anonymous admins) and the group's linked channel are not: banning the linked channel from its own
+/// discussion group detaches every comment thread from its post. The linked channel is only known once
+/// the group's cached data is loaded, so an unknown value refuses rather than allows.
+func chatChannelAuthorIsBannable(authorId: EnginePeer.Id, chatPeerId: EnginePeer.Id, linkedDiscussionPeerId: EnginePeerCachedInfoItem<EnginePeer.Id?>?) -> Bool {
+    if authorId == chatPeerId {
+        return false
+    }
+    guard let linkedDiscussionPeerId, case let .known(linkedPeerId) = linkedDiscussionPeerId else {
+        return false
+    }
+    return linkedPeerId != authorId
+}
+
 func chatAvailableMessageActionsImpl(engine: TelegramEngine, accountPeerId: EnginePeer.Id, messageIds: Set<EngineMessage.Id>, messages: [EngineMessage.Id: EngineRawMessage] = [:], peers: [EnginePeer.Id: EngineRawPeer] = [:], keepUpdated: Bool) -> Signal<ChatAvailableMessageActions, NoError> {
     return engine.data.subscribe(
         TelegramEngine.EngineData.Item.Configuration.Limits(),
@@ -2505,10 +2589,11 @@ func chatAvailableMessageActionsImpl(engine: TelegramEngine, accountPeerId: Engi
         EngineDataMap(Set(messageIds).map(TelegramEngine.EngineData.Item.Messages.Message.init)),
         EngineDataMap(Set(messageIds.map(\.peerId)).map(TelegramEngine.EngineData.Item.Peer.CopyProtectionEnabled.init)),
         EngineDataMap(Set(messageIds.map(\.peerId)).map(TelegramEngine.EngineData.Item.Peer.MyCopyProtectionEnabled.init)),
+        EngineDataMap(Set(messageIds.map(\.peerId)).map(TelegramEngine.EngineData.Item.Peer.LinkedDiscussionPeerId.init)),
         TelegramEngine.EngineData.Item.Peer.Peer(id: accountPeerId)
     )
     |> take(keepUpdated ? Int.max : 1)
-    |> map { limitsConfiguration, peerMap, messageMap, copyProtectionMap, myCopyProtectionMap, accountPeer -> ChatAvailableMessageActions in
+    |> map { limitsConfiguration, peerMap, messageMap, copyProtectionMap, myCopyProtectionMap, linkedDiscussionPeerIdMap, accountPeer -> ChatAvailableMessageActions in
         let isPremium: Bool
         if let accountPeer {
             isPremium = accountPeer.isPremium
@@ -2622,6 +2707,11 @@ func chatAvailableMessageActionsImpl(engine: TelegramEngine, accountPeerId: Engi
                     }
                 }
                 if id.namespace == Namespaces.Message.EphemeralLocal {
+                    let isForwardingDisabled = (message.attributes.first(where: { $0 is EphemeralMessageAttribute }) as? EphemeralMessageAttribute)?.isForwardingDisabled ?? false
+                    let isAction = message.media.contains(where: { $0 is TelegramMediaAction || $0 is TelegramMediaExpiredContent })
+                    if !isForwardingDisabled && !message.containsSecretMedia && !isAction && !isCopyProtected && !isShareProtected && !(message.flags.isSending || message.flags.contains(.Failed)) {
+                        optionsMap[id]!.insert(.forward)
+                    }
                     optionsMap[id]!.insert(.deleteLocally)
                     if message.flags.contains(.Incoming), message.attributes.contains(where: { $0 is EphemeralMessageAttribute }) {
                         optionsMap[id]!.insert(.report)
@@ -2668,22 +2758,22 @@ func chatAvailableMessageActionsImpl(engine: TelegramEngine, accountPeerId: Engi
                         if (channel.hasPermission(.banMembers) || channel.hasPermission(.deleteAllMessages)), case .group = channel.info {
                             if message.flags.contains(.Incoming) {
                                 if let author = message.author {
+                                    let isBannableAuthor: Bool
                                     if author is TelegramUser {
-                                        if !hadBanPeerId {
-                                            hadBanPeerId = true
-                                            banPeer = author
-                                        } else if banPeer?.id != message.author?.id {
-                                            banPeer = nil
-                                        }
-                                        
-                                        if !banPeers.contains(where: { $0.id == author.id }) {
-                                            banPeers.append(author)
-                                        }
+                                        isBannableAuthor = true
                                     } else if author is TelegramChannel {
+                                        // A cross-posted channel post stays excluded even if the group has since been
+                                        // unlinked: the channel never was a participant here.
+                                        isBannableAuthor = chatChannelAuthorIsBannable(authorId: author.id, chatPeerId: id.peerId, linkedDiscussionPeerId: linkedDiscussionPeerIdMap[id.peerId]) && message.sourceReference?.messageId.peerId != author.id
+                                    } else {
+                                        isBannableAuthor = false
+                                    }
+                                    
+                                    if isBannableAuthor {
                                         if !hadBanPeerId {
                                             hadBanPeerId = true
                                             banPeer = author
-                                        } else if banPeer?.id != message.author?.id {
+                                        } else if banPeer?.id != author.id {
                                             banPeer = nil
                                         }
                                         
@@ -3265,18 +3355,31 @@ private final class ChatMessageAuthorContextItemNode: ASDisplayNode, ContextMenu
 }
 
 final class ChatReadReportContextItem: ContextMenuCustomItem {
+    /// A row about the message itself rather than about who read it or reacted to it.
+    enum Info {
+        case edited
+        /// Bubble mode off: when the message was sent, since only the first message of a run shows its time.
+        case sent
+        /// Bubble mode off: who signed a post, since its header shows just the time.
+        case author(String)
+    }
+    
     fileprivate let context: AccountContext
     fileprivate let message: EngineRawMessage
     fileprivate let hasReadReports: Bool
-    fileprivate let isEdit: Bool
+    fileprivate let info: Info?
+    /// The compact row (private chats' metrics): the bubble-free info rows, and the "Edited" row among them. Groups and
+    /// channels otherwise keep master's.
+    fileprivate let usesInfoRowMetrics: Bool
     fileprivate let stats: MessageReadStats?
     fileprivate let action: ((ContextControllerProtocol, @escaping (ContextMenuActionResult) -> Void, MessageReadStats?, [StickerPackCollectionInfo], TelegramMediaFile?) -> Void)?
 
-    init(context: AccountContext, message: EngineRawMessage, hasReadReports: Bool, isEdit: Bool, stats: MessageReadStats?, action: ((ContextControllerProtocol, @escaping (ContextMenuActionResult) -> Void, MessageReadStats?, [StickerPackCollectionInfo], TelegramMediaFile?) -> Void)?) {
+    init(context: AccountContext, message: EngineRawMessage, hasReadReports: Bool, info: Info?, usesInfoRowMetrics: Bool = false, stats: MessageReadStats?, action: ((ContextControllerProtocol, @escaping (ContextMenuActionResult) -> Void, MessageReadStats?, [StickerPackCollectionInfo], TelegramMediaFile?) -> Void)?) {
         self.context = context
         self.message = message
         self.hasReadReports = hasReadReports
-        self.isEdit = isEdit
+        self.info = info
+        self.usesInfoRowMetrics = usesInfoRowMetrics
         self.stats = stats
         self.action = action
     }
@@ -3350,11 +3453,18 @@ private final class ChatReadReportContextItemNode: ASDisplayNode, ContextMenuCus
         self.buttonNode.accessibilityLabel = presentationData.strings.VoiceChat_StopRecording
 
         self.iconNode = ASImageNode()
-        if self.item.isEdit {
-            if let useEditedTimestamp = self.item.context.getAppConfigValue("message_primary_edited_date") as? Bool, useEditedTimestamp {
+        if let info = self.item.info {
+            switch info {
+            case .edited:
+                if let useEditedTimestamp = self.item.context.getAppConfigValue("message_primary_edited_date") as? Bool, useEditedTimestamp {
+                    self.iconNode.image = generateScaledImage(image: generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Time"), color: presentationData.theme.contextMenu.primaryColor), size: CGSize(width: 20.0, height: 20.0), opaque: false)
+                } else {
+                    self.iconNode.image = generateTintedImage(image: UIImage(bundleImageName: "Chat/Message/MenuEditIcon"), color: presentationData.theme.contextMenu.primaryColor)
+                }
+            case .sent:
                 self.iconNode.image = generateScaledImage(image: generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Time"), color: presentationData.theme.contextMenu.primaryColor), size: CGSize(width: 20.0, height: 20.0), opaque: false)
-            } else {
-                self.iconNode.image = generateTintedImage(image: UIImage(bundleImageName: "Chat/Message/MenuEditIcon"), color: presentationData.theme.contextMenu.primaryColor)
+            case .author:
+                self.iconNode.image = generateScaledImage(image: generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/User"), color: presentationData.theme.contextMenu.primaryColor), size: CGSize(width: 20.0, height: 20.0), opaque: false)
             }
         } else if self.item.message.id.peerId.namespace == Namespaces.Peer.CloudUser {
             self.iconNode.image = generateTintedImage(image: UIImage(bundleImageName: "Chat/Message/MenuReadIcon"), color: presentationData.theme.contextMenu.primaryColor)
@@ -3392,7 +3502,15 @@ private final class ChatReadReportContextItemNode: ASDisplayNode, ContextMenuCus
             }
         }
         
-        if !customEmojiFiles.isEmpty {
+        var isBubblelessInfoRow = false
+        switch item.info {
+        case .sent, .author:
+            // The bubble-free info rows offer no reaction tips.
+            isBubblelessInfoRow = true
+        case .edited, nil:
+            break
+        }
+        if !customEmojiFiles.isEmpty, !isBubblelessInfoRow {
             self.customEmojiPacksDisposable = (item.context.engine.stickers.resolveInlineStickers(fileIds: Array(customEmojiFiles))
             |> mapToSignal { customEmoji -> Signal<([StickerPackCollectionInfo], TelegramMediaFile?), NoError> in
                 var stickerPackSignals: [Signal<StickerPackCollectionInfo?, NoError>] = []
@@ -3461,7 +3579,7 @@ private final class ChatReadReportContextItemNode: ASDisplayNode, ContextMenuCus
             })
         }
         
-        if !self.item.isEdit {
+        if self.item.info == nil {
             item.context.account.viewTracker.updateReactionsForMessageIds(messageIds: [item.message.id], force: true)
         }
     }
@@ -3481,6 +3599,50 @@ private final class ChatReadReportContextItemNode: ASDisplayNode, ContextMenuCus
 
     private var validLayout: (calculatedWidth: CGFloat, size: CGSize)?
 
+    private func timestampText(_ timestamp: Int32, today: @escaping (String) -> String, yesterday: @escaping (String) -> String, date: @escaping (String) -> String) -> String {
+        return humanReadableStringForTimestamp(strings: self.presentationData.strings, dateTimeFormat: self.presentationData.dateTimeFormat, timestamp: timestamp, alwaysShowTime: true, allowYesterday: true, format: HumanReadableStringFormat(
+            dateFormatString: { value in
+                return PresentationStrings.FormattedString(string: date(value), ranges: [])
+            },
+            tomorrowFormatString: { value in
+                return PresentationStrings.FormattedString(string: today(value), ranges: [])
+            },
+            todayFormatString: { value in
+                return PresentationStrings.FormattedString(string: today(value), ranges: [])
+            },
+            yesterdayFormatString: { value in
+                return PresentationStrings.FormattedString(string: yesterday(value), ranges: [])
+            }
+        )).string
+    }
+    
+    private func sentTimestampText(_ timestamp: Int32) -> String {
+        let strings = self.presentationData.strings
+        return self.timestampText(timestamp, today: { strings.Chat_PrivateMessageSentTimestamp_TodayAt($0).string }, yesterday: { strings.Chat_PrivateMessageSentTimestamp_YesterdayAt($0).string }, date: { strings.Chat_PrivateMessageSentTimestamp_Date($0).string })
+    }
+    
+    /// The line of a row about the message itself, if this is one.
+    private func infoText() -> String? {
+        guard let info = self.item.info else {
+            return nil
+        }
+        switch info {
+        case .edited:
+            guard let editedTime = self.item.message.editedTime, editedTime != 0 else {
+                return nil
+            }
+            if let useEditedTimestamp = self.item.context.getAppConfigValue("message_primary_edited_date") as? Bool, useEditedTimestamp {
+                return self.sentTimestampText(self.item.message.timestamp)
+            }
+            let strings = self.presentationData.strings
+            return self.timestampText(editedTime, today: { strings.Chat_PrivateMessageEditTimestamp_TodayAt($0).string }, yesterday: { strings.Chat_PrivateMessageEditTimestamp_YesterdayAt($0).string }, date: { strings.Chat_PrivateMessageEditTimestamp_Date($0).string })
+        case .sent:
+            return self.sentTimestampText(self.item.message.timestamp)
+        case let .author(title):
+            return title
+        }
+    }
+    
     func updateStats(stats: MessageReadStats, transition: ContainedViewLayoutTransition) {
         if self.item.message.id.peerId.namespace == Namespaces.Peer.CloudUser {
             self.buttonNode.isUserInteractionEnabled = self.item.action != nil && stats.peers.isEmpty
@@ -3503,7 +3665,7 @@ private final class ChatReadReportContextItemNode: ASDisplayNode, ContextMenuCus
         let verticalInset: CGFloat
         let rightTextInset: CGFloat
         
-        if self.item.message.id.peerId.namespace == Namespaces.Peer.CloudUser {
+        if chatReadReportRowUsesCompactMetrics(isCloudUserChat: self.item.message.id.peerId.namespace == Namespaces.Peer.CloudUser, isBubblelessInfoRow: self.item.usesInfoRowMetrics) {
             verticalInset = 7.0
             rightTextInset = 8.0
         } else {
@@ -3529,41 +3691,8 @@ private final class ChatReadReportContextItemNode: ASDisplayNode, ContextMenuCus
             reactionCount = currentStats.reactionCount
             
             if currentStats.peers.isEmpty {
-                if self.item.isEdit, let editedTime = self.item.message.editedTime, editedTime != 0 {
-                    let dateText: String
-                    if let useEditedTimestamp = self.item.context.getAppConfigValue("message_primary_edited_date") as? Bool, useEditedTimestamp {
-                        dateText = humanReadableStringForTimestamp(strings: self.presentationData.strings, dateTimeFormat: self.presentationData.dateTimeFormat, timestamp: self.item.message.timestamp, alwaysShowTime: true, allowYesterday: true, format: HumanReadableStringFormat(
-                            dateFormatString: { value in
-                                return PresentationStrings.FormattedString(string: self.presentationData.strings.Chat_PrivateMessageSentTimestamp_Date(value).string, ranges: [])
-                            },
-                            tomorrowFormatString: { value in
-                                return PresentationStrings.FormattedString(string: self.presentationData.strings.Chat_PrivateMessageSentTimestamp_TodayAt(value).string, ranges: [])
-                            },
-                            todayFormatString: { value in
-                                return PresentationStrings.FormattedString(string: self.presentationData.strings.Chat_PrivateMessageSentTimestamp_TodayAt(value).string, ranges: [])
-                            },
-                            yesterdayFormatString: { value in
-                                return PresentationStrings.FormattedString(string: self.presentationData.strings.Chat_PrivateMessageSentTimestamp_YesterdayAt(value).string, ranges: [])
-                            }
-                        )).string
-                    } else {
-                        dateText = humanReadableStringForTimestamp(strings: self.presentationData.strings, dateTimeFormat: self.presentationData.dateTimeFormat, timestamp: editedTime, alwaysShowTime: true, allowYesterday: true, format: HumanReadableStringFormat(
-                            dateFormatString: { value in
-                                return PresentationStrings.FormattedString(string: self.presentationData.strings.Chat_PrivateMessageEditTimestamp_Date(value).string, ranges: [])
-                            },
-                            tomorrowFormatString: { value in
-                                return PresentationStrings.FormattedString(string: self.presentationData.strings.Chat_PrivateMessageEditTimestamp_TodayAt(value).string, ranges: [])
-                            },
-                            todayFormatString: { value in
-                                return PresentationStrings.FormattedString(string: self.presentationData.strings.Chat_PrivateMessageEditTimestamp_TodayAt(value).string, ranges: [])
-                            },
-                            yesterdayFormatString: { value in
-                                return PresentationStrings.FormattedString(string: self.presentationData.strings.Chat_PrivateMessageEditTimestamp_YesterdayAt(value).string, ranges: [])
-                            }
-                        )).string
-                    }
-                    
-                    self.textNode.attributedText = NSAttributedString(string: dateText, font: Font.regular(floor(self.presentationData.listsFontSize.baseDisplaySize * 0.8)), textColor: self.presentationData.theme.contextMenu.primaryColor)
+                if let infoText = self.infoText() {
+                    self.textNode.attributedText = NSAttributedString(string: infoText, font: Font.regular(floor(self.presentationData.listsFontSize.baseDisplaySize * 0.8)), textColor: self.presentationData.theme.contextMenu.primaryColor)
                 } else if self.item.message.id.peerId.namespace == Namespaces.Peer.CloudUser {
                     let text = NSAttributedString(string: self.presentationData.strings.Chat_ContextMenuReadDate_ReadAvailablePrefix, font: Font.regular(floor(self.presentationData.listsFontSize.baseDisplaySize * 0.8)), textColor: self.presentationData.theme.contextMenu.primaryColor)
                     if self.textNode.attributedText != text {
@@ -3732,7 +3861,7 @@ private final class ChatReadReportContextItemNode: ASDisplayNode, ContextMenuCus
 
             if !iconSize.width.isZero {
                 var iconFrame = CGRect(origin: CGPoint(x: sideInset + 6.0, y: floor((size.height - iconSize.height) / 2.0)), size: iconSize)
-                if self.item.isEdit {
+                if self.item.info != nil {
                     iconFrame.origin.x += 1.0
                 }
                 transition.updateFrameAdditive(node: self.iconNode, frame: iconFrame)
@@ -3742,7 +3871,7 @@ private final class ChatReadReportContextItemNode: ASDisplayNode, ContextMenuCus
             let placeholderAvatarsContent: AnimatedAvatarSetContext.Content
 
             var avatarsPeers: [EnginePeer] = []
-            if self.item.message.id.peerId.namespace == Namespaces.Peer.CloudUser || self.item.isEdit {
+            if self.item.message.id.peerId.namespace == Namespaces.Peer.CloudUser || self.item.info != nil {
             } else if let recentPeers = self.item.message.reactionsAttribute?.recentPeers, !recentPeers.isEmpty {
                 for recentPeer in recentPeers {
                     if let peer = self.item.message.peers[recentPeer.peerId] {
@@ -3827,7 +3956,7 @@ private final class ChatReadReportContextItemNode: ASDisplayNode, ContextMenuCus
         if self.item.action == nil {
             return false
         }
-        if self.item.isEdit {
+        if self.item.info != nil {
             return false
         }
         if self.item.message.id.peerId.namespace == Namespaces.Peer.CloudUser {

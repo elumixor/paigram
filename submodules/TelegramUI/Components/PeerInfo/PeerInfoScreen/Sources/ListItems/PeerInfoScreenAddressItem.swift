@@ -193,20 +193,20 @@ private final class PeerInfoScreenAddressItemNode: PeerInfoScreenItemNode {
             itemNode = current
             addressItem.updateNode(async: { $0() }, node: {
                 return itemNode
-            }, params: params, previousItem: addressItem, nextItem: addressItem, animation: .None, completion: { (layout, apply) in
+            }, params: params, neighbors: ListViewItemNeighbors(previous: addressItem.neighborDescriptor, next: addressItem.neighborDescriptor),animation: .None, completion: { (layout, apply) in
                 let nodeFrame = CGRect(origin: CGPoint(), size: CGSize(width: width, height: layout.size.height))
                 
                 itemNode.contentSize = layout.contentSize
                 itemNode.insets = layout.insets
                 itemNode.frame = nodeFrame
                 
-                apply(ListViewItemApply(isOnScreen: true))
+                apply(ListViewItemApply())
             })
         } else {
             var itemNodeValue: ListViewItemNode?
-            addressItem.nodeConfiguredForParams(async: { $0() }, params: params, synchronousLoads: false, previousItem: nil, nextItem: nil, completion: { node, apply in
+            addressItem.nodeConfiguredForParams(async: { $0() }, params: params, synchronousLoads: false, neighbors: .none, completion: { node, apply in
                 itemNodeValue = node
-                apply().1(ListViewItemApply(isOnScreen: true))
+                apply().1(ListViewItemApply())
             })
             itemNode = itemNodeValue as! ItemListAddressItemNode
             itemNode.isUserInteractionEnabled = false
@@ -231,6 +231,27 @@ private final class PeerInfoScreenAddressItemNode: PeerInfoScreenItemNode {
         
         self.activateArea.frame = CGRect(origin: CGPoint(), size: CGSize(width: width, height: height))
         self.activateArea.accessibilityLabel = item.label
+        self.activateArea.accessibilityValue = item.text
+        // Tap = the item's action; the long-press menu is a custom action while the gesture is on.
+        if let action = item.action {
+            self.activateArea.applyPeerInfoRowAction(action)
+        } else {
+            self.activateArea.accessibilityTraits = .staticText
+            self.activateArea.activate = nil
+        }
+        if item.contextAction != nil {
+            if self.activateArea.view.accessibilityCustomActions?.first?.name != presentationData.strings.Common_More {
+                self.activateArea.view.accessibilityCustomActions = [UIAccessibilityCustomAction(name: presentationData.strings.Common_More, actionHandler: { [weak self] _ in
+                    guard let self, let contextAction = self.item?.contextAction else {
+                        return false
+                    }
+                    contextAction(self.contextSourceNode, nil, nil)
+                    return true
+                })]
+            }
+        } else {
+            self.activateArea.view.accessibilityCustomActions = nil
+        }
         
         let contentSize = CGSize(width: width, height: height)
         self.containerNode.frame = CGRect(origin: CGPoint(), size: contentSize)

@@ -126,8 +126,80 @@ public final class ListItemComponentAdaptor: Component {
         return true
     }
     
+    /// The row's tap target. For VoiceOver it is the row: it reads what the hosted item's own element says (the item
+    /// node is hidden while the button exists, its element would activate nothing).
+    private final class ActionButton: HighlightTrackingButton {
+        weak var itemNode: ASDisplayNode?
+        
+        private func itemElement() -> NSObject? {
+            guard let itemNode = self.itemNode else {
+                return nil
+            }
+            func find(_ node: ASDisplayNode) -> ASDisplayNode? {
+                if node.isHidden || node.alpha < 0.01 {
+                    return nil
+                }
+                if node.isAccessibilityElement, let label = node.accessibilityLabel, !label.isEmpty {
+                    return node
+                }
+                for subnode in node.subnodes ?? [] {
+                    if let result = find(subnode) {
+                        return result
+                    }
+                }
+                return nil
+            }
+            return find(itemNode)
+        }
+        
+        override var isAccessibilityElement: Bool {
+            get {
+                return self.itemElement() != nil
+            } set(value) {
+            }
+        }
+        
+        override var accessibilityLabel: String? {
+            get {
+                return self.itemElement()?.accessibilityLabel
+            } set(value) {
+            }
+        }
+        
+        override var accessibilityValue: String? {
+            get {
+                return self.itemElement()?.accessibilityValue
+            } set(value) {
+            }
+        }
+        
+        override var accessibilityCustomActions: [UIAccessibilityCustomAction]? {
+            get {
+                // The item's own actions (swipe options, "More"), set on its element's view.
+                if let node = self.itemElement() as? ASDisplayNode, node.isNodeLoaded {
+                    return node.view.accessibilityCustomActions
+                }
+                return nil
+            } set(value) {
+            }
+        }
+        
+        override var accessibilityTraits: UIAccessibilityTraits {
+            get {
+                var traits = self.itemElement()?.accessibilityTraits ?? []
+                traits.remove(.staticText)
+                traits.insert(.button)
+                if !self.isEnabled {
+                    traits.insert(.notEnabled)
+                }
+                return traits
+            } set(value) {
+            }
+        }
+    }
+    
     public final class View: UIView, ComponentTaggedView, ListSectionComponent.ChildView {
-        private var button: HighlightTrackingButton?
+        private var button: ActionButton?
         private var tapGestureRecognizer: HighlightTrackingTapGestureRecognizer?
         public var itemNode: ListViewItemNode?
         
@@ -165,11 +237,11 @@ public final class ListItemComponentAdaptor: Component {
         private func updateActionControls(component: ListItemComponentAdaptor, itemNode: ListViewItemNode, size: CGSize, transition: ComponentTransition) {
             itemNode.isUserInteractionEnabled = component.action == nil || component.actionMode == .gesture
             if component.action != nil && component.actionMode == .button {
-                let button: HighlightTrackingButton
+                let button: ActionButton
                 if let current = self.button {
                     button = current
                 } else {
-                    button = HighlightTrackingButton()
+                    button = ActionButton()
                     self.button = button
                     self.addSubview(button)
                     button.addTarget(self, action: #selector(self.pressed), for: .touchUpInside)
@@ -181,10 +253,13 @@ public final class ListItemComponentAdaptor: Component {
                     }
                 }
 
+                button.itemNode = itemNode
+                itemNode.view.accessibilityElementsHidden = true
                 transition.setFrame(view: button, frame: CGRect(origin: CGPoint(), size: size))
             } else if let button = self.button {
                 self.button = nil
                 button.removeFromSuperview()
+                itemNode.view.accessibilityElementsHidden = false
             }
 
             if component.action != nil && component.actionMode == .gesture {
@@ -234,8 +309,7 @@ public final class ListItemComponentAdaptor: Component {
                     async: { f in f() },
                     node: { return itemNode },
                     params: component.params,
-                    previousItem: nil,
-                    nextItem: nil,
+                    neighbors: .none,
                     animation: mappedAnimation,
                     completion: { [weak itemNode] layout, apply in
                         resultSize = layout.size
@@ -250,7 +324,7 @@ public final class ListItemComponentAdaptor: Component {
                         itemNode.insets = layout.insets
                         itemNode.frame = nodeFrame
                         
-                        apply(ListViewItemApply(isOnScreen: true))
+                        apply(ListViewItemApply())
                     }
                 )
                 
@@ -271,11 +345,10 @@ public final class ListItemComponentAdaptor: Component {
                     async: { f in f() },
                     params: component.params,
                     synchronousLoads: true,
-                    previousItem: nil,
-                    nextItem: nil,
+                    neighbors: .none,
                     completion: { result, apply in
                         itemNode = result
-                        apply().1(ListViewItemApply(isOnScreen: true))
+                        apply().1(ListViewItemApply())
                     }
                 )
                 if let itemNode {

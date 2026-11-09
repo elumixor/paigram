@@ -31,6 +31,7 @@ public enum MessageContentKindKey {
     case story
     case giveaway
     case paidContent
+    case widget
 }
 
 public enum MessageContentKind: Equatable {
@@ -58,6 +59,7 @@ public enum MessageContentKind: Equatable {
     case invoice(String)
     case story
     case giveaway
+    case widget
     
     public func isSemanticallyEqual(to other: MessageContentKind) -> Bool {
         switch self {
@@ -205,6 +207,12 @@ public enum MessageContentKind: Equatable {
             } else {
                 return false
             }
+        case .widget:
+            if case .widget = other {
+                return true
+            } else {
+                return false
+            }
         }
     }
     
@@ -258,6 +266,8 @@ public enum MessageContentKind: Equatable {
             return .story
         case .giveaway:
             return .giveaway
+        case .widget:
+            return .widget
         }
     }
 }
@@ -273,28 +283,9 @@ public func messageTextWithAttributes(message: EngineMessage) -> NSAttributedStr
         }
     }
     if let entities = entities?.entities {
-        let updatedString = NSMutableAttributedString(attributedString: attributedText)
-        
-        for entity in entities.sorted(by: { $0.range.lowerBound > $1.range.lowerBound }) {
-            guard case let .CustomEmoji(_, fileId) = entity.type else {
-                continue
-            }
-            
-            let range = NSRange(location: entity.range.lowerBound, length: entity.range.upperBound - entity.range.lowerBound)
-            if range.upperBound >= updatedString.length {
-                continue
-            }
-            
-            let currentDict = updatedString.attributes(at: range.lowerBound, effectiveRange: nil)
-            var updatedAttributes: [NSAttributedString.Key: Any] = currentDict
-            updatedAttributes[ChatTextInputAttributes.customEmoji] = ChatTextInputTextCustomEmojiAttribute(interactivelySelectedFromPackId: nil, fileId: fileId, file: message.associatedMedia[EngineMedia.Id(namespace: Namespaces.Media.CloudFile, id: fileId)] as? TelegramMediaFile)
-            
-            let insertString = NSAttributedString(string: updatedString.attributedSubstring(from: range).string, attributes: updatedAttributes)
-            updatedString.replaceCharacters(in: range, with: insertString)
-        }
-        attributedText = updatedString
+        attributedText = stringWithAppliedCustomEmojiEntities(attributedText, entities: entities, message: message._asMessage())
     }
-    
+
     return attributedText
 }
 
@@ -314,7 +305,7 @@ public func messageContentKind(contentSettings: ContentSettings, message: Engine
     }
     for attribute in message.attributes {
         if let attribute = attribute as? RichTextMessageAttribute {
-            return .text(attribute.instantPage.previewAttributedText(strings: strings))
+            return .text(attribute.instantPage.previewAttributedText(strings: strings, dateTimeFormat: dateTimeFormat, associatedMedia: { message.associatedMedia[$0].map(EngineMedia.init) }))
         }
     }
     return .text(messageTextWithAttributes(message: message))
@@ -414,6 +405,13 @@ public func mediaContentKind(_ media: EngineMedia, message: EngineMessage? = nil
         return .story
     case .giveaway, .giveawayResults:
         return .giveaway
+    case .widget:
+        // The caption is a widget's preview text; without one, the "Widget" stub (widget-sandbox v0.1.0, integration.md
+        // "Caption and preview").
+        if let message, !message.text.isEmpty {
+            return .text(messageTextWithAttributes(message: message))
+        }
+        return .widget
     case let .webpage(webpage):
         if let message, message.text.isEmpty, case let .Loaded(content) = webpage.content {
             return .text(NSAttributedString(string: content.displayUrl))
@@ -502,11 +500,19 @@ public func stringForMediaKind(_ kind: MessageContentKind, strings: Presentation
         return (NSAttributedString(string: strings.Message_Story), true)
     case .giveaway:
         return (NSAttributedString(string: strings.Message_Giveaway), true)
+    case .widget:
+        return (NSAttributedString(string: strings.Message_Widget), true)
     }
 }
 
 public func descriptionStringForMessage(contentSettings: ContentSettings, message: EngineMessage, strings: PresentationStrings, nameDisplayOrder: PresentationPersonNameOrder, dateTimeFormat: PresentationDateTimeFormat, accountPeerId: EnginePeer.Id) -> (NSAttributedString, Bool, Bool) {
     let contentKind = messageContentKind(contentSettings: contentSettings, message: message, strings: strings, nameDisplayOrder: nameDisplayOrder, dateTimeFormat: dateTimeFormat, accountPeerId: accountPeerId)
+    if message.richText != nil {
+        let result = stringForMediaKind(contentKind, strings: strings)
+        if contentKind.key != .text || result.0.length != 0 {
+            return (result.0, result.1, false)
+        }
+    }
     if !message.text.isEmpty && ![.expiredImage, .expiredVideo, .poll].contains(contentKind.key) {
         return (foldLineBreaks(messageTextWithAttributes(message: message)), false, true)
     }

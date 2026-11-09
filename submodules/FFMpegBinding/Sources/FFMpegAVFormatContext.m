@@ -64,8 +64,15 @@ static int get_stream_rotation(const AVStream *stream) {
 }
 
 - (bool)openInputWithDirectFilePath:(NSString * _Nullable)directFilePath {
+    return [self openInputWithDirectFilePath:directFilePath ignoreEditList:false];
+}
+
+- (bool)openInputWithDirectFilePath:(NSString * _Nullable)directFilePath ignoreEditList:(bool)ignoreEditList {
     AVDictionary *options = nil;
     av_dict_set(&options, "usetoc", "1", 0);
+    if (ignoreEditList) {
+        av_dict_set(&options, "ignore_editlist", "1", 0);
+    }
     
     const char *url = "file";
     if (directFilePath) {
@@ -84,6 +91,15 @@ static int get_stream_rotation(const AVStream *stream) {
 - (bool)findStreamInfo {
     int result = avformat_find_stream_info(_impl, nil);
     return result >= 0;
+}
+
+- (void)discardStreamsNotOfType:(FFMpegAVFormatStreamType)type {
+    enum AVMediaType mediaType = type == FFMpegAVFormatStreamTypeAudio ? AVMEDIA_TYPE_AUDIO : AVMEDIA_TYPE_VIDEO;
+    for (unsigned int i = 0; i < _impl->nb_streams; i++) {
+        if (_impl->streams[i]->codecpar->codec_type != mediaType) {
+            _impl->streams[i]->discard = AVDISCARD_ALL;
+        }
+    }
 }
 
 - (void)seekFrameForStreamIndex:(int32_t)streamIndex pts:(int64_t)pts positionOnKeyframe:(bool)positionOnKeyframe {

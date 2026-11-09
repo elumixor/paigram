@@ -4,7 +4,7 @@ import Postbox
 import SwiftSignalKit
 import TelegramCore
 import ImageIO
-import MobileCoreServices
+import UniformTypeIdentifiers
 import Display
 import AVFoundation
 import WebPBinding
@@ -21,6 +21,7 @@ import GradientBackground
 import LegacyImpl
 import UniversalMediaPlayer
 import RangeSet
+import PassRenderer
 
 public func fetchCachedResourceRepresentation(account: Account, resource: MediaResource, representation: CachedMediaResourceRepresentation) -> Signal<CachedMediaResourceRepresentationResult, NoError> {
     if let representation = representation as? CachedStickerAJpegRepresentation {
@@ -127,22 +128,22 @@ public func fetchCachedResourceRepresentation(account: Account, resource: MediaR
             return fetchCachedBlurredWallpaperRepresentation(resource: resource, resourceData: data, representation: representation)
         }
     } else if let representation = representation as? CachedAlbumArtworkRepresentation {
-        return account.postbox.mediaBox.resourceData(resource, option: .complete(waitUntilFetchStatus: false))
+        return TelegramEngine(account: account).resources.data(resource: EngineMediaResource(resource), waitUntilFetchStatus: false)
         |> mapToSignal { data -> Signal<CachedMediaResourceRepresentationResult, NoError> in
-            if data.complete, let fileData = try? Data(contentsOf: URL(fileURLWithPath: data.path)) {
+            if data.isComplete, let fileData = try? Data(contentsOf: URL(fileURLWithPath: data.path)) {
                 return fetchCachedAlbumArtworkRepresentation(resource: resource, data: fileData, representation: representation)
                 |> `catch` { _ -> Signal<CachedMediaResourceRepresentationResult, NoError> in
                     return .complete()
                 }
             } else if let size = resource.size {
-                return account.postbox.mediaBox.resourceData(resource, size: size, in: 0 ..< min(size, 256 * 1024))
+                return TelegramEngine(account: account).resources.rangeData(resource: EngineMediaResource(resource), size: size, range: 0 ..< min(size, 256 * 1024))
                 |> mapToSignal { result -> Signal<CachedMediaResourceRepresentationResult, NoError> in
                     let (data, _) = result
                     return fetchCachedAlbumArtworkRepresentation(resource: resource, data: data, representation: representation)
                     |> `catch` { error -> Signal<CachedMediaResourceRepresentationResult, NoError> in
                         switch error {
                             case let .moreDataNeeded(targetSize):
-                                return account.postbox.mediaBox.resourceData(resource, size: size, in: 0 ..< min(size, Int64(targetSize)))
+                                return TelegramEngine(account: account).resources.rangeData(resource: EngineMediaResource(resource), size: size, range: 0 ..< min(size, Int64(targetSize)))
                                 |> mapToSignal { result ->
                                     Signal<CachedMediaResourceRepresentationResult, NoError> in
                                     let (data, _) = result
@@ -200,13 +201,52 @@ public func fetchCachedResourceRepresentation(account: Account, resource: MediaR
             }
             return fetchPreparedSvgRepresentation(resource: resource, resourceData: data, representation: representation)
         }
+    } else if let representation = representation as? CachedPassImageRepresentation {
+        return account.postbox.mediaBox.resourceData(resource, option: .complete(waitUntilFetchStatus: false))
+        |> mapToSignal { data -> Signal<CachedMediaResourceRepresentationResult, NoError> in
+            if !data.complete {
+                return .complete()
+            }
+            return fetchPassImageRepresentation(resourceData: data, representation: representation)
+        }
     }
     return .never()
 }
 
+private func passTransitGlyph(_ type: PassTransitType) -> CGImage? {
+    let name: String
+    switch type {
+    case .air:
+        name = "airplane"
+    case .train:
+        name = "tram.fill"
+    case .bus:
+        name = "bus.fill"
+    case .boat:
+        name = "ferry.fill"
+    case .generic:
+        name = "arrow.right"
+    }
+    return UIImage(systemName: name, withConfiguration: UIImage.SymbolConfiguration(pointSize: 56.0, weight: .regular))?.cgImage
+}
+
+private let passRenderingQueue = Queue(name: "org.telegram.passRendering", qos: .utility)
+
+private func fetchPassImageRepresentation(resourceData: MediaResourceData, representation: CachedPassImageRepresentation) -> Signal<CachedMediaResourceRepresentationResult, NoError> {
+    return Signal({ subscriber in
+        let data = renderPassPNG(path: resourceData.path, options: PassRenderOptions(language: representation.language, scale: representation.scale, transitGlyph: passTransitGlyph)) ?? Data()
+        let path = NSTemporaryDirectory() + "\(Int64.random(in: Int64.min ... Int64.max))"
+        if let _ = try? data.write(to: URL(fileURLWithPath: path)) {
+            subscriber.putNext(.temporaryPath(path))
+        }
+        subscriber.putCompletion()
+        return EmptyDisposable
+    }) |> runOn(passRenderingQueue)
+}
+
 private func videoFirstFrameData(account: Account, resource: MediaResource, chunkSize: Int64) -> Signal<CachedMediaResourceRepresentationResult, NoError> {
     if let size = resource.size {
-        return account.postbox.mediaBox.resourceData(resource, size: size, in: 0 ..< min(size, chunkSize))
+        return TelegramEngine(account: account).resources.rangeData(resource: EngineMediaResource(resource), size: size, range: 0 ..< min(size, chunkSize))
         |> mapToSignal { _ -> Signal<CachedMediaResourceRepresentationResult, NoError> in
             return account.postbox.mediaBox.resourceData(resource, option: .incremental(waitUntilFetchStatus: false), attemptSynchronously: false)
                 |> mapToSignal { data -> Signal<CachedMediaResourceRepresentationResult, NoError> in
@@ -263,7 +303,7 @@ private func fetchCachedStickerAJpegRepresentation(resource: MediaResource, reso
                     context.fill(CGRect(origin: CGPoint(), size: size))
                 }, scale: 1.0)
                 
-                if let alphaImage = alphaImage, let colorDestination = CGImageDestinationCreateWithData(colorData as CFMutableData, kUTTypeJPEG, 1, nil), let alphaDestination = CGImageDestinationCreateWithData(alphaData as CFMutableData, kUTTypeJPEG, 1, nil) {
+                if let alphaImage = alphaImage, let colorDestination = CGImageDestinationCreateWithData(colorData as CFMutableData, UTType.jpeg.identifier as CFString, 1, nil), let alphaDestination = CGImageDestinationCreateWithData(alphaData as CFMutableData, UTType.jpeg.identifier as CFString, 1, nil) {
                     CGImageDestinationSetProperties(colorDestination, NSDictionary() as CFDictionary)
                     CGImageDestinationSetProperties(alphaDestination, NSDictionary() as CFDictionary)
                     
@@ -328,7 +368,7 @@ private func fetchCachedScaledImageRepresentation(resource: MediaResource, resou
                     drawImage(context: context, image: image.cgImage!, orientation: image.imageOrientation, in: CGRect(origin: CGPoint(), size: size))
                 }, scale: 1.0)!
                 
-                if let colorDestination = CGImageDestinationCreateWithURL(url as CFURL, kUTTypeJPEG, 1, nil) {
+                if let colorDestination = CGImageDestinationCreateWithURL(url as CFURL, UTType.jpeg.identifier as CFString, 1, nil) {
                     CGImageDestinationSetProperties(colorDestination, NSDictionary() as CFDictionary)
                     
                     let colorQuality: Float = 0.5
@@ -388,7 +428,7 @@ private func fetchCachedVideoFirstFrameRepresentation(resource: MediaResource, r
                 let path = NSTemporaryDirectory() + "\(Int64.random(in: Int64.min ... Int64.max))"
                 let url = URL(fileURLWithPath: path)
                 
-                if let colorDestination = CGImageDestinationCreateWithURL(url as CFURL, kUTTypeJPEG, 1, nil) {
+                if let colorDestination = CGImageDestinationCreateWithURL(url as CFURL, UTType.jpeg.identifier as CFString, 1, nil) {
                     CGImageDestinationSetProperties(colorDestination, NSDictionary() as CFDictionary)
                     
                     let colorQuality: Float = 0.6
@@ -414,7 +454,7 @@ private func fetchCachedVideoFirstFrameRepresentation(resource: MediaResource, r
 }
 
 private func fetchCachedScaledVideoFirstFrameRepresentation(account: Account, resource: MediaResource, resourceData: MediaResourceData, representation: CachedScaledVideoFirstFrameRepresentation) -> Signal<CachedMediaResourceRepresentationResult, NoError> {
-    return account.postbox.mediaBox.cachedResourceRepresentation(resource, representation: CachedVideoFirstFrameRepresentation(), complete: true)
+    return TelegramEngine(account: account).resources.cachedRepresentation(resource: EngineMediaResource(resource), representation: CachedVideoFirstFrameRepresentation(), complete: true)
     |> mapToSignal { firstFrame -> Signal<CachedMediaResourceRepresentationResult, NoError> in
             return Signal({ subscriber in
                 if let data = try? Data(contentsOf: URL(fileURLWithPath: firstFrame.path), options: [.mappedIfSafe]) {
@@ -429,7 +469,7 @@ private func fetchCachedScaledVideoFirstFrameRepresentation(account: Account, re
                             context.draw(image.cgImage!, in: CGRect(origin: CGPoint(), size: size))
                         }, scale: 1.0)!
                         
-                        if let colorDestination = CGImageDestinationCreateWithURL(url as CFURL, kUTTypeJPEG, 1, nil) {
+                        if let colorDestination = CGImageDestinationCreateWithURL(url as CFURL, UTType.jpeg.identifier as CFString, 1, nil) {
                             CGImageDestinationSetProperties(colorDestination, NSDictionary() as CFDictionary)
                             
                             let colorQuality: Float = 0.5
@@ -457,7 +497,7 @@ private func fetchCachedBlurredWallpaperRepresentation(resource: MediaResource, 
                 let path = NSTemporaryDirectory() + "\(Int64.random(in: Int64.min ... Int64.max))"
                 let url = URL(fileURLWithPath: path)
                 
-                if let colorImage = blurredImage(image, radius: 30.0), let colorDestination = CGImageDestinationCreateWithURL(url as CFURL, kUTTypeJPEG, 1, nil) {
+                if let colorImage = blurredImage(image, radius: 30.0), let colorDestination = CGImageDestinationCreateWithURL(url as CFURL, UTType.jpeg.identifier as CFString, 1, nil) {
                     CGImageDestinationSetProperties(colorDestination, NSDictionary() as CFDictionary)
 
                     let colorQuality: Float = 0.5
@@ -522,7 +562,7 @@ private func fetchCachedAlbumArtworkRepresentation(resource: MediaResource, data
                         drawImage(context: context, image: image.cgImage!, orientation: image.imageOrientation, in: CGRect(origin: CGPoint(), size: size))
                     })!
                     
-                    if let colorDestination = CGImageDestinationCreateWithURL(url as CFURL, kUTTypeJPEG, 1, nil) {
+                    if let colorDestination = CGImageDestinationCreateWithURL(url as CFURL, UTType.jpeg.identifier as CFString, 1, nil) {
                         CGImageDestinationSetProperties(colorDestination, NSDictionary() as CFDictionary)
                         
                         let colorQuality: Float = 0.5
@@ -549,7 +589,7 @@ private func fetchCachedAlbumArtworkRepresentation(resource: MediaResource, data
 private func fetchAnimatedStickerFirstFrameRepresentation(resource: MediaResource, resourceData: MediaResourceData, representation: CachedAnimatedStickerFirstFrameRepresentation) -> Signal<CachedMediaResourceRepresentationResult, NoError> {
     return Signal({ subscriber in
         if let data = try? Data(contentsOf: URL(fileURLWithPath: resourceData.path), options: [.mappedIfSafe]) {
-            return fetchCompressedLottieFirstFrameAJpeg(data: data, size: CGSize(width: CGFloat(representation.width), height: CGFloat(representation.height)), fitzModifier: representation.fitzModifier, cacheKey: "\(resource.id.stringRepresentation)-\(representation.uniqueId)").start(next: { file in
+            return fetchCompressedLottieFirstFrameAJpeg(data: data, size: CGSize(width: CGFloat(representation.width), height: CGFloat(representation.height)), fitzModifier: representation.fitzModifier).start(next: { file in
                 subscriber.putNext(.tempFile(file))
                 subscriber.putCompletion()
             })
@@ -563,7 +603,7 @@ private func fetchAnimatedStickerFirstFrameRepresentation(resource: MediaResourc
 private func fetchAnimatedStickerRepresentation(resource: MediaResource, resourceData: MediaResourceData, representation: CachedAnimatedStickerRepresentation) -> Signal<CachedMediaResourceRepresentationResult, NoError> {
     return Signal({ subscriber in
         if let data = try? Data(contentsOf: URL(fileURLWithPath: resourceData.path), options: [.mappedIfSafe]) {
-            return cacheAnimatedStickerFrames(data: data, size: CGSize(width: CGFloat(representation.width), height: CGFloat(representation.height)), fitzModifier: representation.fitzModifier, cacheKey: "\(resource.id.stringRepresentation)-\(representation.uniqueId)").start(next: { value in
+            return cacheAnimatedStickerFrames(data: data, size: CGSize(width: CGFloat(representation.width), height: CGFloat(representation.height)), fitzModifier: representation.fitzModifier).start(next: { value in
                 subscriber.putNext(value)
             }, completed: {
                 subscriber.putCompletion()

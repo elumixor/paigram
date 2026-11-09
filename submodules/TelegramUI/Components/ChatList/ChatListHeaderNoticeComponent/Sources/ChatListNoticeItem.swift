@@ -16,6 +16,10 @@ import AvatarNode
 import GlobalControlPanelsContext
 
 class ChatListNoticeItem: ListViewItem {
+    var neighborDescriptor: AnyEquatable {
+        return AnyEquatable.noNeighborInfluence
+    }
+
     enum Action {
         case activate
         case hide
@@ -44,7 +48,7 @@ class ChatListNoticeItem: ListViewItem {
         self.action(.activate)
     }
     
-    func nodeConfiguredForParams(async: @escaping (@escaping () -> Void) -> Void, params: ListViewItemLayoutParams, synchronousLoads: Bool, previousItem: ListViewItem?, nextItem: ListViewItem?, completion: @escaping (ListViewItemNode, @escaping () -> (Signal<Void, NoError>?, (ListViewItemApply) -> Void)) -> Void) {
+    func nodeConfiguredForParams(async: @escaping (@escaping () -> Void) -> Void, params: ListViewItemLayoutParams, synchronousLoads: Bool, neighbors: ListViewItemNeighbors, completion: @escaping (ListViewItemNode, @escaping () -> (Signal<Void, NoError>?, (ListViewItemApply) -> Void)) -> Void) {
         async {
             let node = ChatListNoticeItemNode()
             
@@ -63,14 +67,14 @@ class ChatListNoticeItem: ListViewItem {
         }
     }
     
-    func updateNode(async: @escaping (@escaping () -> Void) -> Void, node: @escaping () -> ListViewItemNode, params: ListViewItemLayoutParams, previousItem: ListViewItem?, nextItem: ListViewItem?, animation: ListViewItemUpdateAnimation, completion: @escaping (ListViewItemNodeLayout, @escaping (ListViewItemApply) -> Void) -> Void) {
+    func updateNode(async: @escaping (@escaping () -> Void) -> Void, node: @escaping () -> ListViewItemNode, params: ListViewItemLayoutParams, neighbors: ListViewItemNeighbors, animation: ListViewItemUpdateAnimation, completion: @escaping (ListViewItemNodeLayout, @escaping (ListViewItemApply) -> Void) -> Void) {
         Queue.mainQueue().async {
             assert(node() is ChatListNoticeItemNode)
             if let nodeValue = node() as? ChatListNoticeItemNode {
                 
                 let layout = nodeValue.asyncLayout()
                 async {
-                    let (nodeLayout, apply) = layout(self, params, nextItem == nil)
+                    let (nodeLayout, apply) = layout(self, params, neighbors.next == nil)
                     Queue.mainQueue().async {
                         completion(nodeLayout, { _ in
                             apply()
@@ -115,6 +119,8 @@ final class ChatListNoticeItemNode: ItemListRevealOptionsItemNode {
     
     private var item: ChatListNoticeItem?
     
+    private var accessibilityBodyElement: ChatListNoticeBodyAccessibilityElement?
+    
     override var apparentHeight: CGFloat {
         didSet {
             self.contentContainer.frame = CGRect(origin: CGPoint(), size: CGSize(width: self.bounds.width, height: self.apparentHeight))
@@ -142,6 +148,52 @@ final class ChatListNoticeItemNode: ItemListRevealOptionsItemNode {
         self.addSubnode(self.contentContainer)
     }
     
+    /// The panel for VoiceOver, in reading order: its text as one button (the tap on the panel), then the close
+    /// button or the two choice buttons. The panel's own nodes are not elements.
+    func accessibilityElements(container: UIView) -> [Any] {
+        guard let item = self.item else {
+            return []
+        }
+        var result: [Any] = []
+        
+        let title = noticeAccessibilityText(self.titleNode.textNode.cachedLayout?.attributedString)
+        let text = noticeAccessibilityText(self.textNode.textNode.cachedLayout?.attributedString)
+        if !title.isEmpty || !text.isEmpty {
+            let element: ChatListNoticeBodyAccessibilityElement
+            if let current = self.accessibilityBodyElement, current.accessibilityContainer as? UIView === container {
+                element = current
+            } else {
+                element = ChatListNoticeBodyAccessibilityElement(accessibilityContainer: container)
+                self.accessibilityBodyElement = element
+            }
+            element.accessibilityLabel = title
+            element.accessibilityValue = text
+            element.accessibilityTraits = .button
+            element.activate = { [weak self] in
+                self?.item?.action(.activate)
+            }
+            let bodyFrame = self.titleNode.textNode.frame.union(self.textNode.textNode.frame)
+            element.accessibilityFrameInContainerSpace = self.contentContainer.view.convert(bodyFrame, to: container)
+            result.append(element)
+        }
+        
+        if let closeButton = self.closeButton, !closeButton.isHidden {
+            closeButton.view.isAccessibilityElement = true
+            closeButton.view.accessibilityLabel = item.strings.Common_Close
+            closeButton.view.accessibilityTraits = .button
+            result.append(closeButton.view)
+        }
+        for (button, text) in [(self.okButton, self.okButtonText), (self.cancelButton, self.cancelButtonText)] {
+            if let button, !button.isHidden {
+                button.view.isAccessibilityElement = true
+                button.view.accessibilityLabel = text?.cachedLayout?.attributedString?.string
+                button.view.accessibilityTraits = .button
+                result.append(button.view)
+            }
+        }
+        return result
+    }
+    
     @objc private func closePressed() {
         guard let item = self.item else {
             return
@@ -149,9 +201,9 @@ final class ChatListNoticeItemNode: ItemListRevealOptionsItemNode {
         item.action(.hide)
     }
     
-    override func layoutForParams(_ params: ListViewItemLayoutParams, item: ListViewItem, previousItem: ListViewItem?, nextItem: ListViewItem?) {
+    override func layoutForParams(_ params: ListViewItemLayoutParams, item: ListViewItem, neighbors: ListViewItemNeighbors) {
         let layout = self.asyncLayout()
-        let (_, apply) = layout(item as! ChatListNoticeItem, params, nextItem == nil)
+        let (_, apply) = layout(item as! ChatListNoticeItem, params, neighbors.next == nil)
         apply()
     }
     
@@ -164,7 +216,7 @@ final class ChatListNoticeItemNode: ItemListRevealOptionsItemNode {
         let makeOkButtonTextLayout = TextNode.asyncLayout(self.okButtonText)
         let makeCancelButtonTextLayout = TextNode.asyncLayout(self.cancelButtonText)
         
-        return { item, params, last in
+        return { [weak self] item, params, last in
             let baseWidth = params.width - params.leftInset - params.rightInset
             let _ = baseWidth
             
@@ -597,5 +649,33 @@ final class ChatListNoticeItemNode: ItemListRevealOptionsItemNode {
         
         self.setRevealOptionsOpened(false, animated: true)
         self.revealOptionsInteractivelyClosed()
+    }
+}
+
+/// The text VoiceOver reads for a notice line: custom emoji are drawn over placeholder characters (a server notice's
+/// "&" before its title), which are not read.
+private func noticeAccessibilityText(_ attributedString: NSAttributedString?) -> String {
+    guard let attributedString else {
+        return ""
+    }
+    let result = NSMutableString(string: attributedString.string)
+    var ranges: [NSRange] = []
+    attributedString.enumerateAttribute(ChatTextInputAttributes.customEmoji, in: NSRange(location: 0, length: attributedString.length), options: []) { value, range, _ in
+        if value != nil {
+            ranges.append(range)
+        }
+    }
+    for range in ranges.reversed() {
+        result.replaceCharacters(in: range, with: "")
+    }
+    return (result as String).trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+private final class ChatListNoticeBodyAccessibilityElement: UIAccessibilityElement {
+    var activate: (() -> Void)?
+    
+    override func accessibilityActivate() -> Bool {
+        self.activate?()
+        return self.activate != nil
     }
 }

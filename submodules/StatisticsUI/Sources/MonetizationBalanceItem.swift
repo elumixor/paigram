@@ -50,10 +50,10 @@ final class MonetizationBalanceItem: ListViewItem, ItemListItem {
         self.style = style
     }
     
-    func nodeConfiguredForParams(async: @escaping (@escaping () -> Void) -> Void, params: ListViewItemLayoutParams, synchronousLoads: Bool, previousItem: ListViewItem?, nextItem: ListViewItem?, completion: @escaping (ListViewItemNode, @escaping () -> (Signal<Void, NoError>?, (ListViewItemApply) -> Void)) -> Void) {
+    func nodeConfiguredForParams(async: @escaping (@escaping () -> Void) -> Void, params: ListViewItemLayoutParams, synchronousLoads: Bool, neighbors: ListViewItemNeighbors, completion: @escaping (ListViewItemNode, @escaping () -> (Signal<Void, NoError>?, (ListViewItemApply) -> Void)) -> Void) {
         async {
             let node = MonetizationBalanceItemNode()
-            let (layout, apply) = node.asyncLayout()(self, params, itemListNeighbors(item: self, topItem: previousItem as? ItemListItem, bottomItem: nextItem as? ItemListItem))
+            let (layout, apply) = node.asyncLayout()(self, params, itemListNeighbors(item: self, topFacet: neighbors.previous?.base(ItemListNeighborFacet.self), bottomFacet: neighbors.next?.base(ItemListNeighborFacet.self)))
             
             node.contentSize = layout.contentSize
             node.insets = layout.insets
@@ -66,13 +66,13 @@ final class MonetizationBalanceItem: ListViewItem, ItemListItem {
         }
     }
     
-    func updateNode(async: @escaping (@escaping () -> Void) -> Void, node: @escaping () -> ListViewItemNode, params: ListViewItemLayoutParams, previousItem: ListViewItem?, nextItem: ListViewItem?, animation: ListViewItemUpdateAnimation, completion: @escaping (ListViewItemNodeLayout, @escaping (ListViewItemApply) -> Void) -> Void) {
+    func updateNode(async: @escaping (@escaping () -> Void) -> Void, node: @escaping () -> ListViewItemNode, params: ListViewItemLayoutParams, neighbors: ListViewItemNeighbors, animation: ListViewItemUpdateAnimation, completion: @escaping (ListViewItemNodeLayout, @escaping (ListViewItemApply) -> Void) -> Void) {
         Queue.mainQueue().async {
             if let nodeValue = node() as? MonetizationBalanceItemNode {
                 let makeLayout = nodeValue.asyncLayout()
                 
                 async {
-                    let (layout, apply) = makeLayout(self, params, itemListNeighbors(item: self, topItem: previousItem as? ItemListItem, bottomItem: nextItem as? ItemListItem))
+                    let (layout, apply) = makeLayout(self, params, itemListNeighbors(item: self, topFacet: neighbors.previous?.base(ItemListNeighborFacet.self), bottomFacet: neighbors.next?.base(ItemListNeighborFacet.self)))
                     Queue.mainQueue().async {
                         completion(layout, { _ in
                             apply()
@@ -152,7 +152,7 @@ final class MonetizationBalanceItemNode: ListViewItemNode, ItemListItemNode {
         let makeBalanceTextLayout = TextNode.asyncLayout(self.balanceTextNode)
         let makeValueTextLayout = TextNode.asyncLayout(self.valueTextNode)
         
-        return { item, params, neighbors in
+        return { [weak self] item, params, neighbors in
             var updatedTheme: PresentationTheme?
             if currentItem?.presentationData.theme !== item.presentationData.theme {
                 updatedTheme = item.presentationData.theme
@@ -195,7 +195,7 @@ final class MonetizationBalanceItemNode: ListViewItemNode, ItemListItemNode {
             let (valueLayout, valueApply) = makeValueTextLayout(TextNodeLayoutArguments(attributedString: NSAttributedString(string: value, font: Font.regular(17.0), textColor: item.presentationData.theme.list.itemSecondaryTextColor), backgroundColor: nil, maximumNumberOfLines: 1, truncationType: .middle, constrainedSize: CGSize(width: constrainedWidth, height: CGFloat.greatestFiniteMagnitude), alignment: .center, cutout: nil, insets: UIEdgeInsets()))
             
             let verticalInset: CGFloat = 13.0
-            let buttonHeight: CGFloat = 50.0
+            let buttonHeight: CGFloat = 52.0
             let buttonSpacing: CGFloat = 12.0
             
             var height: CGFloat = verticalInset * 2.0 + balanceLayout.size.height
@@ -221,8 +221,6 @@ final class MonetizationBalanceItemNode: ListViewItemNode, ItemListItemNode {
                         
             contentSize = CGSize(width: params.width, height: height)
             
-            let layout = ListViewItemNodeLayout(contentSize: contentSize, insets: insets)
-            
             return (ListViewItemNodeLayout(contentSize: contentSize, insets: insets), { [weak self] in
                 if let strongSelf = self {
                     let themeUpdated = strongSelf.item?.presentationData.theme !== item.presentationData.theme
@@ -231,8 +229,10 @@ final class MonetizationBalanceItemNode: ListViewItemNode, ItemListItemNode {
                     let _ = balanceApply()
                     let _ = valueApply()
                     
-                    strongSelf.activateArea.frame = CGRect(origin: CGPoint(x: params.leftInset, y: 0.0), size: CGSize(width: params.width - params.leftInset - params.rightInset, height: layout.contentSize.height))
-                    strongSelf.activateArea.accessibilityTraits = []
+                    // VoiceOver: the amount (and its dollar estimate) as one text; the buttons below stay separate.
+                    strongSelf.activateArea.accessibilityLabel = amountString.string
+                    strongSelf.activateArea.accessibilityValue = value.isEmpty ? nil : value
+                    strongSelf.activateArea.accessibilityTraits = .staticText
                     
                     if let _ = updatedTheme {
                         strongSelf.topStripeNode.backgroundColor = itemSeparatorColor
@@ -293,17 +293,13 @@ final class MonetizationBalanceItemNode: ListViewItemNode, ItemListItemNode {
                         strongSelf.maskNode.image = hasCorners ? PresentationResourcesItemList.cornersImage(item.presentationData.theme, top: hasTopCorners, bottom: hasBottomCorners, glass: true) : nil
                         
                         strongSelf.backgroundNode.frame = CGRect(origin: CGPoint(x: 0.0, y: -min(insets.top, separatorHeight)), size: CGSize(width: params.width, height: contentSize.height + min(insets.top, separatorHeight) + min(insets.bottom, separatorHeight)))
-                        strongSelf.maskNode.frame = strongSelf.backgroundNode.frame.insetBy(dx: params.leftInset, dy: 0.0)
+                        strongSelf.maskNode.frame = strongSelf.backgroundNode.frame.inset(by: UIEdgeInsets(top: 0.0, left: params.leftInset, bottom: 0.0, right: params.rightInset))
                         strongSelf.topStripeNode.frame = CGRect(origin: CGPoint(x: 0.0, y: -min(insets.top, separatorHeight)), size: CGSize(width: params.width, height: separatorHeight))
                         strongSelf.bottomStripeNode.frame = CGRect(origin: CGPoint(x: bottomStripeInset, y: contentSize.height - separatorHeight), size: CGSize(width: params.width - bottomStripeInset, height: separatorHeight))
                     }
                     
                     if themeUpdated {
-                        if isStars {
-                            strongSelf.iconNode.image = UIImage(bundleImageName: "Premium/Stars/BalanceStar")
-                        } else {
-                            strongSelf.iconNode.image = generateTintedImage(image: UIImage(bundleImageName: "Ads/TonBig"), color: UIColor(rgb: 0x30A1F5))
-                        }
+                        strongSelf.iconNode.image = isStars ? UIImage(bundleImageName: "Premium/Stars/BalanceStar") : UIImage(bundleImageName: "Ads/GramBig")
                     }
 
                     var emojiItemSize = CGSize()
@@ -312,13 +308,14 @@ final class MonetizationBalanceItemNode: ListViewItemNode, ItemListItemNode {
                     }
                                         
                     let balanceTotalWidth: CGFloat = emojiItemSize.width + balanceLayout.size.width
-                    let balanceTextFrame = CGRect(origin: CGPoint(x: floorToScreenPixels((params.width - balanceTotalWidth) / 2.0) + emojiItemSize.width, y: verticalInset), size: balanceLayout.size)
+                    let balanceTextFrame = CGRect(origin: CGPoint(x: params.leftInset + floorToScreenPixels((params.width - params.leftInset - params.rightInset - balanceTotalWidth) / 2.0) + emojiItemSize.width, y: verticalInset), size: balanceLayout.size)
                     strongSelf.balanceTextNode.frame = balanceTextFrame
                     
                     strongSelf.iconNode.frame = CGRect(origin: CGPoint(x: balanceTextFrame.minX - emojiItemSize.width - 7.0, y: floorToScreenPixels(balanceTextFrame.midY - emojiItemSize.height / 2.0) - 3.0), size: emojiItemSize)
                     
-                    strongSelf.valueTextNode.frame = CGRect(origin: CGPoint(x: floorToScreenPixels((params.width - valueLayout.size.width) / 2.0), y: balanceTextFrame.maxY - 5.0), size: valueLayout.size)
+                    strongSelf.valueTextNode.frame = CGRect(origin: CGPoint(x: params.leftInset + floorToScreenPixels((params.width - params.leftInset - params.rightInset - valueLayout.size.width) / 2.0), y: balanceTextFrame.maxY - 5.0), size: valueLayout.size)
                                       
+                    strongSelf.activateArea.frame = CGRect(origin: CGPoint(x: params.leftInset, y: 0.0), size: CGSize(width: params.width - params.leftInset - params.rightInset, height: strongSelf.valueTextNode.frame.maxY))
                     strongSelf.buttonLayout = (isStars: isStars, origin: strongSelf.valueTextNode.frame.maxY + buttonSpacing + 3.0, width: params.width, leftInset: leftInset, rightInset: rightInset)
                     strongSelf.updateButton()
                 }
@@ -380,6 +377,7 @@ final class MonetizationBalanceItemNode: ListViewItemNode, ItemListItemNode {
                 transition: .immediate,
                 component: AnyComponent(ButtonComponent(
                     background: ButtonComponent.Background(
+                        style: .glass,
                         color: item.presentationData.theme.list.itemCheckColors.fillColor,
                         foreground: item.presentationData.theme.list.itemCheckColors.foregroundColor,
                         pressedColor: item.presentationData.theme.list.itemCheckColors.fillColor.withMultipliedAlpha(0.8)
@@ -396,7 +394,7 @@ final class MonetizationBalanceItemNode: ListViewItemNode, ItemListItemNode {
                     }
                 )),
                 environment: {},
-                containerSize: CGSize(width: withdrawWidth, height: 50.0)
+                containerSize: CGSize(width: withdrawWidth, height: 52.0)
             )
             if let buttonView = self.button.view {
                 if buttonView.superview == nil {
@@ -411,6 +409,7 @@ final class MonetizationBalanceItemNode: ListViewItemNode, ItemListItemNode {
                     transition: .immediate,
                     component: AnyComponent(ButtonComponent(
                         background: ButtonComponent.Background(
+                            style: .glass,
                             color: item.presentationData.theme.list.itemCheckColors.fillColor,
                             foreground: item.presentationData.theme.list.itemCheckColors.foregroundColor,
                             pressedColor: item.presentationData.theme.list.itemCheckColors.fillColor.withMultipliedAlpha(0.8)
@@ -427,7 +426,7 @@ final class MonetizationBalanceItemNode: ListViewItemNode, ItemListItemNode {
                         }
                     )),
                     environment: {},
-                    containerSize: CGSize(width: withdrawWidth, height: 50.0)
+                    containerSize: CGSize(width: withdrawWidth, height: 52.0)
                 )
                 if let buttonView = self.buyButton.view {
                     if buttonView.superview == nil {

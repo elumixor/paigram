@@ -28,6 +28,7 @@ import InteractiveTextComponent
 import ShimmeringMask
 import StreamingTextReveal
 import PaiUI
+import WalletContext
 
 private final class CachedChatMessageText {
     let text: String
@@ -53,34 +54,6 @@ private final class CachedChatMessageText {
         }
         return true
     }
-}
-
-private func findQuoteRange(string: String, quoteText: String, offset: Int?) -> NSRange? {
-    let nsString = string as NSString
-    var currentRange: NSRange?
-    while true {
-        let startOffset = currentRange?.upperBound ?? 0
-        let range = nsString.range(of: quoteText, range: NSRange(location: startOffset, length: nsString.length - startOffset))
-        if range.location != NSNotFound {
-            if let offset {
-                if let currentRangeValue = currentRange {
-                    if abs(range.location - offset) > abs(currentRangeValue.location - offset) {
-                        break
-                    } else {
-                        currentRange = range
-                    }
-                } else {
-                    currentRange = range
-                }
-            } else {
-                currentRange = range
-                break
-            }
-        } else {
-            break
-        }
-    }
-    return currentRange
 }
 
 public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
@@ -225,10 +198,10 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
         let currentMaxGlyphCount: Int? = self.textRevealController?.currentGlyphCount
         let previousGlyphCount = self.textNode.textNode.cachedLayout?.attributedString?.length ?? 0
         
-        return { item, layoutConstants, _, _, _, _ in
+        return { [weak self] item, layoutConstants, _, _, _, _ in
             let contentProperties = ChatMessageBubbleContentProperties(hidesSimpleAuthorHeader: false, headerSpacing: 0.0, hidesBackground: .never, forceFullCorners: false, forceAlignment: .none)
             
-            return (contentProperties, nil, CGFloat.greatestFiniteMagnitude, { constrainedSize, position in
+            return (contentProperties, nil, CGFloat.greatestFiniteMagnitude, { [weak self] constrainedSize, position in
                 var topInset: CGFloat = 0.0
                 var bottomInset: CGFloat = 0.0
                 if case let .linear(top, bottom) = position {
@@ -251,6 +224,18 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
                         bottomInset = layoutConstants.text.bubbleInsets.bottom
                     default:
                         bottomInset = layoutConstants.text.bubbleInsets.bottom - 3.0
+                    }
+                    
+                    if item.bubbleStyle == .bubbleless {
+                        // Without bubbles a caption belongs to the media above it: its capitals stand a block gap under
+                        // the media, closer than the next message does. Text above media keeps half the block gap.
+                        if case .Neighbour(_, .media, _) = top {
+                            let messageFont = item.presentationData.bubblelessIncomingBodyFont
+                            topInset = chatMessageBubblelessCaptionTopInset(ascender: messageFont.ascender, capHeight: messageFont.capHeight)
+                        }
+                        if case .Neighbour(_, .media, _) = bottom {
+                            bottomInset = layoutConstants.text.bubbleInsets.bottom + chatMessageBubblelessBlockGap * 0.5
+                        }
                     }
                 }
                 
@@ -335,6 +320,10 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
                 } else if case let .messageOptions(_, _, info) = item.associatedData.subject, case let .link(link) = info, link.isCentered {
                     displayStatus = false
                 }
+                if item.bubbleStyle.hidesIncomingStatus {
+                    // Without bubbles the time is in the author header.
+                    displayStatus = false
+                }
                 if displayStatus {
                     if incoming {
                         statusType = .BubbleIncoming
@@ -352,12 +341,11 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
                 }
                 
                 var rawText: String
-                var attributedText: NSAttributedString
+                let attributedText: NSAttributedString
                 var messageEntities: [MessageTextEntity]?
                 
                 var mediaDuration: Double? = nil
                 var isSeekableWebMedia = false
-                var isUnsupportedMedia = false
                 var story: Stories.Item?
                 var invoice: TelegramMediaInvoice?
                 for media in item.message.media {
@@ -368,8 +356,6 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
                         invoice = media
                     } else if let webpage = media as? TelegramMediaWebpage, case let .Loaded(content) = webpage.content, webEmbedType(content: content).supportsSeeking {
                         isSeekableWebMedia = true
-                    } else if media is TelegramMediaUnsupported {
-                        isUnsupportedMedia = true
                     } else if let storyMedia = media as? TelegramMediaStory {
                         if let value = item.message.associatedStories[storyMedia.storyId]?.get(Stories.StoredItem.self) {
                             if case let .item(storyValue) = value {
@@ -386,9 +372,6 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
                 } else if let story {
                     rawText = story.text
                     messageEntities = story.entities
-                } else if isUnsupportedMedia {
-                    rawText = item.presentationData.strings.Conversation_UnsupportedMediaPlaceholder
-                    messageEntities = [MessageTextEntity(range: 0..<rawText.count, type: .Italic)]
                 } else {
                     if let updatingMedia = item.attributes.updatingMedia {
                         rawText = updatingMedia.text
@@ -447,14 +430,7 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
                 
                 
                 if incoming && item.associatedData.isSuspiciousPeer, let entities = messageEntities {
-                    messageEntities = entities.filter { entity in
-                        switch entity.type {
-                        case .Url, .TextUrl, .Mention, .TextMention, .Hashtag, .Email, .BankCard:
-                            return false
-                        default:
-                            return true
-                        }
-                    }
+                    messageEntities = entities.filter(\.isShownFromSuspiciousPeer)
                 }
                 
                 // The pai bot's trailing metadata link is for this client to read, not to show.
@@ -543,7 +519,10 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
                 
                 let messageTheme = incoming ? item.presentationData.theme.theme.chat.message.incoming : item.presentationData.theme.theme.chat.message.outgoing
                 
-                let textFont = item.presentationData.messageFont
+                // Message text in New York when it is picked in Text Size; its quotes and code-block titles keep the system
+                // family.
+                let messageBodyFonts = item.presentationData.messageBodyFonts
+                let textFont = messageBodyFonts.body.regular
                 
                 var codeHighlightSpecs: [CachedMessageSyntaxHighlight.Spec] = []
                 var cachedMessageSyntaxHighlight: CachedMessageSyntaxHighlight?
@@ -572,6 +551,7 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
                     let codeBlockTitleColor: UIColor
                     let codeBlockAccentColor: UIColor
                     let codeBlockBackgroundColor: UIColor
+                    var codeBlockFillColor: UIColor?
                     if !incoming {
                         mainColor = messageTheme.accentTextColor
                         if let _ = nameColors?.secondary {
@@ -585,6 +565,9 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
                             codeBlockTitleColor = .white
                             codeBlockAccentColor = UIColor(white: 1.0, alpha: 0.5)
                             codeBlockBackgroundColor = UIColor(white: 0.0, alpha: 0.25)
+                            // Dark themes' outgoing bubbles are coloured (the default's a light blue gradient): the
+                            // white-tinted block made the code hard to read on them.
+                            codeBlockFillColor = UIColor(white: 0.0, alpha: 0.1)
                         } else {
                             codeBlockTitleColor = mainColor
                             codeBlockAccentColor = mainColor
@@ -623,33 +606,19 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
                         }
                     }
                     
-                    attributedText = stringWithAppliedEntities(rawText, entities: entities, strings: item.presentationData.strings, dateTimeFormat: item.presentationData.dateTimeFormat, baseColor: messageTheme.primaryTextColor, linkColor: messageTheme.linkTextColor, baseQuoteTintColor: mainColor, baseQuoteSecondaryTintColor: secondaryColor, baseQuoteTertiaryTintColor: tertiaryColor, codeBlockTitleColor: codeBlockTitleColor, codeBlockAccentColor: codeBlockAccentColor, codeBlockBackgroundColor: codeBlockBackgroundColor, baseFont: textFont, linkFont: textFont, boldFont: item.presentationData.messageBoldFont, italicFont: item.presentationData.messageItalicFont, boldItalicFont: item.presentationData.messageBoldItalicFont, fixedFont: item.presentationData.messageFixedFont, blockQuoteFont: item.presentationData.messageBlockQuoteFont, underlineLinks: underlineLinks, message: item.message, adjustQuoteFontSize: true, cachedMessageSyntaxHighlight: cachedMessageSyntaxHighlight)
+                    attributedText = stringWithAppliedEntities(rawText, entities: entities, strings: item.presentationData.strings, dateTimeFormat: item.presentationData.dateTimeFormat, baseColor: messageTheme.primaryTextColor, linkColor: messageTheme.linkTextColor, baseQuoteTintColor: mainColor, baseQuoteSecondaryTintColor: secondaryColor, baseQuoteTertiaryTintColor: tertiaryColor, codeBlockTitleColor: codeBlockTitleColor, codeBlockAccentColor: codeBlockAccentColor, codeBlockBackgroundColor: codeBlockBackgroundColor, codeBlockFillColor: codeBlockFillColor, baseFont: textFont, linkFont: textFont, boldFont: messageBodyFonts.body.bold, italicFont: messageBodyFonts.body.italic, boldItalicFont: messageBodyFonts.body.boldItalic, fixedFont: item.presentationData.messageFixedFont, blockQuoteFont: item.presentationData.messageBlockQuoteFont, blockFonts: messageBodyFonts.blockFonts, underlineLinks: underlineLinks, message: item.message, adjustQuoteFontSize: true, cachedMessageSyntaxHighlight: cachedMessageSyntaxHighlight)
                 } else if !rawText.isEmpty {
                     attributedText = NSAttributedString(string: rawText, font: textFont, textColor: messageTheme.primaryTextColor)
                 } else {
                     attributedText = NSAttributedString(string: " ", font: textFont, textColor: messageTheme.primaryTextColor)
                 }
                 
-                if let entities = entities {
-                    let updatedString = NSMutableAttributedString(attributedString: attributedText)
-                    
-                    for entity in entities.sorted(by: { $0.range.lowerBound > $1.range.lowerBound }) {
-                        guard case let .CustomEmoji(_, fileId) = entity.type else {
-                            continue
-                        }
-                        
-                        let range = NSRange(location: entity.range.lowerBound, length: entity.range.upperBound - entity.range.lowerBound)
-                        
-                        let currentDict = updatedString.attributes(at: range.lowerBound, effectiveRange: nil)
-                        var updatedAttributes: [NSAttributedString.Key: Any] = currentDict
-                        updatedAttributes[ChatTextInputAttributes.customEmoji] = ChatTextInputTextCustomEmojiAttribute(interactivelySelectedFromPackId: nil, fileId: fileId, file: item.message.associatedMedia[EngineMedia.Id(namespace: Namespaces.Media.CloudFile, id: fileId)] as? TelegramMediaFile)
-                        
-                        let insertString = NSAttributedString(string: updatedString.attributedSubstring(from: range).string, attributes: updatedAttributes)
-                        updatedString.replaceCharacters(in: range, with: insertString)
-                    }
-                    attributedText = updatedString
-                }
-                                
+                // The custom-emoji attribute is not re-applied here: `stringWithAppliedEntities`
+                // already attached it, using ranges adjusted for the substitutions it performs
+                // (`.FormattedDate` renders to text of a different length). An entity's own offsets
+                // index `rawText`, not the string above, so indexing with them lands on the wrong
+                // characters — or out of bounds.
+
                 var customTruncationToken: ((UIFont, Bool) -> NSAttributedString?)?
                 var maximumNumberOfLines: Int = 0
                 if item.presentationData.isPreview {
@@ -792,7 +761,7 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
                 let sideInsets = layoutConstants.text.bubbleInsets.left + layoutConstants.text.bubbleInsets.right
                 suggestedBoundingWidth += sideInsets
                 
-                return (suggestedBoundingWidth, { boundingWidth in
+                return (suggestedBoundingWidth, { [weak self] boundingWidth in
                     var boundingSize: CGSize
                     
                     let statusSizeAndApply = statusSuggestedWidthAndContinue?.1(boundingWidth - sideInsets)
@@ -901,7 +870,8 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
                                             })
                                             strongSelf.textNode.textNode.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.1)
                                         }
-                                    }
+                                    },
+                                    blockCornerRadius: item.bubbleStyle.isBubbleless ? chatMessageBubblelessInlineBlockCornerRadius : nil
                                 )
                             ))
                             animation.animator.updatePosition(layer: strongSelf.textNode.textNode.layer, position: realTextFrame.center, completion: nil)
@@ -1207,6 +1177,7 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
                 TelegramTextAttributes.Hashtag,
                 TelegramTextAttributes.Timecode,
                 TelegramTextAttributes.BankCard,
+                TelegramTextAttributes.TonAddress,
                 TelegramTextAttributes.Date
             ]
             for name in possibleNames {
@@ -1219,6 +1190,12 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
             
             if let _ = attributes[NSAttributedString.Key(rawValue: TelegramTextAttributes.Spoiler)], !self.displayContentsUnderSpoilers.value {
                 return ChatMessageBubbleContentTapAction(content: .none)
+            } else if let tonAddress = attributes[NSAttributedString.Key(rawValue: TelegramTextAttributes.TonAddress)] as? TelegramTonAddress {
+                guard tonAddress.range.length == 48, tonAddress.address.utf8.count == 48,
+                      WalletContext.transferAddress(from: tonAddress.address) != nil else {
+                    return ChatMessageBubbleContentTapAction(content: .none)
+                }
+                return ChatMessageBubbleContentTapAction(content: .tonAddress(tonAddress.address), rects: self.textNode.textNode.rangeRects(in: tonAddress.range)?.rects, activate: makeActivate(tonAddress.range))
             } else if let url = attributes[NSAttributedString.Key(rawValue: TelegramTextAttributes.URL)] as? String {
                 var concealed = true
                 var urlRange: NSRange?
@@ -1384,6 +1361,7 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
                         TelegramTextAttributes.Hashtag,
                         TelegramTextAttributes.Timecode,
                         TelegramTextAttributes.BankCard,
+                        TelegramTextAttributes.TonAddress,
                         TelegramTextAttributes.Date
                     ]
                     for name in possibleNames {
@@ -1391,6 +1369,9 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
                             rects = self.textNode.textNode.attributeRects(name: name, at: index)
                             break
                         }
+                    }
+                    if let tonAddress = attributes[NSAttributedString.Key(rawValue: TelegramTextAttributes.TonAddress)] as? TelegramTonAddress {
+                        rects = self.textNode.textNode.rangeRects(in: tonAddress.range)?.rects
                     }
                     if let _ = attributes[NSAttributedString.Key(rawValue: TelegramTextAttributes.Spoiler)] {
                         spoilerRects = self.textNode.textNode.attributeRects(name: TelegramTextAttributes.Spoiler, at: index)
@@ -1560,9 +1541,8 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
     
     public func getQuoteRect(quote: String, offset: Int?) -> CGRect? {
         var rectsSet: [CGRect] = []
-        if !quote.isEmpty, let cachedLayout = self.textNode.textNode.cachedLayout, let string = cachedLayout.attributedString?.string {
-            
-            let range = findQuoteRange(string: string, quoteText: quote, offset: offset)
+        if !quote.isEmpty, let cachedLayout = self.textNode.textNode.cachedLayout, let layoutString = cachedLayout.attributedString {
+            let range = findQuoteRange(layoutString: layoutString, quoteText: quote, offset: offset)
             if let range, let rects = cachedLayout.rangeRects(in: range)?.rects, !rects.isEmpty {
                 rectsSet = rects
             }
@@ -1585,8 +1565,8 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
     
     public func updateQuoteTextHighlightState(text: String?, offset: Int?, color: UIColor, animated: Bool) {
         var rectsSet: [CGRect] = []
-        if let text = text, !text.isEmpty, let cachedLayout = self.textNode.textNode.cachedLayout, let string = cachedLayout.attributedString?.string {
-            let quoteRange = findQuoteRange(string: string, quoteText: text, offset: offset)
+        if let text = text, !text.isEmpty, let cachedLayout = self.textNode.textNode.cachedLayout, let layoutString = cachedLayout.attributedString {
+            let quoteRange = findQuoteRange(layoutString: layoutString, quoteText: text, offset: offset)
             if let quoteRange, let rects = cachedLayout.rangeRects(in: quoteRange)?.rects, !rects.isEmpty {
                 rectsSet = rects
             }
@@ -1617,6 +1597,22 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
         }
     }
     
+    override public func bubblelessLiftParts() -> [ChatMessageBubblelessLiftPart] {
+        let textNode = self.textNode.textNode
+        guard let layout = textNode.cachedLayout else {
+            return super.bubblelessLiftParts()
+        }
+        // The line boxes, and each quote or code background as a block.
+        let linesFrame = textNode.frame.inset(by: layout.insets)
+        var parts: [ChatMessageBubblelessLiftPart] = [.textLines(chatMessageBubblelessTextLinesFrame(nodeFrame: textNode.frame, insets: layout.insets, lineRects: layout.linesRects()))]
+        for segment in layout.segments {
+            if let blockQuoteFrame = segment.blockQuoteFrame {
+                parts.append(.block(blockQuoteFrame.offsetBy(dx: linesFrame.minX, dy: linesFrame.minY)))
+            }
+        }
+        return parts
+    }
+    
     override public func willUpdateIsExtractedToContextPreview(_ value: Bool) {
         if !value {
             if let textSelectionNode = self.textSelectionNode {
@@ -1630,6 +1626,10 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
         }
     }
     
+    override public func resignTextSelection() {
+        self.cancelTextSelection()
+    }
+
     override public func updateIsExtractedToContextPreview(_ value: Bool) {
         if value {
             if self.textSelectionNode == nil, let item = self.item, let rootNode = item.controllerInteraction.chatControllerNode() {
@@ -1864,5 +1864,22 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
             }
             self.containerNode.clipsToBounds = true
         })
+    }
+}
+
+extension ChatMessageTextBubbleContentNode: ChatMessageQuoteSourceContentNode {
+    public var hasTextSelection: Bool {
+        return self.getCurrentTextSelection() != nil
+    }
+
+    public func currentReplyQuote(maxLength: Int) -> EngineMessageReplyQuote? {
+        guard let textSelection = self.getCurrentTextSelection() else {
+            return nil
+        }
+        let trimmedText = trimStringWithEntities(string: textSelection.text, entities: textSelection.entities, maxLength: maxLength)
+        if trimmedText.string.isEmpty {
+            return nil
+        }
+        return EngineMessageReplyQuote(text: trimmedText.string, offset: textSelection.offset, entities: trimmedText.entities, media: nil)
     }
 }

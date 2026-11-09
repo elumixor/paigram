@@ -162,8 +162,8 @@ public final class SlotMachineAnimationNode: ASDisplayNode {
         self.backNode = ManagedAnimationNode(size: self.animationSize)
         let reelSize = CGSize(width: 384.0, height: 384.0)
         self.leftReelNode = DiceAnimatedStickerNode(account: account, size: reelSize)
-        self.centerReelNode = DiceAnimatedStickerNode(account: account,size: reelSize)
-        self.rightReelNode = DiceAnimatedStickerNode(account: account,size: reelSize)
+        self.centerReelNode = DiceAnimatedStickerNode(account: account, size: reelSize)
+        self.rightReelNode = DiceAnimatedStickerNode(account: account, size: reelSize)
         self.frontNode = ManagedAnimationNode(size: self.animationSize)
         
         super.init()
@@ -261,6 +261,7 @@ class DiceAnimatedStickerNode: ASDisplayNode {
     public var trackStack: [ManagedAnimationItem] = []
     public var didTryAdvancingState = false
     
+
     init(account: Account, size: CGSize) {
         self.account = account
         self.intrinsicSize = size

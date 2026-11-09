@@ -512,7 +512,7 @@ private final class EmojiGameStakeSheetComponent: CombinedComponent {
                         metrics: environment.metrics,
                         deviceMetrics: environment.deviceMetrics,
                         isDisplaying: environment.value.isVisible,
-                        isCentered: environment.metrics.widthClass == .regular,
+                        isCentered: environment.presentsFloatingPanels,
                         screenSize: context.availableSize,
                         regularMetricsSize: CGSize(width: 430.0, height: 900.0),
                         dismiss: { animated in
@@ -1133,7 +1133,6 @@ public final class AmountFieldComponent: Component {
             var leftInset: CGFloat = 16.0
             
             let iconName: String
-            var iconTintColor: UIColor?
             let iconMaxSize: CGSize?
             var iconOffset = CGPoint()
             switch component.currency {
@@ -1141,8 +1140,7 @@ public final class AmountFieldComponent: Component {
                 iconName = "Premium/Stars/StarLarge"
                 iconMaxSize = CGSize(width: 22.0, height: 22.0)
             case .ton:
-                iconName = "Ads/TonBig"
-                iconTintColor = UIColor(rgb: 0x30A1F5)
+                iconName = "Ads/GramBig"
                 iconMaxSize = CGSize(width: 18.0, height: 18.0)
                 iconOffset = CGPoint(x: 3.0, y: 1.0)
             }
@@ -1150,7 +1148,7 @@ public final class AmountFieldComponent: Component {
                 transition: .immediate,
                 component: AnyComponent(BundleIconComponent(
                     name: iconName,
-                    tintColor: iconTintColor,
+                    tintColor: nil,
                     maxSize: iconMaxSize
                 )),
                 environment: {},

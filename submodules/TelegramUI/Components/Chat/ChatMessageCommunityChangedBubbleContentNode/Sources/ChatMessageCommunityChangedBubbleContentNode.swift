@@ -113,10 +113,10 @@ public class ChatMessageCommunityChangedBubbleContentNode: ChatMessageBubbleCont
         let makeSubtitleLayout = TextNode.asyncLayout(self.subtitleNode)
         let makeButtonTitleLayout = TextNode.asyncLayout(self.buttonTitleNode)
         
-        return { item, _, _, _, _, _ in
+        return { [weak self] item, _, _, _, _, _ in
             let contentProperties = ChatMessageBubbleContentProperties(hidesSimpleAuthorHeader: true, headerSpacing: 0.0, hidesBackground: .always, forceFullCorners: false, forceAlignment: .center)
             
-            return (contentProperties, nil, CGFloat.greatestFiniteMagnitude, { constrainedSize, _ in
+            return (contentProperties, nil, CGFloat.greatestFiniteMagnitude, { [weak self] constrainedSize, _ in
                 let width: CGFloat = 180.0
                 let imageSize = CGSize(width: 80.0, height: 80.0)
                 let primaryTextColor = serviceMessageColorComponents(theme: item.presentationData.theme.theme, wallpaper: item.presentationData.theme.wallpaper).primaryText
@@ -166,21 +166,21 @@ public class ChatMessageCommunityChangedBubbleContentNode: ChatMessageBubbleCont
                 
                 let backgroundSize = CGSize(width: width, height: subtitleLayout.size.height + 165.0)
                 
-                return (backgroundSize.width, { _ in
+                return (backgroundSize.width, { [weak self] boundingWidth in
                     return (backgroundSize, { [weak self] _, synchronousLoads, _ in
                         guard let strongSelf = self else {
                             return
                         }
                         strongSelf.item = item
                         
-                        let mediaBackgroundFrame = CGRect(origin: CGPoint(x: floorToScreenPixels((backgroundSize.width - width) / 2.0), y: 0.0), size: backgroundSize)
+                        let mediaBackgroundFrame = CGRect(origin: CGPoint(x: floorToScreenPixels((boundingWidth - width) / 2.0), y: 0.0), size: backgroundSize)
                         strongSelf.mediaBackgroundNode.frame = mediaBackgroundFrame
                         strongSelf.mediaBackgroundNode.updateColor(color: selectDateFillStaticColor(theme: item.presentationData.theme.theme, wallpaper: item.presentationData.theme.wallpaper), enableBlur: item.controllerInteraction.enableFullTranslucency && dateFillNeedsBlur(theme: item.presentationData.theme.theme, wallpaper: item.presentationData.theme.wallpaper), transition: .immediate)
                         strongSelf.mediaBackgroundNode.update(size: mediaBackgroundFrame.size, transition: .immediate)
                         let buttonColor = item.presentationData.theme.theme.overallDarkAppearance ? UIColor(rgb: 0xffffff, alpha: 0.12) : UIColor(rgb: 0x000000, alpha: 0.12)
                         strongSelf.buttonNode.backgroundColor = buttonColor
                         
-                        let avatarFrame = CGRect(origin: CGPoint(x: floorToScreenPixels((backgroundSize.width - imageSize.width) / 2.0), y: 15.0), size: imageSize)
+                        let avatarFrame = CGRect(origin: CGPoint(x: mediaBackgroundFrame.minX + floorToScreenPixels((mediaBackgroundFrame.width - imageSize.width) / 2.0), y: 15.0), size: imageSize)
                         if let shadowImage = UIImage(bundleImageName: "Components/CommunityShadow"), community != nil {
                             strongSelf.avatarShadowNode.isHidden = false
                             strongSelf.avatarShadowNode.image = generateTintedImage(image: shadowImage, color: buttonColor.withMultipliedAlpha(4.0))
@@ -238,12 +238,6 @@ public class ChatMessageCommunityChangedBubbleContentNode: ChatMessageBubbleCont
     override public func updateAbsoluteRect(_ rect: CGRect, within containerSize: CGSize) {
         self.absoluteRect = (rect, containerSize)
         
-        if let mediaBackgroundContent = self.mediaBackgroundContent {
-            var backgroundFrame = mediaBackgroundContent.frame
-            backgroundFrame.origin.x += rect.minX
-            backgroundFrame.origin.y += rect.minY
-            mediaBackgroundContent.update(rect: backgroundFrame, within: containerSize, transition: .immediate)
-        }
     }
     
     override public func tapActionAtPoint(_ point: CGPoint, gesture: TapLongTapOrDoubleTapGesture, isEstimating: Bool) -> ChatMessageBubbleContentTapAction {

@@ -9,6 +9,7 @@ swift_library(
     copts = [
     ],
     deps = [
+        "//submodules/UrlWhitelist",
         "//submodules/SSignalKit/SwiftSignalKit:SwiftSignalKit",
         "//submodules/AsyncDisplayKit:AsyncDisplayKit",
         "//submodules/Display:Display",

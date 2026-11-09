@@ -9,6 +9,7 @@ swift_library(
     copts = [
     ],
     deps = [
+        "//submodules/TelegramUI/Components/StaticGlassBackground",
         "//submodules/AsyncDisplayKit",
         "//submodules/Display",
         "//submodules/SSignalKit/SwiftSignalKit",

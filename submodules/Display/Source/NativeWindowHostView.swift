@@ -87,12 +87,13 @@ private final class WindowRootViewControllerView: UIView {
     }
 }
 
-private final class WindowRootViewController: UIViewController, UIWindowSceneDelegate {
+private final class WindowRootViewController: UIViewController {
     private var voiceOverStatusObserver: AnyObject?
     private var registeredForPreviewing = false
     
     var presentController: ((UIViewController, PresentationSurfaceLevel, Bool, (() -> Void)?) -> Void)?
     var transitionToSize: ((CGSize, Double, UIInterfaceOrientation) -> Void)?
+    var safeAreaInsetsChanged: (() -> Void)?
     
     private var _systemUserInterfaceStyle = ValuePromise<WindowUserInterfaceStyle>(ignoreRepeated: true)
     var systemUserInterfaceStyle: Signal<WindowUserInterfaceStyle, NoError> {
@@ -194,10 +195,6 @@ private final class WindowRootViewController: UIViewController, UIWindowSceneDel
         } else {
             self._systemUserInterfaceStyle.set(.light)
         }
-        
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
-            windowScene.delegate = self
-        }
     }
     
     required init?(coder aDecoder: NSCoder) {
@@ -210,17 +207,18 @@ private final class WindowRootViewController: UIViewController, UIWindowSceneDel
         }
     }
     
-    @available(iOS 26.0, *)
-    func preferredWindowingControlStyle(for windowScene: UIWindowScene) -> UIWindowScene.WindowingControlStyle {
-        return .minimal
-    }
-    
     override var preferredScreenEdgesDeferringSystemGestures: UIRectEdge {
         return self.gestureEdges
     }
     
     override var prefersHomeIndicatorAutoHidden: Bool {
         return self.prefersOnScreenNavigationHidden
+    }
+    
+    override func viewSafeAreaInsetsDidChange() {
+        super.viewSafeAreaInsetsDidChange()
+        
+        self.safeAreaInsetsChanged?()
     }
     
     override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
@@ -253,10 +251,12 @@ private final class NativeWindow: UIWindow, WindowHost {
     var addGlobalPortalHostViewImpl: ((PortalSourceView) -> Void)?
     var hitTestImpl: ((CGPoint, UIEvent?) -> UIView?)?
     var presentNativeImpl: ((UIViewController) -> Void)?
+    var motionShakeImpl: (() -> Void)?
     var invalidateDeferScreenEdgeGestureImpl: (() -> Void)?
     var invalidatePrefersOnScreenNavigationHiddenImpl: (() -> Void)?
     var invalidateSupportedOrientationsImpl: (() -> Void)?
     var cancelInteractiveKeyboardGesturesImpl: (() -> Void)?
+    var dismissedKeyboardByCurrentGestureImpl: (() -> Bool)?
     var forEachControllerImpl: (((ContainableController) -> Void) -> Void)?
     var getAccessibilityElementsImpl: (() -> [Any]?)?
     
@@ -301,6 +301,14 @@ private final class NativeWindow: UIWindow, WindowHost {
         }
     }
     
+    /// The touches this window's recognizers hold, let go of as its scene deactivates (#127).
+    private lazy var touchRelease = WindowTouchRelease(holders: { [weak self] in
+        guard let self else {
+            return []
+        }
+        return WindowTouchRelease.holders(in: self)
+    })
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         
@@ -309,6 +317,34 @@ private final class NativeWindow: UIWindow, WindowHost {
                 recognizer.delaysTouchesBegan = false
             }
         }
+
+        NotificationCenter.default.addObserver(self, selector: #selector(self.sceneActivationChanged(_:)), name: UIScene.willDeactivateNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(self.sceneActivationChanged(_:)), name: UIScene.didActivateNotification, object: nil)
+    }
+
+    @objc private func sceneActivationChanged(_ notification: Notification) {
+        guard let scene = notification.object as? UIScene, scene === self.windowScene else {
+            return
+        }
+        let deactivates = notification.name == UIScene.willDeactivateNotification
+        // After every other observer of this change, whatever their order: an owner that lets go of its own
+        // recognizer's touch then (the chat list's pan, released at rest so that it does not fling as the app leaves)
+        // does so first, and the window lets go of what is still held.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else {
+                return
+            }
+            if deactivates {
+                self.touchRelease.sceneWillDeactivate()
+            } else {
+                self.touchRelease.sceneDidActivate()
+            }
+        }
+    }
+
+    override func sendEvent(_ event: UIEvent) {
+        self.touchRelease.update(with: event)
+        super.sendEvent(event)
     }
     
     required init?(coder aDecoder: NSCoder) {
@@ -317,10 +353,18 @@ private final class NativeWindow: UIWindow, WindowHost {
     
     override func layoutSubviews() {
         super.layoutSubviews()
-        
+
         self.layoutSubviewsEvent?()
     }
-    
+
+    override func motionEnded(_ motion: UIEvent.EventSubtype, with event: UIEvent?) {
+        super.motionEnded(motion, with: event)
+
+        if motion == .motionShake {
+            self.motionShakeImpl?()
+        }
+    }
+
     override func _update(toInterfaceOrientation arg1: Int32, duration arg2: Double, force arg3: Bool) {
         self.updateIsUpdatingOrientationLayout?(true)
         super._update(toInterfaceOrientation: arg1, duration: arg2, force: arg3)
@@ -365,6 +409,10 @@ private final class NativeWindow: UIWindow, WindowHost {
     func cancelInteractiveKeyboardGestures() {
         self.cancelInteractiveKeyboardGesturesImpl?()
     }
+
+    var dismissedKeyboardByCurrentGesture: Bool {
+        return self.dismissedKeyboardByCurrentGestureImpl?() ?? false
+    }
     
     func forEachController(_ f: (ContainableController) -> Void) {
         self.forEachControllerImpl?(f)
@@ -373,6 +421,7 @@ private final class NativeWindow: UIWindow, WindowHost {
 
 public func nativeWindowHostView() -> (UIWindow & WindowHost, WindowHostView) {
     let window = NativeWindow(frame: UIScreen.main.bounds)
+    registerMainWindowForScreenBounds(window)
     
     let rootViewController = WindowRootViewController()
     window.rootViewController = rootViewController
@@ -408,6 +457,10 @@ public func nativeWindowHostView() -> (UIWindow & WindowHost, WindowHostView) {
         hostView?.updateSize?(size, duration, orientation)
     }
     
+    rootViewController.safeAreaInsetsChanged = { [weak hostView] in
+        hostView?.updateSystemInsets?()
+    }
+    
     window.updateSize = { _ in
     }
     
@@ -438,7 +491,11 @@ public func nativeWindowHostView() -> (UIWindow & WindowHost, WindowHostView) {
     window.presentNativeImpl = { [weak hostView] controller in
         hostView?.presentNative?(controller)
     }
-    
+
+    window.motionShakeImpl = { [weak hostView] in
+        hostView?.motionShake?()
+    }
+
     hostView.nativeController = { [weak rootViewController] in
         return rootViewController
     }
@@ -461,6 +518,10 @@ public func nativeWindowHostView() -> (UIWindow & WindowHost, WindowHostView) {
     
     window.cancelInteractiveKeyboardGesturesImpl = { [weak hostView] in
         hostView?.cancelInteractiveKeyboardGestures?()
+    }
+
+    window.dismissedKeyboardByCurrentGestureImpl = { [weak hostView] in
+        return hostView?.dismissedKeyboardByCurrentGesture?() ?? false
     }
     
     window.forEachControllerImpl = { [weak hostView] f in

@@ -1,7 +1,25 @@
 import Foundation
 import Postbox
-import TelegramApi
+internal import TelegramApi
 
+/// What a topic edit changed, from `messageActionTopicEdit` or `updateEditForumTopic` (the same fields under the same
+/// flags): a field that is present changed, and an icon id of 0 removes the icon.
+func forumTopicEditComponents(title: String?, iconEmojiId: Int64?, closed: Api.Bool?, hidden: Api.Bool?) -> [TelegramMediaActionType.ForumTopicEditComponent] {
+    var components: [TelegramMediaActionType.ForumTopicEditComponent] = []
+    if let title = title {
+        components.append(.title(title))
+    }
+    if let iconEmojiId = iconEmojiId {
+        components.append(.iconFileId(iconEmojiId == 0 ? nil : iconEmojiId))
+    }
+    if let closed = closed {
+        components.append(.isClosed(closed == .boolTrue))
+    }
+    if let hidden = hidden {
+        components.append(.isHidden(hidden == .boolTrue))
+    }
+    return components
+}
 
 func telegramMediaActionFromApiAction(_ action: Api.MessageAction) -> TelegramMediaAction? {
     switch action {
@@ -93,6 +111,14 @@ func telegramMediaActionFromApiAction(_ action: Api.MessageAction) -> TelegramMe
     case let .messageActionGeoProximityReached(messageActionGeoProximityReachedData):
         let (fromId, toId, distance) = (messageActionGeoProximityReachedData.fromId, messageActionGeoProximityReachedData.toId, messageActionGeoProximityReachedData.distance)
         return TelegramMediaAction(action: .geoProximityReached(from: fromId.peerId, to: toId.peerId, distance: distance))
+    case let .messageActionGramTransfer(messageActionGramTransferData):
+        return TelegramMediaAction(action: .gramTransfer(
+            amount: messageActionGramTransferData.amount,
+            peerAddress: messageActionGramTransferData.peerAddress,
+            transactionId: messageActionGramTransferData.transactionId,
+            comment: messageActionGramTransferData.comment,
+            commentEncrypted: (messageActionGramTransferData.flags & (1 << 1)) != 0
+        ))
     case let .messageActionGroupCall(messageActionGroupCallData):
         let (call, duration) = (messageActionGroupCallData.call, messageActionGroupCallData.duration)
         switch call {
@@ -161,21 +187,8 @@ func telegramMediaActionFromApiAction(_ action: Api.MessageAction) -> TelegramMe
         let (title, iconColor, iconEmojiId) = (messageActionTopicCreateData.title, messageActionTopicCreateData.iconColor, messageActionTopicCreateData.iconEmojiId)
         return TelegramMediaAction(action: .topicCreated(title: title, iconColor: iconColor, iconFileId: iconEmojiId))
     case let .messageActionTopicEdit(messageActionTopicEditData):
-        let (flags, title, iconEmojiId, closed, hidden) = (messageActionTopicEditData.flags, messageActionTopicEditData.title, messageActionTopicEditData.iconEmojiId, messageActionTopicEditData.closed, messageActionTopicEditData.hidden)
-        var components: [TelegramMediaActionType.ForumTopicEditComponent] = []
-        if let title = title {
-            components.append(.title(title))
-        }
-        if (flags & (1 << 1)) != 0 {
-            components.append(.iconFileId(iconEmojiId == 0 ? nil : iconEmojiId))
-        }
-        if let closed = closed {
-            components.append(.isClosed(closed == .boolTrue))
-        }
-        if let hidden = hidden {
-            components.append(.isHidden(hidden == .boolTrue))
-        }
-        return TelegramMediaAction(action: .topicEdited(components: components))
+        let (title, iconEmojiId, closed, hidden) = (messageActionTopicEditData.title, messageActionTopicEditData.iconEmojiId, messageActionTopicEditData.closed, messageActionTopicEditData.hidden)
+        return TelegramMediaAction(action: .topicEdited(components: forumTopicEditComponents(title: title, iconEmojiId: iconEmojiId, closed: closed, hidden: hidden)))
     case let .messageActionSuggestProfilePhoto(messageActionSuggestProfilePhotoData):
         let photo = messageActionSuggestProfilePhotoData.photo
         return TelegramMediaAction(action: .suggestedProfilePhoto(image: telegramMediaImageFromApiPhoto(photo)))
@@ -244,11 +257,21 @@ func telegramMediaActionFromApiAction(_ action: Api.MessageAction) -> TelegramMe
         }
         return TelegramMediaAction(action: .starGift(gift: gift, convertStars: convertStars, text: text, entities: entities, nameHidden: (flags & (1 << 0)) != 0, savedToProfile: (flags & (1 << 2)) != 0, converted: (flags & (1 << 3)) != 0, upgraded: (flags & (1 << 5)) != 0, canUpgrade: (flags & (1 << 10)) != 0, upgradeStars: upgradeStars, isRefunded: (flags & (1 << 9)) != 0, isPrepaidUpgrade: (flags & (1 << 13)) != 0, upgradeMessageId: upgradeMessageId, peerId: peer?.peerId, senderId: fromId?.peerId, savedId: savedId, prepaidUpgradeHash: prepaidUpgradeHash, giftMessageId: giftMessageId, upgradeSeparate: (flags & (1 << 16)) != 0, isAuctionAcquired: (flags & (1 << 17)) != 0, toPeerId: toId?.peerId, number: number))
     case let .messageActionStarGiftUnique(messageActionStarGiftUniqueData):
-        let (flags, apiGift, canExportAt, transferStars, fromId, peer, savedId, resaleAmount, canTransferDate, canResaleDate, dropOriginalDetailsStars, canCraftAt) = (messageActionStarGiftUniqueData.flags, messageActionStarGiftUniqueData.gift, messageActionStarGiftUniqueData.canExportAt, messageActionStarGiftUniqueData.transferStars, messageActionStarGiftUniqueData.fromId, messageActionStarGiftUniqueData.peer, messageActionStarGiftUniqueData.savedId, messageActionStarGiftUniqueData.resaleAmount, messageActionStarGiftUniqueData.canTransferAt, messageActionStarGiftUniqueData.canResellAt, messageActionStarGiftUniqueData.dropOriginalDetailsStars, messageActionStarGiftUniqueData.canCraftAt)
+        let (flags, apiGift, canExportAt, transferStars, fromId, peer, savedId, resaleAmount, canTransferDate, canResaleDate, dropOriginalDetailsStars, canCraftAt, message) = (messageActionStarGiftUniqueData.flags, messageActionStarGiftUniqueData.gift, messageActionStarGiftUniqueData.canExportAt, messageActionStarGiftUniqueData.transferStars, messageActionStarGiftUniqueData.fromId, messageActionStarGiftUniqueData.peer, messageActionStarGiftUniqueData.savedId, messageActionStarGiftUniqueData.resaleAmount, messageActionStarGiftUniqueData.canTransferAt, messageActionStarGiftUniqueData.canResellAt, messageActionStarGiftUniqueData.dropOriginalDetailsStars, messageActionStarGiftUniqueData.canCraftAt, messageActionStarGiftUniqueData.message)
+        let text: String?
+        let entities: [MessageTextEntity]?
+        switch message {
+        case let .textWithEntities(textWithEntitiesData):
+            text = textWithEntitiesData.text
+            entities = messageTextEntitiesFromApiEntities(textWithEntitiesData.entities)
+        default:
+            text = nil
+            entities = nil
+        }
         guard let gift = StarGift(apiStarGift: apiGift) else {
             return nil
         }
-        return TelegramMediaAction(action: .starGiftUnique(gift: gift, isUpgrade: (flags & (1 << 0)) != 0, isTransferred: (flags & (1 << 1)) != 0, savedToProfile: (flags & (1 << 2)) != 0, canExportDate: canExportAt, transferStars: transferStars, isRefunded: (flags & (1 << 5)) != 0, isPrepaidUpgrade: (flags & (1 << 11)) != 0, peerId: peer?.peerId, senderId: fromId?.peerId, savedId: savedId, resaleAmount: resaleAmount.flatMap { CurrencyAmount(apiAmount: $0) }, canTransferDate: canTransferDate, canResaleDate: canResaleDate, dropOriginalDetailsStars: dropOriginalDetailsStars, assigned: (flags & (1 << 13)) != 0, fromOffer: (flags & (1 << 14)) != 0, canCraftAt: canCraftAt, isCrafted: (flags & (1 << 16)) != 0))
+        return TelegramMediaAction(action: .starGiftUnique(gift: gift, isUpgrade: (flags & (1 << 0)) != 0, isTransferred: (flags & (1 << 1)) != 0, savedToProfile: (flags & (1 << 2)) != 0, canExportDate: canExportAt, transferStars: transferStars, isRefunded: (flags & (1 << 5)) != 0, isPrepaidUpgrade: (flags & (1 << 11)) != 0, peerId: peer?.peerId, senderId: fromId?.peerId, savedId: savedId, resaleAmount: resaleAmount.flatMap { CurrencyAmount(apiAmount: $0) }, canTransferDate: canTransferDate, canResaleDate: canResaleDate, dropOriginalDetailsStars: dropOriginalDetailsStars, assigned: (flags & (1 << 13)) != 0, fromOffer: (flags & (1 << 14)) != 0, canCraftAt: canCraftAt, isCrafted: (flags & (1 << 16)) != 0, text: text, entities: entities, nameHidden: (flags & (1 << 17)) != 0))
     case let .messageActionPaidMessagesRefunded(messageActionPaidMessagesRefundedData):
         let (count, stars) = (messageActionPaidMessagesRefundedData.count, messageActionPaidMessagesRefundedData.stars)
         return TelegramMediaAction(action: .paidMessagesRefunded(count: count, stars: stars))
@@ -374,6 +397,12 @@ func telegramMediaActionFromApiAction(_ action: Api.MessageAction) -> TelegramMe
             PeerId(namespace: Namespaces.Peer.CloudChannel, id: PeerId.Id._internalFromInt64Value($0))
         }
         return TelegramMediaAction(action: .communityChanged(communityId: communityId))
+    case let .messageActionChatJoinedViaCommunity(messageActionChatJoinedViaCommunityData):
+        return TelegramMediaAction(action: .joinedViaCommunity(communityId: PeerId(namespace: Namespaces.Peer.CloudChannel, id: PeerId.Id._internalFromInt64Value(messageActionChatJoinedViaCommunityData.communityId))))
+    case let .messageActionWalletTonConnectRequest(data):
+        return TelegramMediaAction(action: .walletTonConnectRequest(flags: data.flags, sessionId: data.sessionId, expires: data.expires, topic: data.topic, traceId: data.traceId, dappName: data.dappName))
+    case .messageActionNoPaidMessagesTokenUsed:
+        return TelegramMediaAction(action: .noPaidMessagesTokenUsed)
     }
 }
 

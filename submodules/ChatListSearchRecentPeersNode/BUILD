@@ -13,7 +13,6 @@ swift_library(
         "//submodules/AsyncDisplayKit:AsyncDisplayKit",
         "//submodules/Display:Display",
         "//submodules/TelegramCore:TelegramCore",
-        "//submodules/Postbox",
         "//submodules/ListSectionHeaderNode:ListSectionHeaderNode",
         "//submodules/HorizontalPeerItem:HorizontalPeerItem",
         "//submodules/MergeLists:MergeLists",

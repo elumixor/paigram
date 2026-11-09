@@ -71,13 +71,19 @@ public final class ButtonSubtitleComponent: CombinedComponent {
 private final class StoryQualityUpgradeSheetContentComponent: Component {
     typealias EnvironmentType = ViewControllerComponentContainer.Environment
     
+    let context: AccountContext
+    
     let action: () -> Void
     let dismiss: () -> Void
     
     init(
+    
+        context: AccountContext,
         action: @escaping () -> Void,
         dismiss: @escaping () -> Void
     ) {
+    
+        self.context = context
         self.action = action
         self.dismiss = dismiss
     }
@@ -321,7 +327,7 @@ private final class StoryQualityUpgradeSheetScreenComponent: Component {
                 metrics: environment.metrics,
                 deviceMetrics: environment.deviceMetrics,
                 isDisplaying: environment.isVisible,
-                isCentered: environment.metrics.widthClass == .regular,
+                isCentered: environment.presentsFloatingPanels,
                 hasInputHeight: !environment.inputHeight.isZero,
                 regularMetricsSize: CGSize(width: 430.0, height: 900.0),
                 dismiss: { [weak self] _ in
@@ -339,6 +345,7 @@ private final class StoryQualityUpgradeSheetScreenComponent: Component {
                 transition: transition,
                 component: AnyComponent(SheetComponent(
                     content: AnyComponent(StoryQualityUpgradeSheetContentComponent(
+                        context: component.context,
                         action: { [weak self] in
                             guard let self else {
                                 return

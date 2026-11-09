@@ -30,6 +30,7 @@ public final class AnimatedStickerComponent: Component {
     public let isAnimating: Bool
     public let size: CGSize
     
+
     public init(account: Account, animation: Animation, tintColor: UIColor? = nil, isAnimating: Bool = true, size: CGSize) {
         self.account = account
         self.animation = animation

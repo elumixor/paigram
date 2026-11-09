@@ -174,6 +174,14 @@ public class ChatMessageInstantVideoBubbleContentNode: ChatMessageBubbleContentN
     required public init?(coder aDecoder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
+    
+    override public func bubblelessLiftParts() -> [ChatMessageBubblelessLiftPart] {
+        // A round video lifts alone, its circle without a card.
+        if let videoFrame = self.interactiveVideoNode.videoFrame {
+            return [.standalone(videoFrame.offsetBy(dx: self.interactiveVideoNode.frame.minX, dy: self.interactiveVideoNode.frame.minY))]
+        }
+        return super.bubblelessLiftParts()
+    }
         
     override public func asyncLayoutContent() -> (_ item: ChatMessageBubbleContentItem, _ layoutConstants: ChatMessageItemLayoutConstants, _ preparePosition: ChatMessageBubblePreparePosition, _ messageSelection: Bool?, _ constrainedSize: CGSize, _ avatarInset: CGFloat) -> (ChatMessageBubbleContentProperties, CGSize?, CGFloat, (CGSize, ChatMessageBubbleContentPosition) -> (CGFloat, (CGFloat) -> (CGSize, (ListViewItemUpdateAnimation, Bool, ListViewItemApply?) -> Void))) {
         let interactiveVideoLayout = self.interactiveVideoNode.asyncLayout()
@@ -183,7 +191,7 @@ public class ChatMessageInstantVideoBubbleContentNode: ChatMessageBubbleContentN
         let audioTranscriptionState = self.audioTranscriptionState
         let didSetupFileNode = self.item != nil
         
-        return { item, layoutConstants, preparePosition, selection, constrainedSize, avatarInset in
+        return { [weak self] item, layoutConstants, preparePosition, selection, constrainedSize, avatarInset in
             var selectedFile: TelegramMediaFile?
             for media in item.message.media {
                 if let telegramFile = media as? TelegramMediaFile {
@@ -221,7 +229,7 @@ public class ChatMessageInstantVideoBubbleContentNode: ChatMessageBubbleContentN
                 }
             }
             
-            let automaticDownload = shouldDownloadMediaAutomatically(settings: item.controllerInteraction.automaticMediaDownloadSettings, peerType: item.associatedData.automaticDownloadPeerType, networkType: item.associatedData.automaticDownloadNetworkType, authorPeerId: item.message.author?.id, contactsPeerIds: item.associatedData.contactsPeerIds, media: selectedFile!)
+            let automaticDownload = shouldDownloadMediaAutomatically(settings: item.controllerInteraction.automaticMediaDownloadSettings, peerType: item.associatedData.automaticDownloadPeerType, networkType: item.associatedData.automaticDownloadNetworkType, authorPeerId: item.message.author?.id, contactsPeerIds: item.associatedData.contactsPeerIds, media: .file(selectedFile!))
             
             let (initialWidth, refineLayout) = interactiveFileLayout(ChatMessageInteractiveFileNode.Arguments(
                 context: item.context,
@@ -272,15 +280,17 @@ public class ChatMessageInstantVideoBubbleContentNode: ChatMessageBubbleContentN
             let leftInset: CGFloat = 0.0
             let rightInset: CGFloat = 0.0
         
-            let (videoLayout, videoApply) = interactiveVideoLayout(ChatMessageBubbleContentItem(context: item.context, controllerInteraction: item.controllerInteraction, message: item.message, topMessage: item.message, content: item.content, read: item.read, chatLocation: item.chatLocation, presentationData: item.presentationData, associatedData: item.associatedData, attributes: item.attributes, isItemPinned: item.message.tags.contains(.pinned) && !isReplyThread, isItemEdited: false), constrainedSize.width - leftInset - rightInset - avatarInset, displaySize, maximumDisplaySize, isPlaying ? 1.0 : 0.0, .free, automaticDownload, avatarInset)
+            let (videoLayout, videoApply) = interactiveVideoLayout(ChatMessageBubbleContentItem(context: item.context, controllerInteraction: item.controllerInteraction, message: item.message, topMessage: item.message, content: item.content, read: item.read, chatLocation: item.chatLocation, presentationData: item.presentationData, associatedData: item.associatedData, attributes: item.attributes, isItemPinned: item.message.tags.contains(.pinned) && !isReplyThread, isItemEdited: false, bubbleStyle: item.bubbleStyle), constrainedSize.width - leftInset - rightInset - avatarInset, displaySize, maximumDisplaySize, isPlaying ? 1.0 : 0.0, .free, automaticDownload, avatarInset)
             
-            let videoFrame = CGRect(origin: CGPoint(x: 1.0, y: 1.0), size: videoLayout.contentSize)
+            // The video sits a point inside a bubble's edge; without a bubble its frame is the block's edge.
+            let videoInset: CGFloat = item.bubbleStyle == .bubbleless ? 0.0 : 1.0
+            let videoFrame = CGRect(origin: CGPoint(x: videoInset, y: videoInset), size: videoLayout.contentSize)
             
             let contentProperties = ChatMessageBubbleContentProperties(hidesSimpleAuthorHeader: false, headerSpacing: 0.0, hidesBackground: .never, forceFullCorners: false, forceAlignment: .none, shareButtonOffset: isExpanded ? nil : CGPoint(x: avatarInset + displaySize.width + 4.0, y: -25.0), hidesHeaders: !isExpanded, avatarOffset: !isExpanded && isPlaying ? -100.0 : 0.0)
             
-            let videoFrameWidth = videoFrame.width + 2.0
+            let videoFrameWidth = videoFrame.width + videoInset * 2.0
             
-            return (contentProperties, nil, initialWidth, { constrainedSize, position in
+            return (contentProperties, nil, initialWidth, { [weak self] constrainedSize, position in
                 var refinedWidth = videoFrameWidth
                 var finishLayout: ((CGFloat) -> (CGSize, (Bool, ListViewItemUpdateAnimation, ListViewItemApply?) -> Void))?
                 
@@ -293,7 +303,7 @@ public class ChatMessageInstantVideoBubbleContentNode: ChatMessageBubbleContentN
                     refinedWidth = videoFrameWidth
                 }
                 
-                return (refinedWidth, { boundingWidth in
+                return (refinedWidth, { [weak self] boundingWidth in
                     var finalSize: CGSize
                     var finalFileSize: CGSize?
                     var finalFileApply: ((Bool, ListViewItemUpdateAnimation, ListViewItemApply?) -> Void)?
@@ -302,12 +312,12 @@ public class ChatMessageInstantVideoBubbleContentNode: ChatMessageBubbleContentN
                         if isExpanded {
                             finalSize = CGSize(width: fileSize.width + layoutConstants.file.bubbleInsets.left + layoutConstants.file.bubbleInsets.right, height: fileSize.height + layoutConstants.file.bubbleInsets.top + layoutConstants.file.bubbleInsets.bottom)
                         } else {
-                            finalSize = CGSize(width: boundingWidth, height: videoFrame.height + 2.0)
+                            finalSize = CGSize(width: boundingWidth, height: videoFrame.height + videoInset * 2.0)
                         }
                         finalFileSize = fileSize
                         finalFileApply = fileApply
                     } else {
-                        finalSize = CGSize(width: boundingWidth, height: videoFrame.height + 2.0)
+                        finalSize = CGSize(width: boundingWidth, height: videoFrame.height + videoInset * 2.0)
                     }
                     
                     return (finalSize, { [weak self] animation, synchronousLoads, applyInfo in

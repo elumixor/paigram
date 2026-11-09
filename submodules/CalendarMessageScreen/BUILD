@@ -20,6 +20,9 @@ swift_library(
         "//submodules/DirectMediaImageCache:DirectMediaImageCache",
         "//submodules/TelegramStringFormatting:TelegramStringFormatting",
         "//submodules/TooltipUI:TooltipUI",
+        "//submodules/TelegramUI/Components/ButtonComponent",
+        "//submodules/Components/ComponentDisplayAdapters",
+        "//submodules/TelegramUI/Components/EdgeEffect",
     ],
     visibility = [
         "//visibility:public",

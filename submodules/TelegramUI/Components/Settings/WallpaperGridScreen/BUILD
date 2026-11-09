@@ -11,7 +11,6 @@ swift_library(
     deps = [
         "//submodules/AsyncDisplayKit",
         "//submodules/Display",
-        "//submodules/Postbox",
         "//submodules/TelegramCore",
         "//submodules/SSignalKit/SwiftSignalKit",
         "//submodules/TelegramPresentationData",
@@ -36,6 +35,9 @@ swift_library(
         "//submodules/TelegramUI/Components/Settings/ThemeAccentColorScreen",
         "//submodules/TelegramUI/Components/PremiumLockButtonSubtitleComponent",
         "//submodules/TelegramUI/Components/Settings/BoostLevelIconComponent",
+        "//submodules/TelegramUI/Components/GlassBackgroundComponent",
+        "//submodules/TelegramUI/Components/EdgeEffect",
+        "//submodules/Components/ComponentDisplayAdapters",
     ],
     visibility = [
         "//visibility:public",

@@ -16,6 +16,7 @@ import OpenInExternalAppUI
 import ScreenCaptureDetection
 import UndoUI
 import TranslateUI
+import UrlWhitelist
 
 private func tagsForMessage(_ message: Message) -> MessageTags? {
     //TODO:rewrite to take all media (effectiveMedia returns all rich-text media; we stop at the first)
@@ -62,6 +63,17 @@ private func galleryMediaForMedia(media: Media) -> Media? {
 }
 
 func mediaForMessage(message: Message, mediaSubject: GalleryMediaSubject? = nil) -> [(Media, TelegramMediaImage?)] {
+    if case let .richTextMedia(mediaId) = mediaSubject {
+        // The caller named the exact medium (a tap on one block of a rich message), so resolve it by id
+        // instead of falling into the first-match loop below. Returning [] on a miss is deliberate: a
+        // named-but-absent medium must open nothing, never fall back to some other attachment.
+        for media in message.effectiveMedia {
+            if media.id == mediaId, let result = galleryMediaForMedia(media: media) {
+                return [(result, nil)]
+            }
+        }
+        return []
+    }
     //TODO:rewrite to take all media (effectiveMedia returns all rich-text media; we return the first match)
     for media in message.effectiveMedia {
         if let result = galleryMediaForMedia(media: media) {
@@ -367,7 +379,18 @@ public func galleryItemForEntry(
                     }
                     
                     if isHLS {
-                        content = HLSVideoContent(id: .message(message.stableId, file.fileId), userLocation: .peer(message.id.peerId), fileReference: .message(message: MessageReference(message), media: file), streamVideo: streamVideos, loopVideo: loopVideos, autoFetchFullSizeThumbnail: true, codecConfiguration: HLSCodecConfiguration(context: context))
+                        // Where the item's player will seek once it owns the content, by the same precedence. A forwarded
+                        // timestamp only for the item the gallery opens on: a neighbour swiped to that already shows its
+                        // video plays from 0, so loading at its timestamp would be wasted, and one that does not seeks.
+                        var startTimestamp = timecode
+                        if startTimestamp == nil && isCentral {
+                            for attribute in message.attributes {
+                                if let attribute = attribute as? ForwardVideoTimestampAttribute {
+                                    startTimestamp = Double(attribute.timestamp)
+                                }
+                            }
+                        }
+                        content = HLSVideoContent(id: .message(message.stableId, file.fileId), userLocation: .peer(message.id.peerId), fileReference: .message(message: MessageReference(message), media: file), streamVideo: streamVideos, loopVideo: loopVideos, autoFetchFullSizeThumbnail: true, captureProtected: captureProtected, codecConfiguration: HLSCodecConfiguration(context: context), startTimestamp: startTimestamp)
                     } else {
                         content = NativeVideoContent(id: .message(message.stableId, file.fileId), userLocation: .peer(message.id.peerId), fileReference: .message(message: MessageReference(message), media: file), imageReference: mediaImage.flatMap({ ImageMediaReference.message(message: MessageReference(message), media: $0) }), streamVideo: .conservative, loopVideo: loopVideos, tempFilePath: tempFilePath, captureProtected: captureProtected, storeAfterDownload: generateStoreAfterDownload?(message, file))
                     }
@@ -693,7 +716,7 @@ private func galleryEntriesForMessageHistoryEntries(_ entries: [MessageHistoryEn
 }
 
 public class GalleryController: ViewController, StandalonePresentableController, KeyShortcutResponder, GalleryControllerProtocol {
-    public static let darkNavigationTheme = NavigationBarTheme(overallDarkAppearance: true, buttonColor: .white, disabledButtonColor: UIColor(rgb: 0x525252), primaryTextColor: .white, backgroundColor: UIColor(white: 0.0, alpha: 0.6), enableBackgroundBlur: false, separatorColor: UIColor(white: 0.0, alpha: 0.8), badgeBackgroundColor: .clear, badgeStrokeColor: .clear, badgeTextColor: .clear, edgeEffectColor: .clear, accentButtonColor: .white, accentDisabledButtonColor: .white, accentForegroundColor: .black, style: .glass)
+    public static let darkNavigationTheme = NavigationBarTheme(overallDarkAppearance: true, buttonColor: .white, disabledButtonColor: UIColor(rgb: 0x525252), primaryTextColor: .white, badgeBackgroundColor: .clear, badgeTextColor: .clear, edgeEffectColor: .clear, accentButtonColor: .white, accentDisabledButtonColor: .white, accentForegroundColor: .black)
     
     private var galleryNode: GalleryControllerNode {
         return self.displayNode as! GalleryControllerNode
@@ -713,6 +736,11 @@ public class GalleryController: ViewController, StandalonePresentableController,
         return self._ready
     }
     private var didSetReady = false
+    
+    /// Has its own header: the bar takes no part in a navigation transition.
+    override public var navigationBarTransitionSource: NavigationBarTransitionSource? {
+        return nil
+    }
     
     private var adjustedForInitialPreviewingLayout = false
     
@@ -1200,7 +1228,7 @@ public class GalleryController: ViewController, StandalonePresentableController,
                         let actionSheet = ActionSheetController(presentationData: presentationData)
                         
                         var items: [ActionSheetItem] = []
-                        items.append(ActionSheetTextItem(title: cleanUrl))
+                        items.append(ActionSheetTextItem(title: displayUrlRevealingLoginPart(url) ?? cleanUrl))
                         items.append(ActionSheetButtonItem(title: openText, color: .accent, action: { [weak actionSheet] in
                             actionSheet?.dismissAnimated()
                             if let strongSelf = self {
@@ -1973,7 +2001,7 @@ public class GalleryController: ViewController, StandalonePresentableController,
             if let centralItemNode = self.galleryNode.pager.centralItemNode(), let itemSize = centralItemNode.contentSize() {
                 centralItemNode.adjustForPreviewing()
                 self.preferredContentSize = itemSize.aspectFitted(layout.size)
-                self.containerLayoutUpdated(ContainerViewLayout(size: self.preferredContentSize, metrics: LayoutMetrics(), deviceMetrics: layout.deviceMetrics, intrinsicInsets: UIEdgeInsets(), safeInsets: UIEdgeInsets(), additionalInsets: UIEdgeInsets(), statusBarHeight: nil, inputHeight: nil, inputHeightIsInteractivellyChanging: false, inVoiceOver: false), transition: .immediate)
+                self.containerLayoutUpdated(ContainerViewLayout(size: self.preferredContentSize, metrics: LayoutMetrics(), deviceMetrics: layout.deviceMetrics, intrinsicInsets: UIEdgeInsets(), safeInsets: UIEdgeInsets(), reservedCorners: .none, division: nil, additionalInsets: UIEdgeInsets(), statusBarHeight: nil, inputHeight: nil, inputHeightIsInteractivellyChanging: false, inVoiceOver: false, presentedInFormSheet: false), transition: .immediate)
             }
         }
     }

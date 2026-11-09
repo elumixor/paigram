@@ -9,8 +9,9 @@ import TelegramPresentationData
 // A paged carousel for an `InstantPageBlock.slideshow`. Ports V1's InstantPageSlideshowNode /
 // InstantPageSlideshowPagerNode (InstantPageSlideshowItemNode.swift), simplified to create all pages
 // eagerly (slideshows are short; this avoids V1's central±1 index bookkeeping and makes the gallery
-// transition source available for every page). Each image page hosts an `InstantPageImageNode` exactly
-// like the static media views; non-image medias render an empty page (matches V1).
+// transition source available for every page). Each photo/video page hosts an `InstantPageImageNode`
+// exactly like the static media views (a video renders as a poster + play badge, tap opens the gallery);
+// any other media kind renders an empty page.
 final class InstantPageV2SlideshowView: UIView, InstantPageItemView, UIScrollViewDelegate {
     private(set) var item: InstantPageV2SlideshowItem
     var itemFrame: CGRect { return self.item.frame }
@@ -27,10 +28,6 @@ final class InstantPageV2SlideshowView: UIView, InstantPageItemView, UIScrollVie
     private var pageViews: [UIView] = []
     private var pageImageNodes: [InstantPageImageNode] = []
 
-    // The index (into `item.medias`) of the page currently centered in the scroll view. Only this page's
-    // media has an on-screen representation, so it is the only one the gallery may animate in/out to.
-    private var currentPageIndex: Int = 0
-
     init(item: InstantPageV2SlideshowItem, renderContext: InstantPageV2RenderContext, theme: InstantPageTheme) {
         self.item = item
         self.renderContext = renderContext
@@ -42,6 +39,9 @@ final class InstantPageV2SlideshowView: UIView, InstantPageItemView, UIScrollVie
 
         self.backgroundColor = .black                      // structural — slideshow backdrop is black (gallery look), not the media placeholder color
         self.clipsToBounds = true                          // structural
+        if item.cornerRadius != 0.0 {
+            self.layer.cornerRadius = item.cornerRadius
+        }
 
         self.scrollView.disablesInteractiveTransitionGestureRecognizer = true
         
@@ -82,7 +82,14 @@ final class InstantPageV2SlideshowView: UIView, InstantPageItemView, UIScrollVie
             let pageView = UIView()
             pageView.clipsToBounds = true
             pageView.backgroundColor = .black   // black letterbox behind each page, not the media placeholder color
-            if case .image = media.media {
+            // Both photos (`.image`) and videos (`.file`) get a page: `InstantPageImageNode` renders a
+            // video `.file` as a poster + play badge (tap opens the gallery), like a collage video cell.
+            let isRenderableMedia: Bool
+            switch media.media {
+            case .image, .file: isRenderableMedia = true
+            default: isRenderableMedia = false
+            }
+            if isRenderableMedia {
                 let node = makeMediaWrapper(
                     frame: CGRect(origin: .zero, size: self.item.frame.size),
                     media: media,
@@ -92,20 +99,20 @@ final class InstantPageV2SlideshowView: UIView, InstantPageItemView, UIScrollVie
                     theme: self.theme,
                     openMedia: openMedia,
                     longPressMedia: { _ in },
-                    emptyColor: .black
+                    emptyColor: .black,
+                    fit: true   // letterbox each page: one shared block frame (tallest media) would otherwise crop shorter items
                 )
                 pageView.addSubview(node.view)
                 self.pageImageNodes.append(node)
             }
-            // Non-image medias (none in practice — layoutSlideshow filters to images) get an empty page
-            // to keep page indices aligned with the page control.
+            // Any other media kind (none in practice — layoutSlideshow emits only image/video) gets an
+            // empty page to keep page indices aligned with the page control.
             self.scrollView.addSubview(pageView)
             self.pageViews.append(pageView)
         }
 
         self.pageControlNode.pagesCount = self.item.medias.count
         self.pageControlNode.setPage(0.0)
-        self.currentPageIndex = 0
         // Re-register media indices when rebuilding while already on-window (positional reuse with
         // changed content); no-ops before the view is attached, where didMoveToWindow handles it.
         self.registerMedias()
@@ -154,8 +161,30 @@ final class InstantPageV2SlideshowView: UIView, InstantPageItemView, UIScrollVie
         guard width > 0.0, !self.item.medias.isEmpty else { return }
         let page = Int((scrollView.contentOffset.x + width / 2.0) / width)
         let clamped = max(0, min(self.item.medias.count - 1, page))
-        self.currentPageIndex = clamped
         self.pageControlNode.setPage(CGFloat(clamped))
+    }
+
+    // Scrolls, without animation, to the page showing `media` if this carousel holds it.
+    @discardableResult
+    private func showPage(of media: InstantPageMedia) -> Bool {
+        // A carousel created while the gallery is open may not be laid out yet; its pages need their frames
+        // before one can be scrolled to. The page dots follow the scroll in `scrollViewDidScroll`.
+        self.layoutIfNeeded()
+        return InstantPageV2SlideshowView.scrollToPage(of: media, medias: self.item.medias, scrollView: self.scrollView) != nil
+    }
+
+    static func scrollToPage(of media: InstantPageMedia, medias: [InstantPageMedia], scrollView: UIScrollView) -> Int? {
+        guard let index = medias.firstIndex(where: { instantPageMediaMatchesNodeIdentity($0, media) }) else {
+            return nil
+        }
+        let width = scrollView.bounds.width
+        if width > 0.0 {
+            let contentOffset = CGPoint(x: CGFloat(index) * width, y: 0.0)
+            if scrollView.contentOffset != contentOffset {
+                scrollView.setContentOffset(contentOffset, animated: false)
+            }
+        }
+        return index
     }
 
     func update(item: InstantPageV2SlideshowItem, theme: InstantPageTheme, renderContext: InstantPageV2RenderContext) {
@@ -163,12 +192,29 @@ final class InstantPageV2SlideshowView: UIView, InstantPageItemView, UIScrollVie
         self.item = item
         self.theme = theme
         self.backgroundColor = .black
+        if self.layer.cornerRadius != item.cornerRadius {
+            self.layer.cornerRadius = item.cornerRadius
+        }
         if mediasChanged {
             self.rebuildPages()
         } else {
             let strings = renderContext.context.sharedContext.currentPresentationData.with { $0 }.strings
             for node in self.pageImageNodes {
                 node.update(strings: strings, theme: theme)
+                node.captureProtected = renderContext.captureProtected
+                // The reuse check above compares only the INDEX list, so a page keeps its node while
+                // its media value moves underneath it. The node's `media` is what a tap hands to the
+                // gallery's lookup, so it has to be re-pointed or tap-to-open silently stops working
+                // (see `InstantPageImageNode.updateMediaValue`). Matched by index rather than by
+                // position: a non-renderable media contributes a page but no node.
+                guard let updated = self.item.medias.first(where: { $0.index == node.media.index }), updated != node.media else {
+                    continue
+                }
+                if updated.media.id != node.media.media.id {
+                    node.updateInteractiveMediaBinding(sourceLocation: renderContext.sourceLocation, media: updated, imageReferenceForMedia: renderContext.imageReference, fileReferenceForMedia: renderContext.fileReference)
+                } else {
+                    node.updateMediaValue(updated)
+                }
             }
         }
         self.setNeedsLayout()
@@ -178,11 +224,10 @@ final class InstantPageV2SlideshowView: UIView, InstantPageItemView, UIScrollVie
 
     func instantPageTransitionNode(for media: InstantPageMedia) -> (ASDisplayNode, CGRect, () -> (UIView?, UIView?))? {
         // A slideshow registers under EVERY contained media index, so the gallery may ask about a media that
-        // sits on an off-screen page. Only the currently-displayed page has an on-screen representation;
-        // animating in/out to a scrolled-away page's node would fly to the wrong place. Return nil for any
-        // non-current media so the gallery falls back to a plain fade instead of using it to animate.
-        guard self.currentPageIndex >= 0, self.currentPageIndex < self.item.medias.count,
-              self.item.medias[self.currentPageIndex].index == media.index else {
+        // sits on an off-screen page: the item it closes on after the user swiped to it. Only the displayed
+        // page has an on-screen representation, so scroll to that media's page first; the photo then flies
+        // back into its own slot and the carousel stays on it, as a chat album does.
+        guard self.showPage(of: media) else {
             return nil
         }
         for node in self.pageImageNodes {
@@ -194,8 +239,35 @@ final class InstantPageV2SlideshowView: UIView, InstantPageItemView, UIScrollVie
     }
 
     func instantPageUpdateHiddenMedia(_ media: InstantPageMedia?) {
+        // The gallery hides each item it swipes to: follow it, so the carousel already shows that item when the
+        // viewer closes, including an interactive swipe-away that reveals the bubble before the transition.
+        if let media {
+            self.showPage(of: media)
+        }
         for node in self.pageImageNodes {
             node.updateHiddenMedia(media: media)
+        }
+        InstantPageV2SlideshowView.updatePageControlHidden(self.pageControlNode.view, isHidden: InstantPageV2SlideshowView.pageControlIsHidden(medias: self.item.medias, hiddenMedia: media))
+    }
+
+    // The gallery flies its copy of the photo on a surface above this view and removes it only when the close
+    // transition lands, so dots left visible under it pop in at that moment. Like chat media's overlays
+    // (`ChatMessageInteractiveMediaNode.updateIsHidden`), they hide while one of this carousel's media is in the
+    // gallery and fade back in when the gallery hands it back.
+    static func pageControlIsHidden(medias: [InstantPageMedia], hiddenMedia: InstantPageMedia?) -> Bool {
+        guard let hiddenMedia else {
+            return false
+        }
+        return medias.contains(where: { instantPageMediaMatchesNodeIdentity($0, hiddenMedia) })
+    }
+
+    static func updatePageControlHidden(_ view: UIView, isHidden: Bool) {
+        if view.isHidden == isHidden {
+            return
+        }
+        view.isHidden = isHidden
+        if !isHidden {
+            view.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.2)
         }
     }
 }

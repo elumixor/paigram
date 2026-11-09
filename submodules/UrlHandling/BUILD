@@ -15,6 +15,7 @@ swift_library(
         "//submodules/AccountContext:AccountContext",
         "//submodules/TelegramUIPreferences:TelegramUIPreferences",
         "//submodules/TelegramNotices:TelegramNotices",
+        "//submodules/WalletContext:WalletContext",
     ],
     visibility = [
         "//visibility:public",

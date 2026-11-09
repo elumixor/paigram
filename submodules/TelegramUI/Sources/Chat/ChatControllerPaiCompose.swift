@@ -15,7 +15,7 @@ extension ChatControllerImpl {
     /// the box writes it from the chat's recent history in the chat's language and the user's style.
     func openPaiCompose() {
         guard #available(iOS 16.0, *) else {
-            self.chatDisplayNode.openTextProcessing()
+            self.chatDisplayNode.openAICompose()
             return
         }
         guard let peerId = self.chatLocation.peerId, let panel = self.chatDisplayNode.textInputPanelNode, !panel.isPaiComposing else {

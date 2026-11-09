@@ -9,7 +9,6 @@ swift_library(
     copts = [
     ],
     deps = [
-        "//submodules/Postbox",
         "//submodules/TelegramCore",
         "//submodules/TelegramPresentationData",
         "//submodules/MergeLists",

@@ -25,6 +25,9 @@ final class PeerInfoInteraction {
     let openDeleteReaction: (EngineMessage.Id) -> Void
     let openShareBot: () -> Void
     let openAddBotToGroup: () -> Void
+    let openAgentConnect: () -> Void
+    let setAgentActiveProvider: (String) -> Void
+    let openAgentProviderContextMenu: (String, ASDisplayNode, ContextGesture?) -> Void
     let performBotCommand: (PeerInfoBotCommand) -> Void
     let editingOpenPublicLinkSetup: () -> Void
     let editingOpenNameColorSetup: () -> Void
@@ -61,6 +64,7 @@ final class PeerInfoInteraction {
     let openAddMember: () -> Void
     let openQrCode: () -> Void
     let editingOpenReactionsSetup: () -> Void
+    let editingOpenWelcomeMessages: () -> Void
     let dismissInput: () -> Void
     let openForumSettings: () -> Void
     let displayTopicsLimited: (TopicsLimitedReason) -> Void
@@ -105,6 +109,9 @@ final class PeerInfoInteraction {
         openDeleteReaction: @escaping (EngineMessage.Id) -> Void,
         openShareBot: @escaping () -> Void,
         openAddBotToGroup: @escaping () -> Void,
+        openAgentConnect: @escaping () -> Void,
+        setAgentActiveProvider: @escaping (String) -> Void,
+        openAgentProviderContextMenu: @escaping (String, ASDisplayNode, ContextGesture?) -> Void,
         performBotCommand: @escaping (PeerInfoBotCommand) -> Void,
         editingOpenPublicLinkSetup: @escaping () -> Void,
         editingOpenNameColorSetup: @escaping () -> Void,
@@ -141,6 +148,7 @@ final class PeerInfoInteraction {
         openAddMember: @escaping () -> Void,
         openQrCode: @escaping () -> Void,
         editingOpenReactionsSetup: @escaping () -> Void,
+        editingOpenWelcomeMessages: @escaping () -> Void,
         dismissInput: @escaping () -> Void,
         openForumSettings: @escaping () -> Void,
         displayTopicsLimited: @escaping (TopicsLimitedReason) -> Void,
@@ -184,6 +192,9 @@ final class PeerInfoInteraction {
         self.openDeleteReaction = openDeleteReaction
         self.openShareBot = openShareBot
         self.openAddBotToGroup = openAddBotToGroup
+        self.openAgentConnect = openAgentConnect
+        self.setAgentActiveProvider = setAgentActiveProvider
+        self.openAgentProviderContextMenu = openAgentProviderContextMenu
         self.performBotCommand = performBotCommand
         self.editingOpenPublicLinkSetup = editingOpenPublicLinkSetup
         self.editingOpenNameColorSetup = editingOpenNameColorSetup
@@ -220,6 +231,7 @@ final class PeerInfoInteraction {
         self.openAddMember = openAddMember
         self.openQrCode = openQrCode
         self.editingOpenReactionsSetup = editingOpenReactionsSetup
+        self.editingOpenWelcomeMessages = editingOpenWelcomeMessages
         self.dismissInput = dismissInput
         self.openForumSettings = openForumSettings
         self.displayTopicsLimited = displayTopicsLimited

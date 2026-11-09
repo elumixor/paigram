@@ -11,7 +11,6 @@
 
 - (instancetype _Nonnull)initWithBaseAppBundleId:(NSString * _Nonnull)baseAppBundleId;
 
-@property (nonatomic, strong, readonly) NSString * _Nullable appCenterId;
 @property (nonatomic, readonly) int32_t apiId;
 @property (nonatomic, strong, readonly) NSString * _Nonnull apiHash;
 @property (nonatomic, readonly) bool isInternalBuild;
@@ -20,6 +19,8 @@
 @property (nonatomic, strong, readonly) NSString * _Nonnull appSpecificUrlScheme;
 @property (nonatomic, readonly) bool isICloudEnabled;
 @property (nonatomic, readonly) bool isSiriEnabled;
+
++ (NSString * _Nullable)keychainAccessGroupForBaseAppBundleId:(NSString * _Nonnull)baseAppBundleId NS_SWIFT_NAME(keychainAccessGroup(baseAppBundleId:));
 
 + (DeviceSpecificEncryptionParameters * _Nonnull)deviceSpecificEncryptionParameters:(NSString * _Nonnull)rootPath baseAppBundleId:(NSString * _Nonnull)baseAppBundleId;
 - (NSData * _Nullable)bundleDataWithAppToken:(NSData * _Nullable)appToken tokenType:(NSString * _Nullable)tokenType tokenEnvironment:(NSString * _Nullable)tokenEnvironment signatureDict:(NSDictionary * _Nullable)signatureDict;

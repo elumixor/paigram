@@ -21,16 +21,32 @@ import BatchVideoRendering
 import GlassBackgroundComponent
 import ComponentFlow
 import ComponentDisplayAdapters
+import ChatMessageWidgetBubbleContentNode
 
 private struct ChatContextResultStableId: Hashable {
     let result: ChatContextResult
+    /// Drawn as a widget preview: another identity, so a change of how it draws is a delete and an insert.
+    let isWidget: Bool
 
     func hash(into hasher: inout Hasher) {
         hasher.combine(result.id.hashValue)
+        hasher.combine(self.isWidget)
     }
     
     static func ==(lhs: ChatContextResultStableId, rhs: ChatContextResultStableId) -> Bool {
-        return lhs.result == rhs.result
+        return lhs.result == rhs.result && lhs.isWidget == rhs.isWidget
+    }
+}
+
+/// widget-sandbox v0.2 (v0.2 W3): a widget result's preview in the strip: the widget, how it draws, and the chat's width
+/// (its sent bubble's width follows it).
+private struct HorizontalListWidgetPreview: Equatable {
+    let widget: TelegramMediaWidget
+    let appearance: ChatContextResultWidgetAppearance
+    let chatWidth: CGFloat
+    
+    static func ==(lhs: HorizontalListWidgetPreview, rhs: HorizontalListWidgetPreview) -> Bool {
+        return lhs.widget.isEqual(to: rhs.widget) && lhs.appearance == rhs.appearance && lhs.chatWidth == rhs.chatWidth
     }
 }
 
@@ -38,20 +54,24 @@ private struct HorizontalListContextResultsChatInputContextPanelEntry: Comparabl
     let index: Int
     let theme: PresentationTheme
     let result: ChatContextResult
+    let widgetPreview: HorizontalListWidgetPreview?
     
     var stableId: ChatContextResultStableId {
-        return ChatContextResultStableId(result: self.result)
+        return ChatContextResultStableId(result: self.result, isWidget: self.widgetPreview != nil)
     }
     
     static func ==(lhs: HorizontalListContextResultsChatInputContextPanelEntry, rhs: HorizontalListContextResultsChatInputContextPanelEntry) -> Bool {
-        return lhs.index == rhs.index && lhs.theme === rhs.theme && lhs.result == rhs.result
+        return lhs.index == rhs.index && lhs.theme === rhs.theme && lhs.result == rhs.result && lhs.widgetPreview == rhs.widgetPreview
     }
     
     static func <(lhs: HorizontalListContextResultsChatInputContextPanelEntry, rhs: HorizontalListContextResultsChatInputContextPanelEntry) -> Bool {
         return lhs.index < rhs.index
     }
     
-    func item(context: AccountContext, batchVideoContext: QueueLocalObject<BatchVideoRenderingContext>, resultSelected: @escaping (ChatContextResult, ASDisplayNode, CGRect) -> Bool) -> ListViewItem {
+    func item(context: AccountContext, strings: PresentationStrings, batchVideoContext: QueueLocalObject<BatchVideoRenderingContext>, resultSelected: @escaping (ChatContextResult, ASDisplayNode, CGRect) -> Bool) -> ListViewItem {
+        if let widgetPreview = self.widgetPreview {
+            return HorizontalListContextResultsChatInputPanelWidgetItem(strings: strings, result: self.result, widget: widgetPreview.widget, appearance: widgetPreview.appearance, chatWidth: widgetPreview.chatWidth, resultSelected: resultSelected)
+        }
         return HorizontalListContextResultsChatInputPanelItem(context: context, theme: self.theme, result: self.result, batchVideoContext: batchVideoContext, resultSelected: resultSelected)
     }
 }
@@ -74,12 +94,12 @@ private final class HorizontalListContextResultsOpaqueState {
     }
 }
 
-private func preparedTransition(from fromEntries: [HorizontalListContextResultsChatInputContextPanelEntry], to toEntries: [HorizontalListContextResultsChatInputContextPanelEntry], hasMore: Bool, context: AccountContext, batchVideoContext: QueueLocalObject<BatchVideoRenderingContext>, resultSelected: @escaping (ChatContextResult, ASDisplayNode, CGRect) -> Bool) -> HorizontalListContextResultsChatInputContextPanelTransition {
+private func preparedTransition(from fromEntries: [HorizontalListContextResultsChatInputContextPanelEntry], to toEntries: [HorizontalListContextResultsChatInputContextPanelEntry], hasMore: Bool, context: AccountContext, strings: PresentationStrings, batchVideoContext: QueueLocalObject<BatchVideoRenderingContext>, resultSelected: @escaping (ChatContextResult, ASDisplayNode, CGRect) -> Bool) -> HorizontalListContextResultsChatInputContextPanelTransition {
     let (deleteIndices, indicesAndItems, updateIndices) = mergeListsStableWithUpdates(leftList: fromEntries, rightList: toEntries)
     
     let deletions = deleteIndices.map { ListViewDeleteItem(index: $0, directionHint: nil) }
-    let insertions = indicesAndItems.map { ListViewInsertItem(index: $0.0, previousIndex: $0.2, item: $0.1.item(context: context, batchVideoContext: batchVideoContext, resultSelected: resultSelected), directionHint: nil) }
-    let updates = updateIndices.map { ListViewUpdateItem(index: $0.0, previousIndex: $0.2, item: $0.1.item(context: context, batchVideoContext: batchVideoContext, resultSelected: resultSelected), directionHint: nil) }
+    let insertions = indicesAndItems.map { ListViewInsertItem(index: $0.0, previousIndex: $0.2, item: $0.1.item(context: context, strings: strings, batchVideoContext: batchVideoContext, resultSelected: resultSelected), directionHint: nil) }
+    let updates = updateIndices.map { ListViewUpdateItem(index: $0.0, previousIndex: $0.2, item: $0.1.item(context: context, strings: strings, batchVideoContext: batchVideoContext, resultSelected: resultSelected), directionHint: nil) }
     
     return HorizontalListContextResultsChatInputContextPanelTransition(deletions: deletions, insertions: insertions, updates: updates, entryCount: toEntries.count, hasMore: hasMore)
 }
@@ -89,14 +109,21 @@ final class HorizontalListContextResultsChatInputContextPanelNode: ChatInputCont
     private let backgroundView: GlassBackgroundView
     private let listClippingView: UIView
     private let listView: ListView
+    private let buttonTitleNode: ImmediateTextNode
+    private let buttonSeparatorNode: ASDisplayNode
+    private let buttonNode: HighlightTrackingButtonNode
     private var currentExternalResults: ChatContextResultCollection?
     private var currentProcessedResults: ChatContextResultCollection?
     private var currentEntries: [HorizontalListContextResultsChatInputContextPanelEntry]?
     private var isLoadingMore = false
+    /// widget-sandbox v0.2 (v0.2 W3): how widget results draw and the chat's width, from the interface state once laid
+    /// out; nil until then (a widget result draws as any other result until the first layout).
+    private var widgetLayout: (appearance: ChatContextResultWidgetAppearance, chatWidth: CGFloat)?
     private let loadMoreDisposable = MetaDisposable()
     
     private var enqueuedTransitions: [(HorizontalListContextResultsChatInputContextPanelTransition, Bool)] = []
     private var hasValidLayout = false
+    private var layoutContent: (hasButton: Bool, hasResults: Bool)?
     
     private let batchVideoContext: QueueLocalObject<BatchVideoRenderingContext>
     
@@ -115,6 +142,18 @@ final class HorizontalListContextResultsChatInputContextPanelNode: ChatInputCont
             return strings.VoiceOver_ScrollStatus(row, count).string
         }
         
+        self.buttonTitleNode = ImmediateTextNode()
+        self.buttonTitleNode.maximumNumberOfLines = 1
+        self.buttonTitleNode.truncationType = .end
+        self.buttonTitleNode.isUserInteractionEnabled = false
+        self.buttonTitleNode.isHidden = true
+        
+        self.buttonSeparatorNode = ASDisplayNode()
+        self.buttonSeparatorNode.isHidden = true
+        
+        self.buttonNode = HighlightTrackingButtonNode()
+        self.buttonNode.isHidden = true
+        
         self.batchVideoContext = QueueLocalObject(queue: .mainQueue(), generate: {
             return BatchVideoRenderingContext(context: context)
         })
@@ -128,6 +167,23 @@ final class HorizontalListContextResultsChatInputContextPanelNode: ChatInputCont
         self.view.addSubview(self.backgroundContainerView)
         self.listClippingView.addSubview(self.listView.view)
         self.backgroundView.contentView.addSubview(self.listClippingView)
+        self.backgroundView.contentView.addSubview(self.buttonSeparatorNode.view)
+        self.backgroundView.contentView.addSubview(self.buttonTitleNode.view)
+        self.backgroundView.contentView.addSubview(self.buttonNode.view)
+        
+        self.buttonNode.highligthedChanged = { [weak self] highlighted in
+            guard let self else {
+                return
+            }
+            if highlighted {
+                self.buttonTitleNode.layer.removeAnimation(forKey: "opacity")
+                self.buttonTitleNode.alpha = 0.4
+            } else {
+                self.buttonTitleNode.alpha = 1.0
+                self.buttonTitleNode.layer.animateAlpha(from: 0.4, to: 1.0, duration: 0.2)
+            }
+        }
+        self.buttonNode.addTarget(self, action: #selector(self.buttonPressed), forControlEvents: .touchUpInside)
         
         self.listView.displayedItemRangeChanged = { [weak self] displayedRange, opaqueTransactionState in
             if let strongSelf = self, let state = opaqueTransactionState as? HorizontalListContextResultsOpaqueState {
@@ -274,6 +330,13 @@ final class HorizontalListContextResultsChatInputContextPanelNode: ChatInputCont
         self.updateInternalResults(results)
     }
     
+    @objc private func buttonPressed() {
+        guard let results = self.currentProcessedResults, let interfaceInteraction = self.interfaceInteraction else {
+            return
+        }
+        ChatContextResultsButton(results: results)?.activate(context: self.context, interfaceInteraction: interfaceInteraction, botId: results.botId)
+    }
+    
     private func loadMore() {
         guard !self.isLoadingMore, let currentProcessedResults = self.currentProcessedResults, let nextOffset = currentProcessedResults.nextOffset else {
             return
@@ -313,8 +376,13 @@ final class HorizontalListContextResultsChatInputContextPanelNode: ChatInputCont
         var entries: [HorizontalListContextResultsChatInputContextPanelEntry] = []
         var index = 0
         var resultIds = Set<ChatContextResultStableId>()
+        let widgetsEnabled = chatMessageWidgetRenderingEnabled()
         for result in results.results {
-            let entry = HorizontalListContextResultsChatInputContextPanelEntry(index: index, theme: self.theme, result: result)
+            var widgetPreview: HorizontalListWidgetPreview?
+            if let widgetLayout = self.widgetLayout, let widget = messageWidgetPreviewWidget(result.message, renderingEnabled: widgetsEnabled) {
+                widgetPreview = HorizontalListWidgetPreview(widget: widget, appearance: widgetLayout.appearance, chatWidth: widgetLayout.chatWidth)
+            }
+            let entry = HorizontalListContextResultsChatInputContextPanelEntry(index: index, theme: self.theme, result: result, widgetPreview: widgetPreview)
             if resultIds.contains(entry.stableId) {
                 continue
             } else {
@@ -325,7 +393,7 @@ final class HorizontalListContextResultsChatInputContextPanelNode: ChatInputCont
         }
         
         let firstTime = self.currentEntries == nil
-        let transition = preparedTransition(from: self.currentEntries ?? [], to: entries, hasMore: results.nextOffset != nil, context: self.context, batchVideoContext: self.batchVideoContext, resultSelected: { [weak self] result, node, rect in
+        let transition = preparedTransition(from: self.currentEntries ?? [], to: entries, hasMore: results.nextOffset != nil, context: self.context, strings: self.strings, batchVideoContext: self.batchVideoContext, resultSelected: { [weak self] result, node, rect in
             if let strongSelf = self, let interfaceInteraction = strongSelf.interfaceInteraction {
                 return interfaceInteraction.sendContextResult(results, result, node, rect)
             } else {
@@ -374,33 +442,94 @@ final class HorizontalListContextResultsChatInputContextPanelNode: ChatInputCont
     }
     
     override func updateLayout(size: CGSize, leftInset: CGFloat, rightInset: CGFloat, bottomInset: CGFloat, transition: ContainedViewLayoutTransition, interfaceState: ChatPresentationInterfaceState) {
-        let listHeight: CGFloat = 105.0
+        let defaultListHeight: CGFloat = 105.0
         let sideInset: CGFloat = 8.0
         let innerInset: CGFloat = 4.0
         let cornerRadius: CGFloat = 8.0
         let innerRadius: CGFloat = cornerRadius - innerInset
         
-        let listFrame = CGRect(x: sideInset, y: size.height - bottomInset - 8.0 - listHeight, width: size.width - sideInset * 2.0, height: listHeight)
+        // The bot's switch_pm / switch_webview button is a row above the strip, in the same glass panel.
+        // A gallery answer may carry the button and no results at all; the panel is then the row alone.
+        let button = self.currentProcessedResults.flatMap(ChatContextResultsButton.init(results:))
+        let hasResults = !(self.currentProcessedResults?.results.isEmpty ?? true)
+        let buttonHeight: CGFloat = button != nil ? VerticalListContextResultsChatInputPanelButtonItemNode.itemHeight(style: .regular) : 0.0
+        
+        // Above the node's top edge the panel sits under the navigation bar, where it cannot be tapped. When
+        // there is less room than a full strip (landscape with the keyboard up), the strip shrinks instead,
+        // down to half its height: its items take their size from the strip's height.
+        let availableHeight = size.height - bottomInset - 8.0
+        let listHeight = min(defaultListHeight, max(floor(defaultListHeight / 2.0), availableHeight - buttonHeight))
+        
+        // A part the panel did not show before is placed at its final frame and faded in. An animated
+        // transition would grow the row out of a zero frame, and a strip appearing under a lone button row
+        // would ride up from below the growing panel, over the input field, so the panel is then laid out
+        // in place.
+        let previousContent = self.layoutContent
+        self.layoutContent = (hasButton: button != nil, hasResults: hasResults)
+        let buttonAppeared = button != nil && previousContent?.hasButton != true
+        let resultsAppeared = hasResults && previousContent?.hasResults == false
+        let panelTransition: ContainedViewLayoutTransition = resultsAppeared ? .immediate : transition
+        let buttonTransition: ContainedViewLayoutTransition = buttonAppeared ? .immediate : panelTransition
+        
+        let panelHeight = buttonHeight + (hasResults ? listHeight : 0.0)
+        let panelFrame = CGRect(x: sideInset, y: size.height - bottomInset - 8.0 - panelHeight, width: size.width - sideInset * 2.0, height: panelHeight)
+        let listFrame = CGRect(x: 0.0, y: buttonHeight, width: panelFrame.width, height: listHeight)
+        
         let transformedListFrame = CGSize(width: listFrame.height, height: listFrame.width).centered(in: listFrame)
         self.listView.bounds = CGRect(origin: CGPoint(), size: transformedListFrame.size)
-        transition.updatePosition(node: self.listView, position: CGRect(origin: CGPoint(x: -innerInset, y: -innerInset), size: listFrame.size).center)
+        panelTransition.updatePosition(node: self.listView, position: CGRect(origin: CGPoint(x: -innerInset, y: -innerInset), size: listFrame.size).center)
         
-        transition.updateFrame(view: self.listClippingView, frame: CGRect(origin: CGPoint(), size: listFrame.size).insetBy(dx: innerInset, dy: innerInset))
+        panelTransition.updateFrame(view: self.listClippingView, frame: listFrame.insetBy(dx: innerInset, dy: innerInset))
         self.listClippingView.layer.cornerRadius = innerRadius
+        self.listClippingView.isHidden = !hasResults
+        
+        if let button {
+            let buttonFrame = CGRect(x: 0.0, y: 0.0, width: panelFrame.width, height: buttonHeight)
+            
+            // Kept clear of the safe area, as the strip's items are through the list insets.
+            let titleInsetLeft = max(0.0, leftInset - sideInset) + 8.0
+            let titleInsetRight = max(0.0, rightInset - sideInset) + 8.0
+            let titleAreaWidth = max(0.0, buttonFrame.width - titleInsetLeft - titleInsetRight)
+            
+            self.buttonTitleNode.attributedText = NSAttributedString(string: button.title, font: Font.regular(15.0), textColor: interfaceState.theme.chat.inputPanel.panelControlColor)
+            let titleSize = self.buttonTitleNode.updateLayout(CGSize(width: titleAreaWidth, height: buttonFrame.height))
+            buttonTransition.updateFrame(node: self.buttonTitleNode, frame: CGRect(origin: CGPoint(x: titleInsetLeft + floor((titleAreaWidth - titleSize.width) / 2.0), y: floor((buttonFrame.height - titleSize.height) / 2.0)), size: titleSize))
+            
+            self.buttonSeparatorNode.backgroundColor = interfaceState.theme.list.itemPlainSeparatorColor
+            buttonTransition.updateFrame(node: self.buttonSeparatorNode, frame: CGRect(x: 0.0, y: buttonFrame.maxY - UIScreenPixel, width: buttonFrame.width, height: UIScreenPixel))
+            
+            buttonTransition.updateFrame(node: self.buttonNode, frame: buttonFrame)
+            self.buttonNode.accessibilityLabel = button.title
+        }
+        self.buttonTitleNode.isHidden = button == nil
+        self.buttonSeparatorNode.isHidden = button == nil || !hasResults
+        self.buttonNode.isHidden = button == nil
+        
+        if transition.isAnimated && previousContent != nil {
+            if buttonAppeared {
+                self.buttonTitleNode.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.2)
+            }
+            if buttonAppeared || resultsAppeared {
+                self.buttonSeparatorNode.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.2)
+            }
+            if resultsAppeared {
+                self.listClippingView.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.2)
+            }
+        }
         
         let backgroundContainerInset: CGFloat = 32.0
-        let backgroundContainerFrame = listFrame.insetBy(dx: -backgroundContainerInset, dy: -backgroundContainerInset)
-        transition.updateFrame(view: self.backgroundContainerView, frame: backgroundContainerFrame)
-        self.backgroundContainerView.update(size: backgroundContainerFrame.size, isDark: interfaceState.theme.overallDarkAppearance, transition: ComponentTransition(transition))
+        let backgroundContainerFrame = panelFrame.insetBy(dx: -backgroundContainerInset, dy: -backgroundContainerInset)
+        panelTransition.updateFrame(view: self.backgroundContainerView, frame: backgroundContainerFrame)
+        self.backgroundContainerView.update(size: backgroundContainerFrame.size, isDark: interfaceState.theme.overallDarkAppearance, transition: ComponentTransition(panelTransition))
         
-        transition.updateFrame(view: self.backgroundView, frame: CGRect(origin: CGPoint(), size: listFrame.size).offsetBy(dx: backgroundContainerInset, dy: backgroundContainerInset))
-        self.backgroundView.update(size: listFrame.size, cornerRadius: cornerRadius, isDark: interfaceState.theme.overallDarkAppearance, tintColor: .init(kind: .panel), transition: ComponentTransition(transition))
+        panelTransition.updateFrame(view: self.backgroundView, frame: CGRect(origin: CGPoint(), size: panelFrame.size).offsetBy(dx: backgroundContainerInset, dy: backgroundContainerInset))
+        self.backgroundView.update(size: panelFrame.size, cornerRadius: cornerRadius, isDark: interfaceState.theme.overallDarkAppearance, tintColor: .init(kind: .panel), transition: ComponentTransition(panelTransition))
         
         var insets = UIEdgeInsets()
         insets.top = leftInset
         insets.bottom = rightInset
 
-        let (duration, curve) = listViewAnimationDurationAndCurve(transition: transition)
+        let (duration, curve) = listViewAnimationDurationAndCurve(transition: panelTransition)
         let updateSizeAndInsets = ListViewUpdateSizeAndInsets(size: CGSize(width: listHeight, height: size.width), insets: insets, duration: duration, curve: curve)
         
         self.listView.transaction(deleteIndices: [], insertIndicesAndItems: [], updateIndicesAndItems: [], options: [.Synchronous, .LowLatency], scrollToItem: nil, updateSizeAndInsets: updateSizeAndInsets, stationaryItemRange: nil, updateOpaqueState: nil, completion: { _ in })
@@ -415,6 +544,14 @@ final class HorizontalListContextResultsChatInputContextPanelNode: ChatInputCont
         if self.theme !== interfaceState.theme {
             self.theme = interfaceState.theme
             self.listView.backgroundColor = self.theme.list.plainBackgroundColor
+        }
+        
+        let widgetAppearance = ChatContextResultWidgetAppearance(theme: interfaceState.theme, wallpaper: interfaceState.chatWallpaper, fontSize: interfaceState.fontSize, cornerRadius: interfaceState.bubbleCorners.mainRadius)
+        if self.widgetLayout?.appearance != widgetAppearance || self.widgetLayout?.chatWidth != size.width {
+            self.widgetLayout = (widgetAppearance, size.width)
+            if let currentProcessedResults = self.currentProcessedResults, currentProcessedResults.results.contains(where: { messageWidgetPreviewWidget($0.message, renderingEnabled: true) != nil }) {
+                self.updateInternalResults(currentProcessedResults)
+            }
         }
     }
     

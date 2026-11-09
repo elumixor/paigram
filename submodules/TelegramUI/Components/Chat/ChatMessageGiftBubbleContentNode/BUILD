@@ -24,6 +24,7 @@ swift_library(
         "//submodules/ReactionSelectionNode",
         "//submodules/AnimatedStickerNode",
         "//submodules/TelegramAnimatedStickerNode",
+        "//submodules/AvatarNode",
         "//submodules/TelegramUI/Components/ChatControllerInteraction",
         "//submodules/ShimmerEffect",
         "//submodules/Markdown",
@@ -33,6 +34,7 @@ swift_library(
         "//submodules/InvisibleInkDustNode",
         "//submodules/TelegramUI/Components/PeerInfo/PeerInfoCoverComponent",
         "//submodules/TelegramUI/Components/Gifts/GiftItemComponent",
+        "//submodules/TextSelectionNode",
     ],
     visibility = [
         "//visibility:public",

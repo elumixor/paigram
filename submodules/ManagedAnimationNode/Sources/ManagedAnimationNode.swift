@@ -3,7 +3,7 @@ import UIKit
 import Display
 import AsyncDisplayKit
 import TelegramCore
-import RLottieBinding
+import LottieBinding
 import AppBundle
 import GZip
 import SwiftSignalKit
@@ -46,7 +46,7 @@ public final class ManagedAnimationState {
             } else if let unpackedData = TGGUnzipData(data, 5 * 1024 * 1024) {
                 data = unpackedData
             }
-            guard let instance = LottieInstance(data: data, fitzModifier: .none, colorReplacements: item.replaceColors, cacheKey: "") else {
+            guard let instance = makeLottieInstance(data: data, fitzModifier: .none, colorReplacements: item.replaceColors) else {
                 return nil
             }
             resolvedInstance = instance
@@ -101,7 +101,7 @@ public enum ManagedAnimationSource: Equatable {
                 }
                 return getAppBundle().path(forResource: name, ofType: "json")
             case let .resource(account, resource):
-                return account.postbox.mediaBox.completedResourcePath(resource._asResource())
+                return TelegramEngine(account: account).resources.completedResourcePath(id: resource.id)
         }
     }
     
@@ -173,6 +173,7 @@ open class ManagedAnimationNode: ASDisplayNode {
         }
     }
     
+
     public init(size: CGSize) {
         self.intrinsicSize = size
         

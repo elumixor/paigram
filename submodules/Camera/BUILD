@@ -1,4 +1,4 @@
-load("@build_bazel_rules_swift//swift:swift.bzl", "swift_library")
+load("@build_bazel_rules_swift//swift:swift.bzl", "swift_library", "swift_test")
 load(
     "@build_bazel_rules_apple//apple:resources.bzl",
     "apple_resource_bundle",
@@ -38,6 +38,7 @@ apple_resource_bundle(
     resources = [
         ":CameraMetalResources",
     ],
+    visibility = ["//visibility:public"],
 )
 
 swift_library(
@@ -48,21 +49,26 @@ swift_library(
     ]),
     copts = [
     ],
-    data = [
-        ":CameraBundle",
-    ],
     deps = [
         "//submodules/SSignalKit/SwiftSignalKit:SwiftSignalKit",
-        "//submodules/AsyncDisplayKit:AsyncDisplayKit",
-        "//submodules/Display:Display",
-        "//submodules/ImageBlur:ImageBlur",
-        "//submodules/TelegramCore:TelegramCore",
         "//submodules/Utils/DeviceModel",
-        "//submodules/rlottie:RLottieBinding",
-        "//submodules/AppBundle",
-        "//submodules/GZip",
     ],
     visibility = [
         "//visibility:public",
+    ],
+)
+
+swift_test(
+    name = "CameraTests",
+    srcs = [
+        "Sources/CameraCaptureMode.swift",
+        "Sources/CameraCaptureModeChange.swift",
+        "Sources/CameraVideoOrientation.swift",
+        "Tests/CameraCaptureModeTests.swift",
+        "Tests/CameraCaptureModeChangeTests.swift",
+        "Tests/CameraVideoOrientationTests.swift",
+    ],
+    copts = [
+        "-warnings-as-errors",
     ],
 )

@@ -569,10 +569,10 @@ public final class ListMessageFileItemNode: ListMessageNode {
         }
     }
     
-    override public func layoutForParams(_ params: ListViewItemLayoutParams, item: ListViewItem, previousItem: ListViewItem?, nextItem: ListViewItem?) {
+    override public func layoutForParams(_ params: ListViewItemLayoutParams, item: ListViewItem, neighbors: ListViewItemNeighbors) {
         if let item = item as? ListMessageItem {
             let doLayout = self.asyncLayout()
-            let merged = (top: false, bottom: false, dateAtBottom: item.getDateAtBottom(top: previousItem, bottom: nextItem))
+            let merged = (top: false, bottom: false, dateAtBottom: item.getDateAtBottom(top: neighbors.previous))
             let (layout, apply) = doLayout(item, params, merged.top, merged.bottom, merged.dateAtBottom)
             self.contentSize = layout.contentSize
             self.insets = layout.insets
@@ -945,7 +945,7 @@ public final class ListMessageFileItemNode: ListMessageNode {
                 
                 if statusUpdated && item.displayFileInfo {
                     if let file = selectedMedia as? TelegramMediaFile {
-                        updatedStatusSignal = messageFileMediaResourceStatus(context: item.context, file: file, message: EngineMessage(message), isRecentActions: false, isSharedMedia: true, isGlobalSearch: item.isGlobalSearchResult, isDownloadList: item.isDownloadList, isSavedMusic: item.isSavedMusic, isAttachMusic: item.isAttachMusic || item.isStoryMusic)
+                        updatedStatusSignal = messageFileMediaResourceStatus(context: item.context, file: file, message: EngineMessage(message), isRecentActions: false, isSharedMedia: true, isGlobalSearch: item.isGlobalSearchResult, isDownloadList: item.isDownloadList, isSavedMusic: item.isSavedMusic, isAttachMusic: item.isAttachMusic || item.isStoryMusic, richMessageQueueId: item.richMessageQueueId)
                         |> mapToSignal { value -> Signal<FileMediaResourceStatus, NoError> in
                             if case .Fetching = value.fetchStatus, !item.isDownloadList {
                                 return .single(value) |> delay(0.1, queue: Queue.concurrentDefaultQueue())
@@ -972,7 +972,7 @@ public final class ListMessageFileItemNode: ListMessageNode {
                             }
                         }
                         if isVoice {
-                            updatedPlaybackStatusSignal = messageFileMediaPlaybackStatus(context: item.context, file: file, message: EngineMessage(message), isRecentActions: false, isGlobalSearch: item.isGlobalSearchResult, isDownloadList: item.isDownloadList, isSavedMusic: false)
+                            updatedPlaybackStatusSignal = messageFileMediaPlaybackStatus(context: item.context, file: file, message: EngineMessage(message), isRecentActions: false, isGlobalSearch: item.isGlobalSearchResult, isDownloadList: item.isDownloadList, isSavedMusic: false, richMessageQueueId: item.richMessageQueueId)
                         }
                     } else if let image = selectedMedia as? TelegramMediaImage {
                         updatedStatusSignal = messageImageMediaResourceStatus(context: item.context, image: image, message: EngineMessage(message), isRecentActions: false, isSharedMedia: true, isGlobalSearch: item.isGlobalSearchResult || item.isDownloadList)
@@ -1149,6 +1149,7 @@ public final class ListMessageFileItemNode: ListMessageNode {
                     }
                     strongSelf.contextSourceNode.contentRect = extractedRect
                     strongSelf.containerNode.isGestureEnabled = item.displayFileInfo
+                    strongSelf.applyListMessageAccessibility(label: listMessageAccessibilityText([titleText?.string, item.isGlobalSearchResult ? globalAuthorTitle : nil]), value: listMessageAccessibilityText([descriptionText?.string, item.isGlobalSearchResult ? dateText : nil]), item: item, contextSourceNode: strongSelf.contextSourceNode, isContextMenuEnabled: item.displayFileInfo)
                     
                     strongSelf.currentIsRestricted = isRestricted || item.message == nil
                     strongSelf.currentMedia = selectedMedia

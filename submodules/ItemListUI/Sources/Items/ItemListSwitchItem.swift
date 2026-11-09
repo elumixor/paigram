@@ -65,10 +65,10 @@ public class ItemListSwitchItem: ListViewItem, ItemListItem {
         self.tag = tag
     }
     
-    public func nodeConfiguredForParams(async: @escaping (@escaping () -> Void) -> Void, params: ListViewItemLayoutParams, synchronousLoads: Bool, previousItem: ListViewItem?, nextItem: ListViewItem?, completion: @escaping (ListViewItemNode, @escaping () -> (Signal<Void, NoError>?, (ListViewItemApply) -> Void)) -> Void) {
+    public func nodeConfiguredForParams(async: @escaping (@escaping () -> Void) -> Void, params: ListViewItemLayoutParams, synchronousLoads: Bool, neighbors: ListViewItemNeighbors, completion: @escaping (ListViewItemNode, @escaping () -> (Signal<Void, NoError>?, (ListViewItemApply) -> Void)) -> Void) {
         async {
             let node = ItemListSwitchItemNode(type: self.type)
-            let (layout, apply) = node.asyncLayout()(self, params, itemListNeighbors(item: self, topItem: previousItem as? ItemListItem, bottomItem: nextItem as? ItemListItem))
+            let (layout, apply) = node.asyncLayout()(self, params, itemListNeighbors(item: self, topFacet: neighbors.previous?.base(ItemListNeighborFacet.self), bottomFacet: neighbors.next?.base(ItemListNeighborFacet.self)))
             
             node.contentSize = layout.contentSize
             node.insets = layout.insets
@@ -81,13 +81,13 @@ public class ItemListSwitchItem: ListViewItem, ItemListItem {
         }
     }
     
-    public func updateNode(async: @escaping (@escaping () -> Void) -> Void, node: @escaping () -> ListViewItemNode, params: ListViewItemLayoutParams, previousItem: ListViewItem?, nextItem: ListViewItem?, animation: ListViewItemUpdateAnimation, completion: @escaping (ListViewItemNodeLayout, @escaping (ListViewItemApply) -> Void) -> Void) {
+    public func updateNode(async: @escaping (@escaping () -> Void) -> Void, node: @escaping () -> ListViewItemNode, params: ListViewItemLayoutParams, neighbors: ListViewItemNeighbors, animation: ListViewItemUpdateAnimation, completion: @escaping (ListViewItemNodeLayout, @escaping (ListViewItemApply) -> Void) -> Void) {
         Queue.mainQueue().async {
             if let nodeValue = node() as? ItemListSwitchItemNode {
                 let makeLayout = nodeValue.asyncLayout()
                 
                 async {
-                    let (layout, apply) = makeLayout(self, params, itemListNeighbors(item: self, topItem: previousItem as? ItemListItem, bottomItem: nextItem as? ItemListItem))
+                    let (layout, apply) = makeLayout(self, params, itemListNeighbors(item: self, topFacet: neighbors.previous?.base(ItemListNeighborFacet.self), bottomFacet: neighbors.next?.base(ItemListNeighborFacet.self)))
                     Queue.mainQueue().async {
                         completion(layout, { _ in
                             var animated = true
@@ -223,8 +223,13 @@ public class ItemListSwitchItemNode: ListViewItemNode, ItemListItemNode {
         self.addSubnode(self.activateArea)
         
         self.activateArea.activate = { [weak self] in
-            guard let strongSelf = self, let item = strongSelf.item, item.enabled else {
+            guard let strongSelf = self, let item = strongSelf.item else {
                 return false
+            }
+            // As the tap does (`tapGesture`): a locked or disabled switch explains why instead of toggling.
+            if !item.enabled || item.displayLocked {
+                item.activatedWhileDisabled()
+                return true
             }
             let value = !strongSelf.switchNode.isOn
             if item.enableInteractiveChanges {
@@ -239,6 +244,9 @@ public class ItemListSwitchItemNode: ListViewItemNode, ItemListItemNode {
         super.didLoad()
         
         (self.switchNode.view as? UISwitch)?.addTarget(self, action: #selector(self.switchValueChanged(_:)), for: .valueChanged)
+        // The row's element (`activateArea`) carries the title, the on/off value and the toggle; the switch itself
+        // would be a second, unlabelled element.
+        self.switchNode.view.accessibilityElementsHidden = true
         self.switchGestureNode.view.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(self.tapGesture(_:))))
     }
     
@@ -277,7 +285,7 @@ public class ItemListSwitchItemNode: ListViewItemNode, ItemListItemNode {
         let currentItem = self.item
         var currentDisabledOverlayNode = self.disabledOverlayNode
         
-        return { item, params, neighbors in
+        return { [weak self] item, params, neighbors in
             var contentSize: CGSize
             var insets: UIEdgeInsets
             let separatorHeight = UIScreenPixel
@@ -383,10 +391,14 @@ public class ItemListSwitchItemNode: ListViewItemNode, ItemListItemNode {
                     
                     strongSelf.activateArea.frame = CGRect(origin: CGPoint(x: params.leftInset, y: 0.0), size: CGSize(width: params.width - params.leftInset - params.rightInset, height: layout.contentSize.height))
                     
-                    strongSelf.activateArea.accessibilityLabel = item.title
+                    if let text = item.text, !text.isEmpty {
+                        strongSelf.activateArea.accessibilityLabel = "\(item.title), \(text)"
+                    } else {
+                        strongSelf.activateArea.accessibilityLabel = item.title
+                    }
                     strongSelf.activateArea.accessibilityValue = item.value ? item.presentationData.strings.VoiceOver_Common_On : item.presentationData.strings.VoiceOver_Common_Off
                     strongSelf.activateArea.accessibilityHint = item.presentationData.strings.VoiceOver_Common_SwitchHint
-                    var accessibilityTraits = UIAccessibilityTraits()
+                    var accessibilityTraits: UIAccessibilityTraits = .button
                     if item.enabled {
                     } else {
                         accessibilityTraits.insert(.notEnabled)
@@ -501,7 +513,9 @@ public class ItemListSwitchItemNode: ListViewItemNode, ItemListItemNode {
                             
                             transition.updateFrame(node: strongSelf.backgroundNode, frame: CGRect(origin: CGPoint(x: 0.0, y: -min(insets.top, separatorHeight)), size: CGSize(width: params.width, height: contentSize.height + min(insets.top, separatorHeight) + min(insets.bottom, separatorHeight))))
                             transition.updateFrame(node: strongSelf.highlightNode, frame: CGRect(origin: CGPoint(x: 0.0, y: -min(insets.top, separatorHeight)), size: CGSize(width: params.width, height: contentSize.height + min(insets.top, separatorHeight) + min(insets.bottom, separatorHeight))))
-                            transition.updateFrame(node: strongSelf.maskNode, frame: strongSelf.backgroundNode.frame.insetBy(dx: params.leftInset, dy: 0.0))
+                            // Per side: the margins differ beside iPhone Duo's strip; equal margins give the symmetric frame.
+                            let backgroundFrame = strongSelf.backgroundNode.frame
+                            transition.updateFrame(node: strongSelf.maskNode, frame: CGRect(x: backgroundFrame.minX + params.leftInset, y: backgroundFrame.minY, width: backgroundFrame.width - params.leftInset - params.rightInset, height: backgroundFrame.height))
                             transition.updateFrame(node: strongSelf.topStripeNode, frame: CGRect(origin: CGPoint(x: 0.0, y: -min(insets.top, separatorHeight)), size: CGSize(width: layoutSize.width, height: separatorHeight)))
                             transition.updateFrame(node: strongSelf.bottomStripeNode, frame: CGRect(origin: CGPoint(x: bottomStripeInset, y: contentSize.height - separatorHeight), size: CGSize(width: layoutSize.width - params.rightInset - bottomStripeInset - separatorRightInset, height: separatorHeight)))
                     }

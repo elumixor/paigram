@@ -10,7 +10,7 @@ swift_library(
     ],
     deps = [
         "//submodules/AsyncDisplayKit:AsyncDisplayKit",
-        "//submodules/rlottie:RLottieBinding",
+        "//submodules/LottieBinding:LottieBinding",
         "//submodules/lottie-ios:Lottie",
         "//submodules/GZip:GZip",
         "//submodules/AppBundle:AppBundle",

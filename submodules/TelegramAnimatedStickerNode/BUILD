@@ -16,7 +16,7 @@ swift_library(
         "//submodules/LocalMediaResources:LocalMediaResources",
         "//submodules/Tuples:Tuples",
         "//submodules/AnimatedStickerNode:AnimatedStickerNode",
-        "//submodules/rlottie:RLottieBinding",
+        "//submodules/LottieBinding:LottieBinding",
         "//submodules/YuvConversion:YuvConversion",
         "//submodules/GZip:GZip",
         "//submodules/ManagedFile:ManagedFile",

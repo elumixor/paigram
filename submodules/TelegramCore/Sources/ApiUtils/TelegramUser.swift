@@ -1,6 +1,6 @@
 import Foundation
 import Postbox
-import TelegramApi
+internal import TelegramApi
 
 func parsedTelegramProfilePhoto(_ photo: Api.UserProfilePhoto) -> [TelegramMediaImageRepresentation] {
     var representations: [TelegramMediaImageRepresentation] = []
@@ -39,15 +39,24 @@ extension PeerVerification {
         switch apiBotVerification {
         case let .botVerification(botVerificationData):
             let (botId, icon, description) = (botVerificationData.botId, botVerificationData.icon, botVerificationData.description)
+            var text: String = ""
+            var entities: [MessageTextEntity] = []
+            if case let .textWithEntities(textWithEntitiesData) = description {
+                text = textWithEntitiesData.text
+                entities = messageTextEntitiesFromApiEntities(textWithEntitiesData.entities)
+            }
             self.init(
                 botId: PeerId(namespace: Namespaces.Peer.CloudUser, id: PeerId.Id._internalFromInt64Value(botId)),
                 iconFileId: icon,
-                description: description
+                description: text,
+                descriptionEntities: entities
             )
         }
     }
 }
 
+
+private let botFlagsKeptOnMinUpdate: BotUserInfoFlags = [.canEdit, .isBusiness, .hasWebApp, .hasForum, .forumManagedByUser, .canManageBots, .isGuestChat, .isGuardBot, .displayForumAsSidebar]
 
 extension TelegramUser {
     convenience init(user: Api.User) {
@@ -137,6 +146,9 @@ extension TelegramUser {
                 }
                 if (flags2 & (1 << 20)) != 0 {
                     botFlags.insert(.isGuardBot)
+                }
+                if (flags2 & (1 << 22)) != 0 {
+                    botFlags.insert(.displayForumAsSidebar)
                 }
                 botInfo = BotUserInfo(flags: botFlags, inlinePlaceholder: botInlinePlaceholder)
             }
@@ -251,8 +263,8 @@ extension TelegramUser {
                             if (flags & (1 << 27)) != 0 {
                                 botFlags.insert(.canBeAddedToAttachMenu)
                             }
-                            if let botInfo = lhs.botInfo, botInfo.flags.contains(.canEdit) {
-                                botFlags.insert(.canEdit)
+                            if let botInfo = lhs.botInfo {
+                                botFlags.formUnion(botInfo.flags.intersection(botFlagsKeptOnMinUpdate))
                             }
                             botInfo = BotUserInfo(flags: botFlags, inlinePlaceholder: botInlinePlaceholder)
                         }
@@ -350,7 +362,10 @@ extension TelegramUser {
                 userFlags.insert(.isPremium)
             }
 
-            let botInfo: BotUserInfo? = rhs.botInfo
+            var botInfo: BotUserInfo? = rhs.botInfo
+            if let rhsBotInfo = rhs.botInfo, let lhsBotInfo = lhs.botInfo {
+                botInfo = BotUserInfo(flags: rhsBotInfo.flags.union(lhsBotInfo.flags.intersection(botFlagsKeptOnMinUpdate)), inlinePlaceholder: rhsBotInfo.inlinePlaceholder)
+            }
             
             let emojiStatus = rhs.emojiStatus
             

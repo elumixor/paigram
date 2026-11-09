@@ -464,6 +464,17 @@ final class ThemeAccentColorControllerNode: ASDisplayNode, ASScrollViewDelegate 
         self.backgroundNode.update(wallpaper: self.wallpaper, animated: false)
         self.backgroundNode.updateBubbleTheme(bubbleTheme: self.theme, bubbleCorners: self.presentationData.chatBubbleCorners)
 
+        // Without bubbles a theme's colours are previewed as the chats will show them: recoloured, on the plain page.
+        var bubblelessPreview = false
+        if !bubbleCorners.bubbleMode {
+            switch mode {
+            case .colors, .edit:
+                bubblelessPreview = true
+            case .background:
+                break
+            }
+        }
+        
         self.stateDisposable = (self.statePromise.get()
         |> deliverOn(self.queue)
         |> mapToThrottled { next -> Signal<ThemeColorState, NoError> in
@@ -518,7 +529,7 @@ final class ThemeAccentColorControllerNode: ASDisplayNode, ASScrollViewDelegate 
             }
 
             let serviceBackgroundColor = serviceColor(for: (wallpaper, nil))
-            let updatedTheme: PresentationTheme?
+            var updatedTheme: PresentationTheme?
 
             if !updateOnlyWallpaper {
                 if let themeReference = mode.themeReference {
@@ -527,6 +538,11 @@ final class ThemeAccentColorControllerNode: ASDisplayNode, ASScrollViewDelegate 
                     updatedTheme = customizePresentationTheme(theme, editing: false, accentColor: accentColor.color, outgoingAccentColor: outgoingAccentColor?.color, backgroundColors: backgroundColors.map { $0.rgb }, bubbleColors: messagesColors.map { $0.rgb }, animateBubbleColors: state.animateMessageColors)
                 } else {
                     updatedTheme = theme
+                }
+                
+                if bubblelessPreview, let previewTheme = updatedTheme {
+                    updatedTheme = bubblelessPresentationTheme(previewTheme)
+                    wallpaper = bubblelessChatWallpaper(theme: previewTheme)
                 }
 
                 let _ = PresentationResourcesChat.principalGraphics(theme: updatedTheme!, wallpaper: wallpaper, bubbleCorners: bubbleCorners)
@@ -1013,7 +1029,7 @@ final class ThemeAccentColorControllerNode: ASDisplayNode, ASScrollViewDelegate 
                 let itemNode = chatNodes[i]
                 items[i].updateNode(async: { $0() }, node: {
                     return itemNode
-                }, params: params, previousItem: i == 0 ? nil : items[i - 1], nextItem: i == (items.count - 1) ? nil : items[i + 1], animation: .None, completion: { (layout, apply) in
+                }, params: params, neighbors: ListViewItemNeighbors(previous: i == 0 ? nil : items[i - 1].neighborDescriptor, next: i == (items.count - 1) ? nil : items[i + 1].neighborDescriptor), animation: .None, completion: { (layout, apply) in
                     let nodeFrame = CGRect(origin: itemNode.frame.origin, size: CGSize(width: layout.size.width, height: layout.size.height))
                     
                     itemNode.contentSize = layout.contentSize
@@ -1021,16 +1037,16 @@ final class ThemeAccentColorControllerNode: ASDisplayNode, ASScrollViewDelegate 
                     itemNode.frame = nodeFrame
                     itemNode.isUserInteractionEnabled = false
                     
-                    apply(ListViewItemApply(isOnScreen: true))
+                    apply(ListViewItemApply())
                 })
             }
         } else {
             var chatNodes: [ListViewItemNode] = []
             for i in 0 ..< items.count {
                 var itemNode: ListViewItemNode?
-                items[i].nodeConfiguredForParams(async: { $0() }, params: params, synchronousLoads: false, previousItem: i == 0 ? nil : items[i - 1], nextItem: i == (items.count - 1) ? nil : items[i + 1], completion: { node, apply in
+                items[i].nodeConfiguredForParams(async: { $0() }, params: params, synchronousLoads: false, neighbors: ListViewItemNeighbors(previous: i == 0 ? nil : items[i - 1].neighborDescriptor, next: i == (items.count - 1) ? nil : items[i + 1].neighborDescriptor), completion: { node, apply in
                     itemNode = node
-                    apply().1(ListViewItemApply(isOnScreen: true))
+                    apply().1(ListViewItemApply())
                 })
                 itemNode!.isUserInteractionEnabled = false
                 chatNodes.append(itemNode!)
@@ -1092,7 +1108,7 @@ final class ThemeAccentColorControllerNode: ASDisplayNode, ASScrollViewDelegate 
         sampleMessages.append(message8)
         
         items = sampleMessages.reversed().map { message in
-            let item = self.context.sharedContext.makeChatMessagePreviewItem(context: self.context, messages: [message], theme: self.theme, strings: self.presentationData.strings, wallpaper: self.wallpaper, fontSize: self.presentationData.chatFontSize, chatBubbleCorners: self.presentationData.chatBubbleCorners, dateTimeFormat: self.presentationData.dateTimeFormat, nameOrder: self.presentationData.nameDisplayOrder, forcedResourceStatus: !message.media.isEmpty ? FileMediaResourceStatus(mediaStatus: .playbackStatus(.paused), fetchStatus: .Local) : nil, tapMessage: { [weak self] message in
+            let item = self.context.sharedContext.makeChatMessagePreviewItem(context: self.context, messages: [EngineMessage(message)], theme: self.theme, strings: self.presentationData.strings, wallpaper: self.wallpaper, fontSize: self.presentationData.chatFontSize, chatBubbleCorners: self.presentationData.chatBubbleCorners, dateTimeFormat: self.presentationData.dateTimeFormat, nameOrder: self.presentationData.nameDisplayOrder, forcedResourceStatus: !message.media.isEmpty ? FileMediaResourceStatus(mediaStatus: .playbackStatus(.paused), fetchStatus: .Local) : nil, tapMessage: { [weak self] message in
                 guard let strongSelf = self else {
                     return
                 }
@@ -1103,7 +1119,7 @@ final class ThemeAccentColorControllerNode: ASDisplayNode, ASScrollViewDelegate 
                     return state
                 }, animated: true)
             }, clickThroughMessage: { _, _ in
-            }, backgroundNode: self.backgroundNode, availableReactions: nil, accountPeer: nil, isCentered: false, isPreview: true, isStandalone: false, rank: nil, rankRole: nil)
+            }, backgroundNode: self.backgroundNode, availableReactions: nil, accountPeer: nil, isCentered: false, isPreview: true, isStandalone: false, rank: nil, rankRole: nil, isGiftMessageComposerPreview: false, activateGiftMessageInput: nil)
             return item
         }
         
@@ -1125,14 +1141,14 @@ final class ThemeAccentColorControllerNode: ASDisplayNode, ASScrollViewDelegate 
                 
                 items[i].updateNode(async: { $0() }, node: {
                     return itemNode
-                }, params: params, previousItem: i == 0 ? nil : items[i - 1], nextItem: i == (items.count - 1) ? nil : items[i + 1], animation: .None, completion: { (layout, apply) in
+                }, params: params, neighbors: ListViewItemNeighbors(previous: i == 0 ? nil : items[i - 1].neighborDescriptor, next: i == (items.count - 1) ? nil : items[i + 1].neighborDescriptor), animation: .None, completion: { (layout, apply) in
                     let nodeFrame = CGRect(origin: itemNode.frame.origin, size: CGSize(width: layout.size.width, height: layout.size.height))
                     
                     itemNode.contentSize = layout.contentSize
                     itemNode.insets = layout.insets
                     itemNode.frame = nodeFrame
                     
-                    apply(ListViewItemApply(isOnScreen: true))
+                    apply(ListViewItemApply())
                 })
             }
             self.crossfadeBubbles = false
@@ -1140,9 +1156,9 @@ final class ThemeAccentColorControllerNode: ASDisplayNode, ASScrollViewDelegate 
             var messageNodes: [ListViewItemNode] = []
             for i in 0 ..< items.count {
                 var itemNode: ListViewItemNode?
-                items[i].nodeConfiguredForParams(async: { $0() }, params: params, synchronousLoads: false, previousItem: i == 0 ? nil : items[i - 1], nextItem: i == (items.count - 1) ? nil : items[i + 1], completion: { node, apply in
+                items[i].nodeConfiguredForParams(async: { $0() }, params: params, synchronousLoads: false, neighbors: ListViewItemNeighbors(previous: i == 0 ? nil : items[i - 1].neighborDescriptor, next: i == (items.count - 1) ? nil : items[i + 1].neighborDescriptor), completion: { node, apply in
                     itemNode = node
-                    apply().1(ListViewItemApply(isOnScreen: true))
+                    apply().1(ListViewItemApply())
                 })
                 messageNodes.append(itemNode!)
                 self.messagesContainerNode.addSubnode(itemNode!)
@@ -1160,15 +1176,11 @@ final class ThemeAccentColorControllerNode: ASDisplayNode, ASScrollViewDelegate 
         var bottomOffset: CGFloat = 9.0 + bottomInset
         if let messageNodes = self.messageNodes {
             for itemNode in messageNodes {
-                let previousFrame = itemNode.frame
                 transition.updateFrame(node: itemNode, frame: CGRect(origin: CGPoint(x: 0.0, y: bottomOffset), size: itemNode.frame.size))
                 bottomOffset += itemNode.frame.height
                 
                 let relativeFrame = itemNode.frame.offsetBy(dx: 0.0, dy: relativeOffset)
                 itemNode.updateAbsoluteRect(relativeFrame, within: containerSize)
-                if case let .animated(duration, curve) = transition {
-                    itemNode.applyAbsoluteOffset(value: CGPoint(x: 0.0, y: -relativeFrame.minY + previousFrame.minY), animationCurve: curve, duration: duration)
-                }
             }
         }
         
@@ -1300,8 +1312,13 @@ final class ThemeAccentColorControllerNode: ASDisplayNode, ASScrollViewDelegate 
         let playButtonSize = CGSize(width: 48.0, height: 48.0)
         var centerDistance: CGFloat = 40.0
         let buttonsVerticalOffset: CGFloat = 5.0
+        // The option buttons center over the toolbar: in its band when the side insets differ (iPhone Duo's strip, which
+        // a bottom toolbar spans, keeping clear only of a corner block at the bottom), across the screen otherwise.
+        let toolbarBottomInsets = layout.bottomEdgeSideInsets()
+        let buttonsMinX: CGFloat = layout.safeInsets.left != layout.safeInsets.right ? toolbarBottomInsets.left : 0.0
+        let buttonsWidth: CGFloat = layout.safeInsets.left != layout.safeInsets.right ? layout.size.width - toolbarBottomInsets.left - toolbarBottomInsets.right : layout.size.width
 
-        let playFrame = CGRect(origin: CGPoint(x: floor((layout.size.width - playButtonSize.width) / 2.0), y: layout.size.height - bottomInset - 44.0 - buttonsVerticalOffset + floor((buttonSize.height - playButtonSize.height) / 2.0)), size: playButtonSize)
+        let playFrame = CGRect(origin: CGPoint(x: buttonsMinX + floor((buttonsWidth - playButtonSize.width) / 2.0), y: layout.size.height - bottomInset - 44.0 - buttonsVerticalOffset + floor((buttonSize.height - playButtonSize.height) / 2.0)), size: playButtonSize)
 
         let playAlpha: CGFloat
         var centerButtons = false
@@ -1328,8 +1345,8 @@ final class ThemeAccentColorControllerNode: ASDisplayNode, ASScrollViewDelegate 
             playAlpha = 0.0
         }
         
-        patternFrame = CGRect(origin: CGPoint(x: centerButtons ? floor((layout.size.width - buttonSize.width) / 2.0) : floor((layout.size.width - buttonSize.width * 2.0 - centerDistance) / 2.0), y: layout.size.height - bottomInset - 44.0 - buttonsVerticalOffset), size: buttonSize)
-        colorsFrame = CGRect(origin: CGPoint(x: centerButtons ? floor((layout.size.width - buttonSize.width) / 2.0) : patternFrame.maxX + centerDistance, y: layout.size.height - bottomInset - 44.0 - buttonsVerticalOffset), size: buttonSize)
+        patternFrame = CGRect(origin: CGPoint(x: centerButtons ? buttonsMinX + floor((buttonsWidth - buttonSize.width) / 2.0) : buttonsMinX + floor((buttonsWidth - buttonSize.width * 2.0 - centerDistance) / 2.0), y: layout.size.height - bottomInset - 44.0 - buttonsVerticalOffset), size: buttonSize)
+        colorsFrame = CGRect(origin: CGPoint(x: centerButtons ? buttonsMinX + floor((buttonsWidth - buttonSize.width) / 2.0) : patternFrame.maxX + centerDistance, y: layout.size.height - bottomInset - 44.0 - buttonsVerticalOffset), size: buttonSize)
         
         transition.updateFrame(node: self.patternButtonNode, frame: patternFrame)
         transition.updateAlpha(node: self.patternButtonNode, alpha: patternAlpha)

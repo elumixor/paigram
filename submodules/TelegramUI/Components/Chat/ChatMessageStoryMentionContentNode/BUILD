@@ -9,6 +9,7 @@ swift_library(
     copts = [
     ],
     deps = [
+        "//submodules/ShimmerEffect",
         "//submodules/AsyncDisplayKit",
         "//submodules/Display",
         "//submodules/SSignalKit/SwiftSignalKit",

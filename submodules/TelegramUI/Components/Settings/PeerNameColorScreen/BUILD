@@ -9,9 +9,9 @@ swift_library(
     copts = [
     ],
     deps = [
+        "//submodules/ContextUI",
         "//submodules/AsyncDisplayKit",
         "//submodules/Display",
-        "//submodules/Postbox",
         "//submodules/TelegramCore",
         "//submodules/SSignalKit/SwiftSignalKit",
         "//submodules/TelegramPresentationData",

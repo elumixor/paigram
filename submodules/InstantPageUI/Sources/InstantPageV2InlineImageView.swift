@@ -26,16 +26,32 @@ final class InstantPageV2InlineImageView: UIView {
     private let theme: InstantPageTheme
     private let fetchedDisposable = MetaDisposable()
 
+    /// Excludes this inline image from screenshots — see `InstantPageV2RenderContext.captureProtected`.
+    /// An inline image is as much message media as a block image is, so a copy-protected rich message
+    /// must protect it too.
+    var captureProtected: Bool = false {
+        didSet {
+            if self.captureProtected != oldValue {
+                self.imageNode.captureProtected = self.captureProtected
+            }
+        }
+    }
+
     init(media: EngineMedia,
          webpage: TelegramMediaWebpage?,
          frame: CGRect,
          context: AccountContext,
          userLocation: MediaResourceUserLocation,
-         theme: InstantPageTheme) {
+         theme: InstantPageTheme,
+         captureProtected: Bool) {
         self.media = media
         self.theme = theme
         self.fileId = media.id?.id ?? 0
-        self.imageNode = TransformImageNode()
+        // Configured through a local: `self.imageNode` is not usable until after `super.init`.
+        let imageNode = TransformImageNode()
+        imageNode.captureProtected = captureProtected
+        self.imageNode = imageNode
+        self.captureProtected = captureProtected
 
         super.init(frame: frame)
         self.isUserInteractionEnabled = false
@@ -83,10 +99,13 @@ final class InstantPageV2InlineImageView: UIView {
                                                               fileReference: fileReference,
                                                               fetched: true))
             } else {
-                // Video / animated file: render a single still frame. No play overlay.
-                self.imageNode.setSignal(chatMessageVideo(postbox: context.account.postbox,
-                                                          userLocation: userLocation,
-                                                          videoReference: fileReference))
+                // Video / animated file: render a single still frame. No play overlay. `autoFetchFullSizeThumbnail`
+                // as in InstantPageImageNode: without it a file that has a stripped `immediateThumbnailData` never
+                // fetches its preview representation and stays blurred.
+                self.imageNode.setSignal(mediaGridMessageVideo(postbox: context.account.postbox,
+                                                               userLocation: userLocation,
+                                                               videoReference: fileReference,
+                                                               autoFetchFullSizeThumbnail: true))
             }
         default:
             // RichText.image's MediaId resolves to .image or .file in practice; other

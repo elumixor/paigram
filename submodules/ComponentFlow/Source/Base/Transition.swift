@@ -3,6 +3,8 @@ import UIKit
 import Display
 import UIKitRuntimeUtils
 
+private var transientBlurFilterKey: UInt8 = 0
+
 #if targetEnvironment(simulator)
 @_silgen_name("UIAnimationDragCoefficient") func UIAnimationDragCoefficient() -> Float
 #endif
@@ -1021,6 +1023,53 @@ public struct ComponentTransition {
         }
     }
     
+    /// Per-corner radii — see `CornerRadii` and `CALayer.setCornerRadii`. Silently no-ops where the
+    /// underlying property is unavailable; check `CALayer.cornerRadiiSupported` if you need a
+    /// guaranteed clip and must fall back to a mask.
+    ///
+    public func setCornerRadii(layer: CALayer, cornerRadii radii: CornerRadii, completion: ((Bool) -> Void)? = nil) {
+        guard CALayer.cornerRadiiSupported else {
+            completion?(true)
+            return
+        }
+        let keyPath = layer.cornerRadiiKeyPath
+        if layer.cornerRadii == radii, layer.animation(forKey: keyPath) == nil {
+            completion?(true)
+            return
+        }
+        switch self.animation {
+        case .none:
+            layer.removeAnimation(forKey: keyPath)
+            layer.setCornerRadii(radii)
+            completion?(true)
+        case let .curve(duration, curve):
+            // Resume from the presented value when interrupting an in-flight animation, matching
+            // `setCornerRadius`.
+            let fromRadii: CornerRadii?
+            if layer.animation(forKey: keyPath) != nil, let presentationRadii = layer.presentation()?.cornerRadii {
+                fromRadii = presentationRadii
+            } else {
+                fromRadii = layer.cornerRadii
+            }
+            layer.setCornerRadii(radii)
+            guard let fromRadii else {
+                completion?(true)
+                return
+            }
+            layer.animate(
+                from: fromRadii.boxedValue,
+                to: radii.boxedValue,
+                keyPath: keyPath,
+                duration: duration,
+                delay: 0.0,
+                curve: curve,
+                removeOnCompletion: true,
+                additive: false,
+                completion: completion
+            )
+        }
+    }
+
     public func setCornerRadius(layer: CALayer, cornerRadius: CGFloat, completion: ((Bool) -> Void)? = nil) {
         if layer.cornerRadius == cornerRadius {
             completion?(true)
@@ -1445,14 +1494,38 @@ public struct ComponentTransition {
             blurFilter.setValue(toRadius as NSNumber, forKey: "inputRadius")
             layer.filters = [blurFilter]
             layer.animate(from: fromRadius as NSNumber, to: toRadius as NSNumber, keyPath: "filters.gaussianBlur.inputRadius", timingFunction: CAMediaTimingFunctionName.easeOut.rawValue, duration: duration, delay: delay, removeOnCompletion: removeOnCompletion, completion: { [weak layer] flag in
-                if let layer {
-                    if toRadius <= 0.0 {
-                        layer.filters = nil
+                if let layer, toRadius <= 0.0 {
+                    // A newer transition may already have installed its own blur.
+                    if let filters = layer.filters, filters.contains(where: { ($0 as? NSObject) === blurFilter }) {
+                        let remainingFilters = filters.filter { ($0 as? NSObject) !== blurFilter }
+                        layer.filters = remainingFilters.isEmpty ? nil : remainingFilters
                     }
                 }
                 
                 completion?(flag)
             })
+        }
+    }
+    
+    public static func animateTransientBlur(layer: CALayer, fromRadius: CGFloat, toRadius: CGFloat, duration: Double, delay: Double = 0.0) {
+        let ownFilter = objc_getAssociatedObject(layer, &transientBlurFilterKey) as? NSObject
+        let previousFilters = (layer.filters ?? []).filter { ($0 as? NSObject) !== ownFilter }
+        ComponentTransition.easeInOut(duration: duration).animateBlur(layer: layer, fromRadius: fromRadius, toRadius: toRadius, delay: delay)
+        guard let installed = layer.filters?.first as? NSObject else {
+            return
+        }
+        objc_setAssociatedObject(layer, &transientBlurFilterKey, installed, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        if !previousFilters.isEmpty {
+            layer.filters = [installed] + previousFilters
+        }
+        let factor = UIView.animationDurationFactor()
+        DispatchQueue.main.asyncAfter(deadline: .now() + (delay + duration) * (factor > 0.0 ? factor : 1.0)) { [weak layer] in
+            guard let layer, (objc_getAssociatedObject(layer, &transientBlurFilterKey) as? NSObject) === installed else {
+                return
+            }
+            objc_setAssociatedObject(layer, &transientBlurFilterKey, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+            let remaining = (layer.filters ?? []).filter { ($0 as? NSObject) !== installed }
+            layer.filters = remaining.isEmpty ? nil : remaining
         }
     }
     

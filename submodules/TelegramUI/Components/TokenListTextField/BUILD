@@ -16,6 +16,7 @@ swift_library(
         "//submodules/TelegramCore",
         "//submodules/AvatarNode",
         "//submodules/AccountContext",
+        "//submodules/CountrySelectionUI",
         "//submodules/Components/ComponentDisplayAdapters",
     ],
     visibility = [

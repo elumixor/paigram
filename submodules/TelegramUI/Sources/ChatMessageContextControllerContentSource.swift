@@ -12,6 +12,7 @@ import TelegramPresentationData
 import DustEffect
 import TooltipUI
 import TelegramNotices
+import ChatMessageItemCommon
  
 final class ChatMessageContextLocationContentSource: ContextLocationContentSource {
     private let controller: ViewController
@@ -23,7 +24,7 @@ final class ChatMessageContextLocationContentSource: ContextLocationContentSourc
     }
     
     func transitionInfo() -> ContextControllerLocationViewInfo? {
-        return ContextControllerLocationViewInfo(location: self.location, contentAreaInScreenSpace: UIScreen.main.bounds)
+        return ContextControllerLocationViewInfo(location: self.location, contentAreaInScreenSpace: mainWindowScreenBounds)
     }
 }
 
@@ -58,6 +59,21 @@ final class ChatMessageContextExtractedContentSource: ContextExtractedContentSou
             }
         }
         |> distinctUntilChanged
+    }
+    
+    // Bubble mode off: an incoming message lifts on a card on the text column, and the menu and the reactions line up
+    // with its left edge rather than each keeping a distance of its own from the screen edge (spec 5.9).
+    var actionsHorizontalAlignment: ContextActionsHorizontalAlignment {
+        guard let chatController = self.chatController, !chatController.presentationInterfaceState.bubbleCorners.bubbleMode else {
+            return .default
+        }
+        var isMessageOptions = false
+        if case .messageOptions = chatController.presentationInterfaceState.subject {
+            isMessageOptions = true
+        }
+        // A message on the page or a card lifts on a card; service messages lift alone and keep master's placement.
+        let style = chatMessageBubbleStyle(bubbleMode: false, isMessageOptions: isMessageOptions, incoming: self.message.effectivelyIncoming(self.engine.account.peerId), message: self.message._asMessage())
+        return style.isBubbleless ? .left : .default
     }
     
     init(chatController: ChatControllerImpl, chatNode: ChatControllerNode, engine: TelegramEngine, message: EngineMessage, selectAll: Bool, centerVertically: Bool = false, keepDefaultContentTouches: Bool = false, snapshot: Bool = false) {
@@ -231,7 +247,7 @@ final class ChatViewOnceMessageContextExtractedContentSource: ContextExtractedCo
             if (isIncoming || "".isEmpty) {
                 let messageItem = self.context.sharedContext.makeChatMessagePreviewItem(
                     context: self.context,
-                    messages: [self.message._asMessage()],
+                    messages: [self.message],
                     theme: self.presentationData.theme,
                     strings: self.presentationData.strings,
                     wallpaper: self.presentationData.chatWallpaper,
@@ -249,16 +265,18 @@ final class ChatViewOnceMessageContextExtractedContentSource: ContextExtractedCo
                     isPreview: false,
                     isStandalone: true,
                     rank: nil,
-                    rankRole: nil
+                    rankRole: nil,
+                    isGiftMessageComposerPreview: false,
+                    activateGiftMessageInput: nil
                 )
                 
                 let width = chatNode.historyNode.frame.width
                 let params = ListViewItemLayoutParams(width: width, leftInset: validLayout.safeInsets.left, rightInset: validLayout.safeInsets.right, availableHeight: chatNode.historyNode.frame.height, isStandalone: false)
                 var node: ListViewItemNode?
                 
-                messageItem.nodeConfiguredForParams(async: { $0() }, params: params, synchronousLoads: false, previousItem: nil, nextItem: nil, completion: { messageNode, apply in
+                messageItem.nodeConfiguredForParams(async: { $0() }, params: params, synchronousLoads: false, neighbors: .none, completion: { messageNode, apply in
                     node = messageNode
-                    apply().1(ListViewItemApply(isOnScreen: true))
+                    apply().1(ListViewItemApply())
                 })
                 
                 if let messageNode = node as? ChatMessageItemView, let copyContentNode = messageNode.getMessageContextSourceNode(stableId: self.message.stableId) {
@@ -273,8 +291,8 @@ final class ChatViewOnceMessageContextExtractedContentSource: ContextExtractedCo
                     bubbleWidth = copyContentNode.contentNode.subnodes?.first?.frame.width ?? messageNode.frame.width
                     
                     if isVideo {
-                        messageItem.updateNode(async: { $0() }, node: { return messageNode }, params: params, previousItem: nil, nextItem: nil, animation: .System(duration: 0.4, transition: ControlledTransition(duration: 0.4, curve: .spring, interactive: false)), completion: { (layout, apply) in
-                            apply(ListViewItemApply(isOnScreen: true))
+                        messageItem.updateNode(async: { $0() }, node: { return messageNode }, params: params, neighbors: .none, animation: .System(duration: 0.4, transition: ControlledTransition(duration: 0.4, curve: .spring, interactive: false)), completion: { (layout, apply) in
+                            apply(ListViewItemApply())
                         })
                     }
                 }

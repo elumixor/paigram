@@ -16,7 +16,7 @@ import LottieComponent
 import AudioToolbox
 import SwiftSignalKit
 import GZip
-import RLottieBinding
+import LottieBinding
 import AppBundle
 import Lottie
 
@@ -45,7 +45,7 @@ private final class LottieDirectContent: LottieComponent.Content {
     override func load(_ f: @escaping (LottieComponent.ContentData) -> Void) -> Disposable {
         if let data = try? Data(contentsOf: URL(fileURLWithPath: self.path)) {
             let result = TGGUnzipData(data, 2 * 1024 * 1024) ?? data
-            f(.animation(data: result, cacheKey: nil))
+            f(.animation(data: result))
         }
         
         return EmptyDisposable
@@ -68,6 +68,7 @@ final class EmojiSearchStatusComponent: Component {
         case results
     }
     
+    let context: AccountContext
     let theme: PresentationTheme
     let forceNeedsVibrancy: Bool
     let strings: PresentationStrings
@@ -75,12 +76,14 @@ final class EmojiSearchStatusComponent: Component {
     let content: Content
 
     init(
+        context: AccountContext,
         theme: PresentationTheme,
         forceNeedsVibrancy: Bool,
         strings: PresentationStrings,
         useOpaqueTheme: Bool,
         content: Content
     ) {
+        self.context = context
         self.theme = theme
         self.forceNeedsVibrancy = forceNeedsVibrancy
         self.strings = strings
@@ -168,7 +171,7 @@ final class EmojiSearchStatusComponent: Component {
         }
         
         init?(content: ContentState, data: Data, displaySize: CGSize, frameRange: ClosedRange<Int>?, previousAnimationState: EmojiSearchStatusAnimationState?) {
-            guard let animationInstance = LottieInstance(data: data, fitzModifier: .none, colorReplacements: nil, cacheKey: "") else {
+            guard let animationInstance = makeLottieInstance(data: data, fitzModifier: .none, colorReplacements: nil) else {
                 return nil
             }
             self.content = content

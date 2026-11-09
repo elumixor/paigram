@@ -13,6 +13,19 @@ func managedAudioSessionLog(_ what: @autoclosure () -> String) {
     managedAudioSessionLogger(what())
 }
 
+private func describeAudioPort(_ port: AVAudioSessionPortDescription) -> String {
+    return "\(port.portName) [\(port.portType.rawValue)]"
+}
+
+/// Everything needed to tell "the app pinned this input" apart from "the system chose this input".
+func audioInputStateDescription() -> String {
+    let session = AVAudioSession.sharedInstance()
+    let preferred = session.preferredInput.map(describeAudioPort) ?? "<none>"
+    let current = session.currentRoute.inputs.map(describeAudioPort).joined(separator: ", ")
+    let available = (session.availableInputs ?? []).map(describeAudioPort).joined(separator: ", ")
+    return "preferredInput=\(preferred) route.inputs=[\(current)] available=[\(available)]"
+}
+
 
 public enum ManagedAudioSessionType: Equatable {
     case ambient
@@ -29,6 +42,26 @@ public enum ManagedAudioSessionType: Equatable {
         default:
             return false
         }
+    }
+    
+    var isRecord: Bool {
+        switch self {
+        case .record:
+            return true
+        default:
+            return false
+        }
+    }
+    
+    /// The session a voice-message recording asks for.
+    ///
+    /// `pauseMusicOnRecording` is the Data & Storage "Pause Music While Recording" toggle. When it is
+    /// off the session mixes with other apps' audio instead of interrupting it, the same mapping the
+    /// round-video recorder (`VideoMessageCameraScreen`) and the legacy camera bridge
+    /// (`TelegramInitializeLegacyComponents`) apply; the story camera and media editor always mix
+    /// (bugs.telegram.org/c/24902).
+    public static func voiceMessageRecording(beginWithTone: Bool, pauseMusicOnRecording: Bool) -> ManagedAudioSessionType {
+        return .record(speaker: beginWithTone, video: false, withOthers: !pauseMusicOnRecording)
     }
 }
 
@@ -76,16 +109,161 @@ public enum AudioSessionOutput: Equatable {
 private let bluetoothPortTypes = Set<AVAudioSession.Port>([.bluetoothA2DP, .bluetoothLE, .bluetoothHFP])
 
 private extension AudioSessionOutput {
-    init(description: AVAudioSessionPortDescription) {
+    init(description: AudioSessionRoutePort) {
         var type: AudioSessionPortType = .generic
         if bluetoothPortTypes.contains(description.portType) {
             type = .bluetooth
         } else if description.uid == "Wired Headphones" || description.uid == "Wired Microphone" {
             type = .wired
         }
-        
-        self = .port(AudioSessionPort(uid: description.uid, name: description.portName, type: type))
+
+        self = .port(AudioSessionPort(uid: description.uid, name: description.name, type: type))
     }
+}
+
+/// The fields of an `AVAudioSessionPortDescription` that route classification reads. The system
+/// type cannot be constructed, so this is what tests describe a route with.
+public struct AudioSessionRoutePort: Equatable {
+    public let portType: AVAudioSession.Port
+    public let uid: String
+    public let name: String
+
+    public init(portType: AVAudioSession.Port, uid: String, name: String) {
+        self.portType = portType
+        self.uid = uid
+        self.name = name
+    }
+
+    init(_ description: AVAudioSessionPortDescription) {
+        self.init(portType: description.portType, uid: description.uid, name: description.portName)
+    }
+}
+
+/// A snapshot of `AVAudioSession`'s route: `currentRoute.outputs`, `currentRoute.inputs` and `availableInputs`.
+public struct AudioSessionRoute: Equatable {
+    public let outputs: [AudioSessionRoutePort]
+    public let inputs: [AudioSessionRoutePort]
+    public let availableInputs: [AudioSessionRoutePort]?
+
+    public init(outputs: [AudioSessionRoutePort], inputs: [AudioSessionRoutePort], availableInputs: [AudioSessionRoutePort]?) {
+        self.outputs = outputs
+        self.inputs = inputs
+        self.availableInputs = availableInputs
+    }
+
+    init(_ session: AVAudioSession) {
+        self.init(
+            outputs: session.currentRoute.outputs.map(AudioSessionRoutePort.init),
+            inputs: session.currentRoute.inputs.map(AudioSessionRoutePort.init),
+            availableInputs: session.availableInputs?.map(AudioSessionRoutePort.init)
+        )
+    }
+}
+
+/// The outputs a call offers in its audio menu, and the one it shows as current, for `route`.
+/// `hasLoudspeaker` is whether the device has a receiver besides its speaker (an iPhone). A device without one (an iPad)
+/// offers its speaker as `.speaker`, not `.builtin`: it has no other built-in route, `.builtin` only resets the output
+/// override (which leaves the sound in wired headphones), and `.speaker` is what its route reports as current, so a
+/// two-item toggle can always go back.
+public func audioSessionOutputs(route: AudioSessionRoute, hasLoudspeaker: Bool) -> (available: [AudioSessionOutput], current: AudioSessionOutput) {
+    var availableOutputs: [AudioSessionOutput] = []
+    var activeOutput: AudioSessionOutput = .builtin
+
+    if let availableInputs = route.availableInputs {
+        var hasHeadphones = false
+        var hasBluetoothHeadphones = false
+
+        var headphonesAreActive = false
+        loop: for currentOutput in route.outputs {
+            switch currentOutput.portType {
+            case .headphones, .bluetoothA2DP, .bluetoothHFP, .bluetoothLE:
+                headphonesAreActive = true
+                hasHeadphones = true
+                hasBluetoothHeadphones = [.bluetoothA2DP, .bluetoothHFP, .bluetoothLE].contains(currentOutput.portType)
+                activeOutput = .headphones
+                break loop
+            default:
+                break
+            }
+        }
+
+        // While the sound is in wired headphones but the built-in microphone is in use (`.builtin` applied on a
+        // device without a receiver, as at a call's start), the headset's microphone stays an item of its own, as
+        // before: it is the way back to it.
+        let keepsWiredHeadsetInputSeparate = headphonesAreActive && route.inputs.contains(where: { $0.portType == .builtInMic })
+
+        for input in availableInputs {
+            var isActive = false
+            for currentInput in route.inputs {
+                if currentInput.uid == input.uid {
+                    isActive = true
+                }
+            }
+
+            if input.portType == .builtInMic {
+                if isActive && !headphonesAreActive {
+                    activeOutput = .builtin
+                    inner: for currentOutput in route.outputs {
+                        if currentOutput.portType == .builtInSpeaker {
+                            activeOutput = .speaker
+                            break inner
+                        }
+                    }
+                }
+                continue
+            }
+            if !keepsWiredHeadsetInputSeparate && isWiredHeadsetInput(input, route: route) {
+                // The microphone of the wired headset is the "Headphones" route, not an output of its own.
+                if isActive {
+                    activeOutput = .headphones
+                }
+                hasHeadphones = true
+                continue
+            }
+            let output = AudioSessionOutput(description: input)
+            availableOutputs.append(output)
+            if isActive {
+                activeOutput = output
+            }
+        }
+
+        if hasLoudspeaker {
+            availableOutputs.insert(.speaker, at: 0)
+        }
+
+        if hasHeadphones && !hasBluetoothHeadphones {
+            availableOutputs.insert(.headphones, at: 0)
+        }
+        availableOutputs.insert(hasLoudspeaker ? .builtin : .speaker, at: 0)
+    }
+    
+    return (availableOutputs, activeOutput)
+}
+
+/// The microphone of a wired headset: a headset microphone, or a USB audio input while wired
+/// headphones are the output (USB-C EarPods; a separate USB microphone next to wired headphones is taken
+/// for one too). A USB input without them is a microphone of its own.
+///
+/// Not while a Bluetooth device is the output: an A2DP-only device reads as "Headphones" too, so the
+/// wired headset is then offered, and selected, by its microphone port, as before.
+private func isWiredHeadsetInput(_ input: AudioSessionRoutePort, route: AudioSessionRoute) -> Bool {
+    if route.outputs.contains(where: { bluetoothPortTypes.contains($0.portType) }) {
+        return false
+    }
+    switch input.portType {
+    case .headsetMic:
+        return true
+    case .usbAudio:
+        return route.outputs.contains(where: { $0.portType == .headphones })
+    default:
+        return false
+    }
+}
+
+/// The input to prefer when the user picks "Headphones": the wired headset's microphone, which takes
+/// the call's output to the headset as well. Nil when no wired headset microphone is available.
+public func audioSessionWiredHeadsetInput(route: AudioSessionRoute) -> AudioSessionRoutePort? {
+    return route.availableInputs?.first(where: { isWiredHeadsetInput($0, route: route) })
 }
 
 public enum AudioSessionOutputMode: Equatable {
@@ -151,8 +329,15 @@ private final class ManagedAudioSessionControlActivate {
     }
 }
 
+/// What the session found once it activated: `isHeadsetConnected` is read after the holder's
+/// category has been applied, so it reflects the route the call will actually use.
 public struct AudioSessionActivationState {
     public let isHeadsetConnected: Bool
+    
+    /// Public so another `ManagedAudioSession` implementation can complete an activation.
+    public init(isHeadsetConnected: Bool) {
+        self.isHeadsetConnected = isHeadsetConnected
+    }
 }
 
 public class ManagedAudioSessionControl {
@@ -168,6 +353,22 @@ public class ManagedAudioSessionControl {
         self.setOutputModeImpl = setOutputModeImpl
         self.setupAndActivateImpl = setupAndActivateImpl
         self.setTypeImpl = setTypeImpl
+    }
+    
+    /// Lets another `ManagedAudioSession` implementation (a test double, for one) hand out
+    /// controls. The closures mirror the public methods one to one.
+    public convenience init(
+        setup: @escaping (Bool) -> Void,
+        activate: @escaping (@escaping (AudioSessionActivationState) -> Void) -> Void,
+        setOutputMode: @escaping (AudioSessionOutputMode) -> Void,
+        setupAndActivate: @escaping (Bool, @escaping (AudioSessionActivationState) -> Void) -> Void,
+        setType: @escaping (ManagedAudioSessionType, @escaping () -> Void) -> Void
+    ) {
+        self.init(setupImpl: setup, activateImpl: { completion in
+            activate(completion.f)
+        }, setOutputModeImpl: setOutputMode, setupAndActivateImpl: { synchronous, completion in
+            setupAndActivate(synchronous, completion.f)
+        }, setTypeImpl: setType)
     }
     
     public func setup(synchronous: Bool = false) {
@@ -224,6 +425,10 @@ public final class ManagedAudioSessionClientParams {
 
 public protocol ManagedAudioSession: AnyObject {
     func getIsHeadsetPluggedIn() -> Bool
+    /// Synchronously reports whether the audio session is currently set up for recording.
+    /// Callers on the main thread use this to avoid pushing a playback session on top of an
+    /// active recorder, which would deactivate and therefore stop it.
+    func getIsRecordingActive() -> Bool
     func headsetConnected() -> Signal<Bool, NoError>
     func isActive() -> Signal<Bool, NoError>
     func isPlaybackActive() -> Signal<Bool, NoError>
@@ -281,11 +486,22 @@ public var sharedManagedAudioSession: ManagedAudioSession? {
 }
 
 public final class ManagedAudioSessionImpl: NSObject, ManagedAudioSession {
+    /// When enabled, recording sessions (voice messages, video messages, the story camera) never pin
+    /// a preferred input port and instead follow the system-wide microphone selection
+    /// (Settings ▸ Sounds & Haptics ▸ Input, or the iOS 26 Control Center input picker).
+    /// Set from Debug Settings ▸ "Recording: respect system microphone".
+    public static var respectsSystemRecordingInput: Bool = false
+
     private var nextId: Int32 = 0
     private let queue: Queue
     private let hasLoudspeaker: Bool
     private var holders: [HolderRecord] = []
-    private var currentTypeAndOutputMode: (ManagedAudioSessionType, AudioSessionOutputMode)?
+    private let isRecordingActiveSync = Atomic<Bool>(value: false)
+    private var currentTypeAndOutputMode: (ManagedAudioSessionType, AudioSessionOutputMode)? {
+        didSet {
+            let _ = self.isRecordingActiveSync.swap(self.currentTypeAndOutputMode?.0.isRecord ?? false)
+        }
+    }
     private var deactivateTimer: SwiftSignalKit.Timer?
     
     private let isHeadsetPluggedInSync = Atomic<Bool>(value: false)
@@ -299,6 +515,10 @@ public final class ManagedAudioSessionImpl: NSObject, ManagedAudioSession {
     
     public func getIsHeadsetPluggedIn() -> Bool {
         return self.isHeadsetPluggedInSync.with { $0 }
+    }
+    
+    public func getIsRecordingActive() -> Bool {
+        return self.isRecordingActiveSync.with { $0 }
     }
     
     private let outputsToHeadphonesSubscribers = Bag<(Bool) -> Void>()
@@ -375,6 +595,8 @@ public final class ManagedAudioSessionImpl: NSObject, ManagedAudioSession {
     }
     
     private func updateCurrentAudioRouteInfo() {
+        managedAudioSessionLog("ManagedAudioSession current route: \(audioInputStateDescription())")
+
         let value = self.isHeadsetPluggedIn()
         if self.isHeadsetPluggedInValue != value {
             self.isHeadsetPluggedInValue = value
@@ -394,72 +616,7 @@ public final class ManagedAudioSessionImpl: NSObject, ManagedAudioSession {
             }
         }
         
-        let audioSession = AVAudioSession.sharedInstance()
-        
-        var availableOutputs: [AudioSessionOutput] = []
-        var activeOutput: AudioSessionOutput = .builtin
-        
-        if let availableInputs = audioSession.availableInputs {
-            var hasHeadphones = false
-            var hasBluetoothHeadphones = false
-            
-            var headphonesAreActive = false
-            loop: for currentOutput in audioSession.currentRoute.outputs {
-                switch currentOutput.portType {
-                case .headphones, .bluetoothA2DP, .bluetoothHFP, .bluetoothLE:
-                    headphonesAreActive = true
-                    hasHeadphones = true
-                    hasBluetoothHeadphones = [.bluetoothA2DP, .bluetoothHFP, .bluetoothLE].contains(currentOutput.portType)
-                    activeOutput = .headphones
-                    break loop
-                default:
-                    break
-                }
-            }
-            
-            for input in availableInputs {
-                var isActive = false
-                for currentInput in audioSession.currentRoute.inputs {
-                    if currentInput.uid == input.uid {
-                        isActive = true
-                    }
-                }
-                
-                if input.portType == .builtInMic {
-                    if isActive && !headphonesAreActive {
-                        activeOutput = .builtin
-                        inner: for currentOutput in audioSession.currentRoute.outputs {
-                            if currentOutput.portType == .builtInSpeaker {
-                                activeOutput = .speaker
-                                break inner
-                            }
-                        }
-                    }
-                    continue
-                }
-                if input.portType == .headphones {
-                    if isActive {
-                        activeOutput = .headphones
-                    }
-                    hasHeadphones = true
-                    continue
-                }
-                let output = AudioSessionOutput(description: input)
-                availableOutputs.append(output)
-                if isActive {
-                    activeOutput = output
-                }
-            }
-            
-            if self.hasLoudspeaker {
-                availableOutputs.insert(.speaker, at: 0)
-            }
-            
-            if hasHeadphones && !hasBluetoothHeadphones {
-                availableOutputs.insert(.headphones, at: 0)
-            }
-            availableOutputs.insert(.builtin, at: 0)
-        }
+        let (availableOutputs, activeOutput) = audioSessionOutputs(route: AudioSessionRoute(AVAudioSession.sharedInstance()), hasLoudspeaker: self.hasLoudspeaker)
         
         if self.availableOutputsValue != availableOutputs || self.currentOutputValue != activeOutput {
             self.availableOutputsValue = availableOutputs
@@ -558,7 +715,7 @@ public final class ManagedAudioSessionImpl: NSObject, ManagedAudioSession {
         
         let id = OSAtomicIncrement32(&self.nextId)
         let queue = self.queue
-        queue.async {
+        queue.async { [self] in
             self.holders.append(HolderRecord(id: id, audioSessionType: audioSessionType, control: ManagedAudioSessionControl(setupImpl: { [weak self] synchronous in
                 let f: () -> Void = {
                     if let strongSelf = self {
@@ -722,11 +879,15 @@ public final class ManagedAudioSessionImpl: NSObject, ManagedAudioSession {
                         }
                     } else {
                         if activeIndex != self.holders.count - 1 {
-                            if lastIsRecordWithOthers {
+                            if self.holders[activeIndex].audioSessionType == .voiceCall {
+                                // A call keeps its session against anything pushed on top of it,
+                                // including a recording that mixes with other audio: deactivating the
+                                // call's holder, even temporarily, makes PresentationCall drop its
+                                // audio-session control and tear down the call's audio device.
+                                deactivate = false
+                            } else if lastIsRecordWithOthers {
                                 deactivate = true
                                 temporary = true
-                            } else if self.holders[activeIndex].audioSessionType == .voiceCall {
-                                deactivate = false
                             } else {
                                 deactivate = true
                             }
@@ -980,7 +1141,7 @@ public final class ManagedAudioSessionImpl: NSObject, ManagedAudioSession {
                     }
                     try AVAudioSession.sharedInstance().overrideOutputAudioPort(.speaker)
                 case .headphones:
-                    break
+                    self.preferWiredHeadsetInput()
                 case let .port(port):
                     try AVAudioSession.sharedInstance().overrideOutputAudioPort(.none)
                     if let routes = AVAudioSession.sharedInstance().availableInputs {
@@ -1012,8 +1173,33 @@ public final class ManagedAudioSessionImpl: NSObject, ManagedAudioSession {
         }
     }
     
+    /// "Headphones" includes a wired headset's microphone (see `audioSessionOutputs`), so choosing it
+    /// pins that microphone, which also moves the output to the headset. Without a headset microphone
+    /// the route is left as it is.
+    private func preferWiredHeadsetInput() {
+        let session = AVAudioSession.sharedInstance()
+        guard let input = audioSessionWiredHeadsetInput(route: AudioSessionRoute(session)), let route = session.availableInputs?.first(where: { $0.uid == input.uid }) else {
+            return
+        }
+        managedAudioSessionLog("ManagedAudioSession pinning preferred input -> \(describeAudioPort(route)) for headphones")
+        do {
+            try session.overrideOutputAudioPort(.none)
+        } catch let e {
+            managedAudioSessionLog("ManagedAudioSession clearing the output override for headphones failed: \(e)")
+        }
+        do {
+            try session.setPreferredInput(route)
+        } catch let e {
+            managedAudioSessionLog("ManagedAudioSession pinning the headset input failed: \(e)")
+        }
+    }
+    
     private func setupOutputMode(_ outputMode: AudioSessionOutputMode, type: ManagedAudioSessionType) throws {
         managedAudioSessionLog("ManagedAudioSession setup \(outputMode) for \(type)")
+        managedAudioSessionLog("ManagedAudioSession input before setupOutputMode: \(audioInputStateDescription()) headset=\(self.isHeadsetPluggedInValue) options=\(AVAudioSession.sharedInstance().categoryOptions.rawValue)")
+        defer {
+            managedAudioSessionLog("ManagedAudioSession input after setupOutputMode: \(audioInputStateDescription())")
+        }
         var resetToBuiltin = false
         switch outputMode {
         case .system:
@@ -1036,7 +1222,7 @@ public final class ManagedAudioSessionImpl: NSObject, ManagedAudioSession {
                     }
                     try AVAudioSession.sharedInstance().overrideOutputAudioPort(.speaker)
                 case .headphones:
-                    break
+                    self.preferWiredHeadsetInput()
                 case let .port(port):
                     try AVAudioSession.sharedInstance().overrideOutputAudioPort(.none)
                     if let routes = AVAudioSession.sharedInstance().availableInputs {
@@ -1053,6 +1239,7 @@ public final class ManagedAudioSessionImpl: NSObject, ManagedAudioSession {
         }
         
         if case let .record(_, video, _) = type, video, let input = AVAudioSession.sharedInstance().availableInputs?.first {
+            managedAudioSessionLog("ManagedAudioSession picking a data source on the first available input \(describeAudioPort(input))")
             if let dataSources = input.dataSources {
                 for source in dataSources {
                     if source.dataSourceName.contains("Bottom") {
@@ -1073,7 +1260,14 @@ public final class ManagedAudioSessionImpl: NSObject, ManagedAudioSession {
                     try AVAudioSession.sharedInstance().overrideOutputAudioPort(.speaker)
                 case .voiceCall, .playWithPossiblePortOverride, .record(true, _, _):
                     try AVAudioSession.sharedInstance().overrideOutputAudioPort(.none)
-                    if let routes = AVAudioSession.sharedInstance().availableInputs {
+                    if ManagedAudioSessionImpl.respectsSystemRecordingInput, updatedType.isRecord {
+                        // Recording follows the system-wide microphone selection. Pinning a preferred
+                        // input here would override the user's choice (Settings ▸ Sounds & Haptics ▸
+                        // Input, or the Control Center input picker), so clear any preference this
+                        // app set earlier instead.
+                        managedAudioSessionLog("ManagedAudioSession following the system input selection for \(updatedType), clearing the preferred input")
+                        let _ = try? AVAudioSession.sharedInstance().setPreferredInput(nil)
+                    } else if let routes = AVAudioSession.sharedInstance().availableInputs {
                         var alreadySet = false
                         if self.isHeadsetPluggedInValue {
                             if case .voiceCall = updatedType, case .custom(.builtin) = outputMode {
@@ -1081,6 +1275,7 @@ public final class ManagedAudioSessionImpl: NSObject, ManagedAudioSession {
                                 loop: for route in routes {
                                     switch route.portType {
                                     case .headphones, .bluetoothA2DP, .bluetoothHFP, .bluetoothLE:
+                                        managedAudioSessionLog("ManagedAudioSession pinning preferred input -> \(describeAudioPort(route)) for \(updatedType)")
                                         let _ = try? AVAudioSession.sharedInstance().setPreferredInput(route)
                                         alreadySet = true
                                         break loop

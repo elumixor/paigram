@@ -135,12 +135,33 @@ public final class ChatTextInputActionButtonsNode: ASDisplayNode, ChatSendMessag
     private let strings: PresentationStrings
     
     public let micButtonBackgroundView: GlassBackgroundView
+    /// The send capsule's width; 40 unless the host sets its own (the agent composer's is 42).
+    public var sendButtonWidth: CGFloat = 40.0
+    /// The mic sits inside a glass container (the agent composer) and draws no circle of its own.
+    public var hidesMicBackground = false
     public let micButtonTintMaskView: UIImageView
     public let micButton: ChatTextInputMediaRecordingButton
     public let stopButtonIcon: GlassBackgroundView.ContentImageView
+    public let stopButton: HighlightTrackingButton
     
     public let sendContainerNode: ASDisplayNode
     public let sendButtonBackgroundView: UIImageView
+    // Bubble mode off: the send button is a blue glass circle, in a glass container of its own (the panel's would fuse
+    // it into the input field's glass, smearing the blue over the field's gray). Made lazily; the flat
+    // `sendButtonBackgroundView` stays for the paid (stars) button.
+    private var sendButtonGlassContainer: GlassBackgroundContainerView?
+    private var sendButtonGlassView: GlassBackgroundView?
+    private var sendButtonGlassIsVisible = false
+    private var sendButtonGlassParams: (size: CGSize, isDark: Bool, tintColor: GlassBackgroundView.TintColor, isEnabled: Bool)?
+    public private(set) var sendButtonGlassTintColor: UIColor?
+    public var sendButtonGlassFrame: CGRect? {
+        guard self.sendButtonGlassTintColor != nil, let container = self.sendButtonGlassContainer else {
+            return nil
+        }
+        return container.convert(container.bounds, to: self.view)
+    }
+    private var sendButtonGlassIconCache: (source: UIImage, image: UIImage)?
+    private var sendButtonBackgroundImageDiameter: CGFloat?
     private var sendButtonBackgroundEffectLayer: StarsParticleEffectLayer?
     public let sendButton: HighlightTrackingButtonNode
     public var sendButtonRadialStatusNode: ChatSendButtonRadialStatusNode?
@@ -197,12 +218,19 @@ public final class ChatTextInputActionButtonsNode: ASDisplayNode, ChatSendMessag
         self.stopButtonIcon = GlassBackgroundView.ContentImageView()
         self.micButtonBackgroundView.contentView.addSubview(self.stopButtonIcon)
         self.stopButtonIcon.alpha = 0.0
+
+        // Hidden rather than alpha-driven: this is the hit-test gate, and it must be closed
+        // whenever Stop is not on screen, independent of the icon's cross-fade.
+        self.stopButton = HighlightTrackingButton()
+        self.micButtonBackgroundView.contentView.addSubview(self.stopButton)
+        self.stopButton.isHidden = true
         
         self.sendContainerNode = ASDisplayNode()
         self.sendContainerNode.layer.allowsGroupOpacity = true
         
         self.sendButtonBackgroundView = UIImageView()
-        self.sendButtonBackgroundView.image = generateStretchableFilledCircleImage(diameter: 34.0, color: .white)?.withRenderingMode(.alwaysTemplate)
+        // The image is (re)generated in `updateLayout` for the frame's `min(width, height)`, so the capsule's
+        // radius is always half its shorter side rather than a baked-in constant.
         self.sendButton = HighlightTrackingButtonNode(pointerStyle: nil)
         
         self.textNode = ImmediateAnimatedCountLabelNode()
@@ -303,11 +331,48 @@ public final class ChatTextInputActionButtonsNode: ASDisplayNode, ChatSendMessag
         }
     }
     
+    /// Bubble mode off: whether the send button is glass (not a paid one, which keeps its own colour).
+    public func usesSendButtonGlass(interfaceState: ChatPresentationInterfaceState) -> Bool {
+        return !interfaceState.bubbleCorners.bubbleMode && self.customSendColor == nil
+    }
+    
+    /// System glass does not follow its container's alpha, so the panel shows and hides the glass together with
+    /// `sendContainerNode` through this, and the glass dissolves on its own.
+    public func updateSendButtonGlassVisibility(_ isVisible: Bool, transition: ContainedViewLayoutTransition) {
+        if self.sendButtonGlassIsVisible == isVisible {
+            return
+        }
+        self.sendButtonGlassIsVisible = isVisible
+        self.applySendButtonGlass(transition: ComponentTransition(transition))
+    }
+    
+    private func applySendButtonGlass(transition: ComponentTransition) {
+        guard let params = self.sendButtonGlassParams, let glassView = self.sendButtonGlassView else {
+            return
+        }
+        glassView.update(size: params.size, cornerRadius: min(params.size.width, params.size.height) * 0.5, isDark: params.isDark, tintColor: params.tintColor, isInteractive: false, isVisible: params.isEnabled && self.sendButtonGlassIsVisible, transition: transition)
+    }
+    
+    /// The send glyph drawn white on the blue glass (a theme's glyph is dark when its accent is white).
+    public func sendButtonGlassIcon(_ image: UIImage?, interfaceState: ChatPresentationInterfaceState) -> UIImage? {
+        guard let image, self.usesSendButtonGlass(interfaceState: interfaceState) else {
+            return image
+        }
+        if let cache = self.sendButtonGlassIconCache, cache.source === image {
+            return cache.image
+        }
+        guard let tinted = generateTintedImage(image: image, color: .white) else {
+            return image
+        }
+        self.sendButtonGlassIconCache = (image, tinted)
+        return tinted
+    }
+    
     public func updateLayout(size: CGSize, isMediaInputExpanded: Bool, showTitle: Bool, currentMessageEffectId: Int64?, transition: ContainedViewLayoutTransition, interfaceState: ChatPresentationInterfaceState) -> CGSize {
         self.validLayout = size
         
         var innerSize = size
-        innerSize.width = 40.0 + 3.0 * 2.0
+        innerSize.width = self.sendButtonWidth + 3.0 * 2.0
         
         let defaultGlassTintColor: GlassBackgroundView.TintColor
         if case .clear = interfaceState.preferredGlassType {
@@ -365,7 +430,11 @@ public final class ChatTextInputActionButtonsNode: ASDisplayNode, ChatSendMessag
         }
     
         transition.updateFrame(view: self.micButtonBackgroundView, frame: CGRect(origin: CGPoint(), size: size))
-        self.micButtonBackgroundView.update(size: size, cornerRadius: size.height * 0.5, isDark:  interfaceState.theme.overallDarkAppearance, tintColor: defaultGlassTintColor, isInteractive: true, transition: ComponentTransition(transition))
+        // While recording, the recording blob stands in for this button. On iOS 26 the circle is system glass, which
+        // does not follow its view's alpha (the panel's fade-out leaves it on screen, under the translucent blob), so
+        // it is dissolved through the glass itself.
+        let isRecording = interfaceState.inputTextPanelState.mediaRecordingState != nil
+        self.micButtonBackgroundView.update(size: size, cornerRadius: size.height * 0.5, isDark:  interfaceState.theme.overallDarkAppearance, tintColor: defaultGlassTintColor, isInteractive: true, isVisible: !isRecording && !self.hidesMicBackground, transition: ComponentTransition(transition))
         
         transition.updatePosition(layer: self.micButton.layer, position: CGRect(origin: CGPoint(), size: size).center)
         transition.updateBounds(layer: self.micButton.layer, bounds: CGRect(origin: CGPoint(), size: size))
@@ -386,8 +455,19 @@ public final class ChatTextInputActionButtonsNode: ASDisplayNode, ChatSendMessag
         }
         if let image = self.stopButtonIcon.image {
             self.stopButtonIcon.tintColor = interfaceState.theme.chat.inputPanel.panelControlColor
-            transition.updateFrame(view: self.stopButtonIcon, frame: image.size.centered(in: CGRect(origin: CGPoint(), size: size)))
+            // This icon carries a scale transform: ChatTextInputPanelNode cross-fades it against the
+            // mic button by scaling between 0.001 and 1.0. `frame` is a DERIVED property — UIKit
+            // computes it from bounds, position, anchorPoint and transform — so writing it back while
+            // the transform is non-identity makes UIKit solve for bounds instead, inflating them by
+            // 1/scale. A 14pt icon written at scale 0.001 yields 14000pt bounds, which render as a
+            // huge square once the scale animates back to 1.0, and each subsequent layout pass feeds
+            // the inflated value back in. Drive the transform-independent properties directly, the
+            // way micButton above does for exactly the same reason.
+            let iconFrame = image.size.centered(in: CGRect(origin: CGPoint(), size: size))
+            transition.updatePosition(layer: self.stopButtonIcon.layer, position: iconFrame.center)
+            transition.updateBounds(layer: self.stopButtonIcon.layer, bounds: CGRect(origin: CGPoint(), size: iconFrame.size))
         }
+        transition.updateFrame(view: self.stopButton, frame: CGRect(origin: CGPoint(), size: size))
         
         var sendSlowmodeTimerTimestamp: (duration: Int32, timestamp: Int32)?
         if let slowmodeState = interfaceState.slowmodeState {
@@ -400,6 +480,23 @@ public final class ChatTextInputActionButtonsNode: ASDisplayNode, ChatSendMessag
         }
         
         let sendButtonBackgroundFrame = CGRect(origin: CGPoint(), size: innerSize).insetBy(dx: 3.0, dy: 3.0)
+        // Corner radius = min(width, height) / 2: a true capsule whatever the frame. The stretchable image
+        // must be generated at that diameter — a fixed one (it was 34) reads as a rounded rect the moment
+        // the frame's shorter side differs from it.
+        let sendButtonCornerDiameter = min(sendButtonBackgroundFrame.width, sendButtonBackgroundFrame.height)
+        if self.sendButtonBackgroundImageDiameter != sendButtonCornerDiameter {
+            self.sendButtonBackgroundImageDiameter = sendButtonCornerDiameter
+            // A circle stretched from its middle column repeats a slice of its curve along the flat edges, so the
+            // straight part meets the rounding with a visible kink. The image is a capsule one point longer than its
+            // diameter each way, whose middle row and column are flat, and only those stretch.
+            let radius = sendButtonCornerDiameter * 0.5
+            self.sendButtonBackgroundView.image = generateImage(CGSize(width: sendButtonCornerDiameter + 1.0, height: sendButtonCornerDiameter + 1.0), rotatedContext: { size, context in
+                context.clear(CGRect(origin: CGPoint(), size: size))
+                context.setFillColor(UIColor.white.cgColor)
+                context.addPath(UIBezierPath(roundedRect: CGRect(origin: CGPoint(), size: size), cornerRadius: radius).cgPath)
+                context.fillPath()
+            })?.resizableImage(withCapInsets: UIEdgeInsets(top: radius, left: radius, bottom: radius, right: radius), resizingMode: .stretch).withRenderingMode(.alwaysTemplate)
+        }
         
         let slowmodeInset: CGFloat = 4.0
         
@@ -424,7 +521,7 @@ public final class ChatTextInputActionButtonsNode: ASDisplayNode, ChatSendMessag
             
             if slowmodeProgressLayer.bounds.size != sendButtonBackgroundFrame.size {
                 let pathFrame = CGRect(origin: CGPoint(), size: sendButtonBackgroundFrame.size).insetBy(dx: 2.0, dy: 2.0)
-                slowmodeProgressLayer.path = UIBezierPath(roundedRect: pathFrame, cornerRadius: pathFrame.height * 0.5).cgPath
+                slowmodeProgressLayer.path = UIBezierPath(roundedRect: pathFrame, cornerRadius: min(pathFrame.width, pathFrame.height) * 0.5).cgPath
             }
             slowmodeProgressTransition.updateFrame(layer: slowmodeProgressLayer, frame: sendButtonBackgroundFrame)
             
@@ -462,6 +559,50 @@ public final class ChatTextInputActionButtonsNode: ASDisplayNode, ChatSendMessag
             transition.updateTintColor(view: self.sendButtonBackgroundView, color: self.customSendColor ?? interfaceState.theme.chat.inputPanel.panelControlAccentColor)
         }
         
+        if self.usesSendButtonGlass(interfaceState: interfaceState) {
+            let glassContainer: GlassBackgroundContainerView
+            let glassView: GlassBackgroundView
+            var glassTransition = ComponentTransition(transition)
+            if let currentContainer = self.sendButtonGlassContainer, let current = self.sendButtonGlassView {
+                glassContainer = currentContainer
+                glassView = current
+            } else {
+                glassTransition = .immediate
+                glassContainer = GlassBackgroundContainerView(spacing: 0.0)
+                glassContainer.isUserInteractionEnabled = false
+                glassView = GlassBackgroundView()
+                glassView.isUserInteractionEnabled = false
+                glassContainer.contentView.addSubview(glassView)
+                self.sendButtonGlassContainer = glassContainer
+                self.sendButtonGlassView = glassView
+                self.sendContainerNode.view.insertSubview(glassContainer, belowSubview: self.sendButtonBackgroundView)
+                self.sendButtonGlassIsVisible = !self.sendContainerNode.alpha.isZero
+            }
+            transition.updateAlpha(layer: self.sendButtonBackgroundView.layer, alpha: 0.0)
+            let glassFrame = bubblelessSendButtonGlassFrame(backgroundFrame: sendButtonBackgroundFrame, hasSlowmodeTimer: sendSlowmodeTimerTimestamp != nil)
+            glassTransition.setFrame(view: glassContainer, frame: glassFrame)
+            glassContainer.update(size: glassFrame.size, isDark: interfaceState.theme.overallDarkAppearance, transition: glassTransition)
+            glassTransition.setFrame(view: glassView, frame: CGRect(origin: CGPoint(), size: glassFrame.size))
+            let glassTintColor: GlassBackgroundView.TintColor
+            if self.isSendDisabled {
+                glassTintColor = defaultGlassTintColor
+                self.sendButtonGlassTintColor = nil
+            } else {
+                let accentColor = bubblelessSendButtonGlassColor(accentColor: interfaceState.theme.chat.inputPanel.panelControlAccentColor, dark: interfaceState.theme.overallDarkAppearance)
+                glassTintColor = .init(kind: .custom(style: .default, color: accentColor))
+                self.sendButtonGlassTintColor = accentColor
+            }
+            self.sendButtonGlassParams = (glassFrame.size, interfaceState.theme.overallDarkAppearance, glassTintColor, true)
+            self.applySendButtonGlass(transition: glassTransition)
+        } else if let glassContainer = self.sendButtonGlassContainer {
+            self.sendButtonGlassContainer = nil
+            self.sendButtonGlassView = nil
+            self.sendButtonGlassParams = nil
+            self.sendButtonGlassTintColor = nil
+            glassContainer.removeFromSuperview()
+            transition.updateAlpha(layer: self.sendButtonBackgroundView.layer, alpha: 1.0)
+        }
+        
         if starsAmount == nil {
             if self.isSendDisabled {
                 transition.updateAlpha(layer: self.sendButton.imageNode.layer, alpha: 0.4)
@@ -485,7 +626,7 @@ public final class ChatTextInputActionButtonsNode: ASDisplayNode, ChatSendMessag
                 }
             }
             transition.updateFrame(layer: sendButtonBackgroundEffectLayer, frame: CGRect(origin: CGPoint(), size: sendButtonBackgroundFrame.size))
-            sendButtonBackgroundEffectLayer.update(color: UIColor(white: 1.0, alpha: 0.5), size: sendButtonBackgroundFrame.size, cornerRadius: sendButtonBackgroundFrame.height * 0.5, transition: ComponentTransition(sendButtonBackgroundEffectLayerTransition))
+            sendButtonBackgroundEffectLayer.update(color: UIColor(white: 1.0, alpha: 0.5), size: sendButtonBackgroundFrame.size, cornerRadius: sendButtonCornerDiameter * 0.5, transition: ComponentTransition(sendButtonBackgroundEffectLayerTransition))
         } else if let sendButtonBackgroundEffectLayer = self.sendButtonBackgroundEffectLayer {
             self.sendButtonBackgroundEffectLayer = nil
             transition.updateFrame(layer: sendButtonBackgroundEffectLayer, frame: CGRect(origin: CGPoint(), size: sendButtonBackgroundFrame.size))
@@ -552,8 +693,7 @@ public final class ChatTextInputActionButtonsNode: ASDisplayNode, ChatSendMessag
     public func updateAccessibility() {
         self.accessibilityTraits = .button
         if !self.stopButtonIcon.alpha.isZero {
-            //TODO:localize
-            self.accessibilityLabel = "Stop"
+            self.accessibilityLabel = self.strings.VoiceOver_Chat_Stop
             self.accessibilityHint = nil
         } else if !self.micButton.alpha.isZero {
             switch self.micButton.mode {
@@ -582,4 +722,22 @@ public final class ChatTextInputActionButtonsNode: ASDisplayNode, ChatSendMessag
         }
         return nil
     }
+}
+
+/// The send button's glass: its frame, or 4pt inside it in slow mode, as the flat disc shrinks, so that the countdown
+/// ring around it stands on the page.
+public func bubblelessSendButtonGlassFrame(backgroundFrame: CGRect, hasSlowmodeTimer: Bool) -> CGRect {
+    return hasSlowmodeTimer ? backgroundFrame.insetBy(dx: 4.0, dy: 4.0) : backgroundFrame
+}
+
+/// Bubble mode off: the send button's glass is the accent the user picked, or the system blue as iOS draws it (0088FF
+/// light, 0091FF dark) for the built-in blues (0088FF, 3E88F7, 2EA6FF) and for a black or white accent.
+public func bubblelessSendButtonGlassColor(accentColor: UIColor, dark: Bool) -> UIColor {
+    var saturation: CGFloat = 0.0
+    accentColor.getHue(nil, saturation: &saturation, brightness: nil, alpha: nil)
+    let builtInBlues: [UInt32] = [0x0088ff, 0x3e88f7, 0x2ea6ff]
+    if saturation < 0.2 || builtInBlues.contains(accentColor.rgb) {
+        return UIColor.systemBlue.resolvedColor(with: UITraitCollection(userInterfaceStyle: dark ? .dark : .light))
+    }
+    return accentColor
 }

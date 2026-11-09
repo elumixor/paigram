@@ -29,8 +29,9 @@ import GlassBackgroundComponent
 public final class MediaItemNodeView: UIView, RichTextMediaItemView, UIScrollViewDelegate {
     private let imageView: StandaloneInstantPageImageView?   // location (.geo) only
     private let audioView: StandaloneInstantPageAudioView?   // audio (music/voice) only
+    private let documentView: StandaloneInstantPageDocumentView?   // document (generic file) only
     // Photo/video → a mosaic cell pool. count==1 is a single full-bounds cell (mosaic engine has no 1-item case).
-    private var mosaicItems: [(media: EngineMedia, naturalSize: CGSize, isSpoiler: Bool)] = []
+    private var mosaicItems: [(media: EngineMedia, naturalSize: CGSize, isSpoiler: Bool, kind: MediaKind)] = []
     private var mosaicCells: [MosaicCellDiff.PooledKey: (host: ComponentHostView<Empty>, component: RichTextMediaContentComponent)] = [:]
     private var mosaicOccurrenceCounter: [EngineMedia.Id: Int] = [:]
     private let mosaicContext: AccountContext?   // set for photo/video; nil for audio/location
@@ -56,22 +57,49 @@ public final class MediaItemNodeView: UIView, RichTextMediaItemView, UIScrollVie
     private var layoutToggleBackground: GlassBackgroundView?
     private var layoutToggleIconView: UIImageView?
 
+    /// Telegram albums cap at 10 media; the "+" add button is hidden once the container is full.
+    private static let maxContainerItemCount = 10
+
     /// Shown iff the add button is (article editor + photo/video container) AND this is a togglable album (>= 2).
+    /// Deliberately NOT gated on `canAddMoreItems` — the layout toggle stays available on a full (10-item) album.
     private var showsLayoutToggle: Bool { self.showsAddButton && self.mosaicItems.count >= 2 }
 
     /// True when this view should show the add button: article editor (`showsControls`) + a photo/video
     /// container (`mosaicContext != nil` — never audio/location).
     private var showsAddButton: Bool { self.showsControls && self.mosaicContext != nil }
 
+    /// The add button is offered only while the container can still grow (fewer than the max).
+    private var canAddMoreItems: Bool { self.mosaicItems.count < MediaItemNodeView.maxContainerItemCount }
+
+    /// The "+" add button is actually on-screen: an article-editor photo/video container that can still grow.
+    /// When false but `showsLayoutToggle` is true (a full album), the toggle button slides into the "+" slot.
+    private var addButtonVisible: Bool { self.showsAddButton && self.canAddMoreItems }
+
+    /// The container-level buttons' frames for a container `width` wide (nil = not shown).
+    private func containerControlFrames(width: CGFloat) -> (add: CGRect?, toggle: CGRect?) {
+        return MediaChromeLayout.containerControlFrames(containerWidth: width, showsAdd: self.addButtonVisible, showsToggle: self.showsLayoutToggle)
+    }
+
     public init(context: AccountContext,
-                items: [(media: EngineMedia, naturalSize: CGSize, isSpoiler: Bool)],
+                items: [(media: EngineMedia, naturalSize: CGSize, isSpoiler: Bool, kind: MediaKind)],
                 audioColorOverride: InstantPageAudioColorOverride? = nil,
+                documentColorOverride: InstantPageDocumentColorOverride? = nil,
                 cornerRadius: CGFloat = 0,
                 showsControls: Bool = true,
                 displayMode: MediaDisplayMode = .mosaic) {
         self.showsControls = showsControls
         self.displayMode = displayMode
-        if items.count == 1, case let .file(file) = items[0].media, file.isMusic || file.isVoice {
+        if items.count == 1, items[0].kind == .document, case let .file(file) = items[0].media {
+            // Dispatch on the EDITOR's kind, not by sniffing the media: an image-mime file picked from
+            // the Files tab is a document row, and sniffing would send it to the photo pool below.
+            self.documentView = StandaloneInstantPageDocumentView(context: context, file: file, colorOverride: documentColorOverride)
+            self.audioView = nil
+            self.imageView = nil
+            self.mosaicContext = nil
+            super.init(frame: .zero)
+            self.addSubview(self.documentView!)
+        } else if items.count == 1, case let .file(file) = items[0].media, file.isMusic || file.isVoice {
+            self.documentView = nil
             self.audioView = StandaloneInstantPageAudioView(context: context, file: file, colorOverride: audioColorOverride)
             self.imageView = nil
             self.mosaicContext = nil
@@ -79,6 +107,7 @@ public final class MediaItemNodeView: UIView, RichTextMediaItemView, UIScrollVie
             self.addSubview(self.audioView!)
         } else if items.count == 1, case .geo = items[0].media {
             let attributes: [InstantPageImageAttribute] = [InstantPageMapAttribute(zoom: 15, dimensions: CGSize(width: 600.0, height: 300.0))]
+            self.documentView = nil
             self.imageView = StandaloneInstantPageImageView(context: context, media: items[0].media, attributes: attributes)
             self.audioView = nil
             self.mosaicContext = nil
@@ -86,14 +115,15 @@ public final class MediaItemNodeView: UIView, RichTextMediaItemView, UIScrollVie
             self.addSubview(self.imageView!)
         } else {
             // Photo/video (any count) — the mosaic cell pool. count==1 fills bounds.
+            self.documentView = nil
             self.imageView = nil
             self.audioView = nil
             self.mosaicContext = context
             super.init(frame: .zero)
             self.mosaicItems = items
         }
-        // Round photo/video/location corners on request; audio stays square.
-        if cornerRadius > 0, self.audioView == nil {
+        // Round photo/video/location corners on request; audio and document rows stay square.
+        if cornerRadius > 0, self.audioView == nil, self.documentView == nil {
             self.layer.cornerRadius = cornerRadius
             self.layer.masksToBounds = true
         }
@@ -108,7 +138,7 @@ public final class MediaItemNodeView: UIView, RichTextMediaItemView, UIScrollVie
 
     /// Re-render with a NEW resolved item list (add-more / delete-one), reusing surviving cells via
     /// `MosaicCellDiff` so their bound fetch is preserved (no re-flash). No-op for audio/location.
-    public func updateResolvedItems(_ items: [(media: EngineMedia, naturalSize: CGSize, isSpoiler: Bool)],
+    public func updateResolvedItems(_ items: [(media: EngineMedia, naturalSize: CGSize, isSpoiler: Bool, kind: MediaKind)],
                                     displayMode: MediaDisplayMode = .mosaic) {
         guard self.mosaicContext != nil else { return }
         self.mosaicItems = items
@@ -121,6 +151,8 @@ public final class MediaItemNodeView: UIView, RichTextMediaItemView, UIScrollVie
         self.imageView?.update(size: size)
         self.audioView?.frame = CGRect(origin: .zero, size: size)
         self.audioView?.update(size: size)
+        self.documentView?.frame = CGRect(origin: .zero, size: size)
+        self.documentView?.update(size: size)
         if self.mosaicContext != nil {
             self.updatePhotoVideoLayout(size: size)
         }
@@ -174,7 +206,7 @@ public final class MediaItemNodeView: UIView, RichTextMediaItemView, UIScrollVie
     /// Positions the add button top-right and shows/hides it (`showsAddButton`). Brought above the mosaic
     /// cells every pass since cell hosts are inserted after it may have been created.
     private func layoutAddButton(size: CGSize) {
-        guard self.showsAddButton else {
+        guard let frame = self.containerControlFrames(width: size.width).add else {
             self.addButtonContainer?.isHidden = true
             return
         }
@@ -182,9 +214,7 @@ public final class MediaItemNodeView: UIView, RichTextMediaItemView, UIScrollVie
         guard let container = self.addButtonContainer, let button = self.addButton,
               let background = self.addButtonBackground, let iconView = self.addButtonIconView else { return }
         container.isHidden = false
-        let buttonSize = CGSize(width: 36.0, height: 36.0)
-        let inset: CGFloat = 8.0
-        let frame = CGRect(x: size.width - inset - buttonSize.width, y: inset, width: buttonSize.width, height: buttonSize.height)   // top-right
+        let buttonSize = frame.size
         container.frame = frame
         container.update(size: buttonSize, isDark: true, transition: .immediate)
         background.frame = CGRect(origin: .zero, size: buttonSize)
@@ -210,16 +240,7 @@ public final class MediaItemNodeView: UIView, RichTextMediaItemView, UIScrollVie
         } else {
             // Same cap the box reserves (MediaBlockBox.mosaicSize): pack within width × min(1000,width),
             // then scale-to-fit + center when the width-driven pack still exceeds the cap.
-            let cap = min(1000.0, size.width)
-            let (rawFrames, naturalSize) = chatMessageBubbleMosaicLayout(
-                maxSize: CGSize(width: size.width, height: cap),
-                itemSizes: self.mosaicItems.map { $0.naturalSize })
-            let scale: CGFloat = naturalSize.height > cap ? cap / naturalSize.height : 1.0
-            let xOffset = floor((size.width - naturalSize.width * scale) / 2.0)
-            frames = rawFrames.map { frame, _ in
-                CGRect(x: xOffset + frame.minX * scale, y: frame.minY * scale,
-                       width: frame.width * scale, height: frame.height * scale)
-            }
+            frames = MosaicCellFrames.frames(itemSizes: self.mosaicItems.map { $0.naturalSize }, size: size)
         }
         self.applyCells(into: self, frames: frames, size: size,
                         usesAspectFit: self.mosaicItems.count == 1, reportNilIndex: self.mosaicItems.count == 1)
@@ -247,9 +268,20 @@ public final class MediaItemNodeView: UIView, RichTextMediaItemView, UIScrollVie
         // `reuseIndex` walks `plan.reuse` in lockstep with `incomingIds` — both were built by iterating
         // `mosaicItems` in order and skipping id-less items identically, so the two stay aligned.
         var reuseIndex = 0
+        let cellFrames = self.mosaicItems.indices.map { $0 < frames.count ? frames[$0] : CGRect(origin: .zero, size: size) }
+        // Each cell's "…", clear of the container's "+" / layout toggle (a narrow top-right tile, #28). A
+        // slideshow page is on screen at the container's origin, alone, whatever its offset in the scroll view.
+        let controlFrames = self.containerControlFrames(width: size.width)
+        let containerControls = [controlFrames.add, controlFrames.toggle].compactMap { $0 }
+        let moreButtonOrigins: [CGPoint]
+        if container === self {
+            moreButtonOrigins = MediaChromeLayout.moreButtonOrigins(cellFrames: cellFrames, avoiding: containerControls)
+        } else {
+            moreButtonOrigins = cellFrames.map { MediaChromeLayout.moreButtonOrigin(cellFrame: CGRect(origin: CGPoint(x: 0.0, y: $0.minY), size: $0.size), avoiding: containerControls) }
+        }
         for (index, item) in self.mosaicItems.enumerated() {
             guard let mediaId = item.media.id else { continue }
-            let frame = index < frames.count ? frames[index] : CGRect(origin: .zero, size: size)
+            let frame = cellFrames[index]
             let host: ComponentHostView<Empty>
             let cellKey: MosaicCellDiff.PooledKey
             if let reusedKey = plan.reuse[reuseIndex], let existingHost = self.mosaicCells[reusedKey]?.host {
@@ -274,6 +306,11 @@ public final class MediaItemNodeView: UIView, RichTextMediaItemView, UIScrollVie
             // component whose `isSpoiler` (part of `==`) reflects the current state is what makes the toggle
             // re-render. `usesAspectFit` rides a size change (1↔mosaic), so it needn't be in `==`.
             let component = RichTextMediaContentComponent(context: context, media: item.media, showsMoreButton: self.showsControls, usesAspectFit: usesAspectFit, isSpoiler: item.isSpoiler)
+            component.moreButtonOrigin = moreButtonOrigins[index]
+            if self.showsControls, MediaChromeLayout.overflowsTile(component.moreButtonOrigin) {
+                // Its "…" overflows onto a neighbour tile: draw it above that tile.
+                container.bringSubviewToFront(host)
+            }
             component.onControlTapped = { [weak self] kind, anchorView, rect in
                 self?.onControlTapped?(kind, reportedIndex, anchorView, rect)
             }
@@ -281,6 +318,12 @@ public final class MediaItemNodeView: UIView, RichTextMediaItemView, UIScrollVie
             host.frame = frame
             _ = host.update(transition: .immediate, component: AnyComponent(component),
                             environment: {}, containerSize: frame.size)
+        }
+        // The container's own buttons stay above every cell, including one just raised above its neighbours.
+        for button in [self.layoutToggleContainer, self.addButtonContainer] {
+            if let button, button.superview === self {
+                self.bringSubviewToFront(button)
+            }
         }
     }
 
@@ -386,7 +429,9 @@ public final class MediaItemNodeView: UIView, RichTextMediaItemView, UIScrollVie
     /// Positions the toggle button IMMEDIATELY LEFT of the add button and shows/hides it. Icon depicts the
     /// layout you'll switch TO: a carousel glyph while currently mosaic, a grid glyph while currently slideshow.
     private func layoutToggleButtonLayout(size: CGSize) {
-        guard self.showsLayoutToggle else {
+        // Normally sits left of the add button; when the add button is hidden (a full album), it takes the
+        // top-right slot so the corner isn't left empty (`MediaChromeLayout.containerControlFrames`).
+        guard let frame = self.containerControlFrames(width: size.width).toggle else {
             self.layoutToggleContainer?.isHidden = true
             return
         }
@@ -394,12 +439,7 @@ public final class MediaItemNodeView: UIView, RichTextMediaItemView, UIScrollVie
         guard let container = self.layoutToggleContainer, let button = self.layoutToggleButton,
               let background = self.layoutToggleBackground, let iconView = self.layoutToggleIconView else { return }
         container.isHidden = false
-        let buttonSize = CGSize(width: 36.0, height: 36.0)
-        let inset: CGFloat = 8.0
-        let spacing: CGFloat = 6.0
-        // Left of the add button (add button is at x = width - inset - 36).
-        let frame = CGRect(x: size.width - inset - buttonSize.width - spacing - buttonSize.width, y: inset,
-                           width: buttonSize.width, height: buttonSize.height)
+        let buttonSize = frame.size
         container.frame = frame
         container.update(size: buttonSize, isDark: true, transition: .immediate)
         background.frame = CGRect(origin: .zero, size: buttonSize)
@@ -416,6 +456,7 @@ public final class MediaItemNodeView: UIView, RichTextMediaItemView, UIScrollVie
         super.layoutSubviews()
         self.imageView?.frame = self.bounds
         self.audioView?.frame = self.bounds
+        self.documentView?.frame = self.bounds
         if self.mosaicContext != nil {
             self.updatePhotoVideoLayout(size: self.bounds.size)
         }
@@ -435,7 +476,7 @@ public final class MediaItemNodeView: UIView, RichTextMediaItemView, UIScrollVie
               self.point(inside: point, with: event) else {
             return nil
         }
-        if self.showsAddButton, let container = self.addButtonContainer, !container.isHidden {
+        if self.addButtonVisible, let container = self.addButtonContainer, !container.isHidden {
             let inContainer = container.convert(point, from: self)
             if let hit = container.hitTest(inContainer, with: event) {
                 return hit
@@ -458,16 +499,19 @@ public final class MediaItemNodeView: UIView, RichTextMediaItemView, UIScrollVie
                 let inScroll = scroll.convert(point, from: self)
                 if scroll.point(inside: inScroll, with: event) { return scroll }
             }
-            for (_, cell) in self.mosaicCells {
-                let inHost = cell.host.convert(point, from: self)
-                if cell.host.point(inside: inHost, with: event),
-                   let hit = cell.host.hitTest(inHost, with: event), hit !== cell.host {
+            // Not gated on the cell's bounds: a narrow tile's "…" can overflow onto its neighbour
+            // (`MediaChromeLayout.moreButtonOrigin`), and the cell only ever returns its controls. Topmost
+            // cell first, so where two "…" overlap the one drawn on top takes the tap.
+            let cellHosts = Set(self.mosaicCells.values.map { ObjectIdentifier($0.host) })
+            for host in self.subviews.reversed() where cellHosts.contains(ObjectIdentifier(host)) && !host.isHidden {
+                let inHost = host.convert(point, from: self)
+                if let hit = host.hitTest(inHost, with: event), hit !== host {
                     return hit
                 }
             }
             return nil
         }
-        return nil   // audio / location — non-interactive
+        return nil   // audio / location / document — non-interactive
     }
 }
 

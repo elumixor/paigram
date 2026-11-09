@@ -40,19 +40,31 @@ public final class GlassControlGroupComponent: Component {
         
         public let id: AnyHashable
         public let content: Content
+        /// Overrides the group's foreground colour for this item's content (a destructive action's red, say).
+        public let foregroundColor: UIColor?
         public let action: (() -> Void)?
+        /// VoiceOver label of an item without text of its own (an icon, an animation); a text item reads its text.
+        public let accessibilityLabel: String?
 
-        public init(id: AnyHashable, content: Content, action: (() -> Void)?) {
+        public init(id: AnyHashable, content: Content, foregroundColor: UIColor? = nil, action: (() -> Void)?, accessibilityLabel: String? = nil) {
             self.id = id
             self.content = content
+            self.foregroundColor = foregroundColor
             self.action = action
+            self.accessibilityLabel = accessibilityLabel
         }
         
         public static func ==(lhs: Item, rhs: Item) -> Bool {
             if lhs.id != rhs.id {
                 return false
             }
+            if lhs.accessibilityLabel != rhs.accessibilityLabel {
+                return false
+            }
             if lhs.content != rhs.content {
+                return false
+            }
+            if lhs.foregroundColor != rhs.foregroundColor {
                 return false
             }
             if (lhs.action == nil) != (rhs.action == nil) {
@@ -73,19 +85,22 @@ public final class GlassControlGroupComponent: Component {
     public let background: Background
     public let items: [Item]
     public let minWidth: CGFloat
+    public let textHorizontalInset: CGFloat
 
     public init(
         theme: PresentationTheme,
         preferClearGlass: Bool,
         background: Background,
         items: [Item],
-        minWidth: CGFloat
+        minWidth: CGFloat,
+        textHorizontalInset: CGFloat = 10.0
     ) {
         self.theme = theme
         self.preferClearGlass = preferClearGlass
         self.background = background
         self.items = items
         self.minWidth = minWidth
+        self.textHorizontalInset = textHorizontalInset
     }
 
     public static func ==(lhs: GlassControlGroupComponent, rhs: GlassControlGroupComponent) -> Bool {
@@ -102,6 +117,9 @@ public final class GlassControlGroupComponent: Component {
             return false
         }
         if lhs.minWidth != rhs.minWidth {
+            return false
+        }
+        if lhs.textHorizontalInset != rhs.textHorizontalInset {
             return false
         }
         return true
@@ -124,9 +142,26 @@ public final class GlassControlGroupComponent: Component {
         
         private var component: GlassControlGroupComponent?
         private weak var state: EmptyComponentState?
+        private var isGlassHidden = false
+        private var lastGlassParams: (size: CGSize, tintColor: GlassBackgroundView.TintColor, isDark: Bool)?
+
+        public func setGlassHidden(_ isHidden: Bool, transition: ComponentTransition) {
+            self.isGlassHidden = isHidden
+            guard let params = self.lastGlassParams else {
+                return
+            }
+            self.backgroundView.update(size: params.size, cornerRadius: params.size.height * 0.5, isDark: params.isDark, tintColor: params.tintColor, isInteractive: true, isVisible: !isHidden, transition: transition)
+        }
+
+        /// The source for a context menu one of the group's items opens: the group's glass, which morphs into the menu
+        /// whole, as a navigation-bar pill of several buttons does.
+        public var menuSourceView: UIView {
+            return self.backgroundView
+        }
 
         override public init(frame: CGRect) {
             self.backgroundView = GlassBackgroundView()
+            self.backgroundView.morphsIntoContextMenu = true
             
             super.init(frame: frame)
             
@@ -192,19 +227,20 @@ public final class GlassControlGroupComponent: Component {
                     isInteractive = true
                 }
                 
+                let itemForegroundColor = item.foregroundColor ?? foregroundColor
                 let content: AnyComponent<Empty>
                 var itemInsets = UIEdgeInsets()
                 switch item.content {
                 case let .icon(name):
                     content = AnyComponent(BundleIconComponent(
                         name: name,
-                        tintColor: foregroundColor
+                        tintColor: itemForegroundColor
                     ))
                 case let .text(string):
                     content = AnyComponent(MultilineTextComponent(
-                        text: .plain(NSAttributedString(string: string, font: Font.medium(17.0), textColor: foregroundColor))
+                        text: .plain(NSAttributedString(string: string, font: Font.medium(17.0), textColor: itemForegroundColor))
                     ))
-                    itemInsets.left = 10.0
+                    itemInsets.left = component.textHorizontalInset
                     itemInsets.right = itemInsets.left
                 case let .animation(name):
                     let playOnce: ActionSlot<Void>
@@ -216,7 +252,7 @@ public final class GlassControlGroupComponent: Component {
                     }
                     content = AnyComponent(LottieComponent(
                         content: LottieComponent.AppBundleContent(name: name),
-                        color: foregroundColor,
+                        color: itemForegroundColor,
                         size: CGSize(width: 32.0, height: 32.0),
                         playOnce: playOnce
                     ))
@@ -247,7 +283,8 @@ public final class GlassControlGroupComponent: Component {
                         isEnabled: item.action != nil,
                         animateAlpha: false,
                         animateScale: false,
-                        animateContents: false
+                        animateContents: false,
+                        accessibility: glassControlItemAccessibilityLabel(item).map { ComponentAccessibility(label: $0) }
                     )),
                     environment: {},
                     containerSize: CGSize(width: availableSize.width, height: availableSize.height)
@@ -292,7 +329,8 @@ public final class GlassControlGroupComponent: Component {
             let size = CGSize(width: contentsWidth, height: availableSize.height)
             transition.setFrame(view: self.backgroundView, frame: CGRect(origin: CGPoint(), size: size))
             
-            self.backgroundView.update(size: size, cornerRadius: size.height * 0.5, isDark: component.theme.overallDarkAppearance, tintColor: tintColor, isInteractive: true, transition: transition)
+            self.lastGlassParams = (size, tintColor, component.theme.overallDarkAppearance)
+            self.backgroundView.update(size: size, cornerRadius: size.height * 0.5, isDark: component.theme.overallDarkAppearance, tintColor: tintColor, isInteractive: true, isVisible: !self.isGlassHidden, transition: transition)
             self.backgroundView.isUserInteractionEnabled = isInteractive
             
             return size
@@ -305,5 +343,24 @@ public final class GlassControlGroupComponent: Component {
     
     public func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
         return view.update(component: self, availableSize: availableSize, state: state, environment: environment, transition: transition)
+    }
+}
+
+/// The label VoiceOver reads for a control group item: the label given, else the text the item shows.
+func glassControlItemAccessibilityLabel(_ item: GlassControlGroupComponent.Item) -> String? {
+    if let accessibilityLabel = item.accessibilityLabel {
+        return accessibilityLabel
+    }
+    switch item.content {
+    case let .text(text):
+        return text.isEmpty ? nil : text
+    case let .icon(name):
+        // A standard navigation glyph reads its name ("Close").
+        return ComponentAccessibilityStrings.label(navigationIconName: name)
+    case let .animation(name):
+        // The animated "…" glyph opens a menu.
+        return name == "anim_morewide" ? ComponentAccessibilityStrings.more : nil
+    case .customIcon:
+        return nil
     }
 }

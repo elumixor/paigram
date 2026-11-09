@@ -57,6 +57,12 @@ public enum ChatControllerInteractionReaction {
     case reaction(MessageReaction.Reaction)
 }
 
+public enum WalletTransferArrivalState {
+    case queued(rise: Bool)
+    case playing(startTime: Double, rise: Bool)
+    case finished
+}
+
 public struct UnreadMessageRangeKey: Hashable {
     public var peerId: EnginePeer.Id
     public var namespace: Int32
@@ -116,11 +122,13 @@ public struct OpenMessageParams {
     public var mode: ChatControllerInteractionOpenMessageMode
     public var mediaSubject: GalleryMediaSubject?
     public var progress: Promise<Bool>?
+    public var decryptWalletComment: Bool
     
-    public init(mode: ChatControllerInteractionOpenMessageMode, mediaSubject: GalleryMediaSubject? = nil, progress: Promise<Bool>? = nil) {
+    public init(mode: ChatControllerInteractionOpenMessageMode, mediaSubject: GalleryMediaSubject? = nil, progress: Promise<Bool>? = nil, decryptWalletComment: Bool = false) {
         self.mode = mode
         self.mediaSubject = mediaSubject
         self.progress = progress
+        self.decryptWalletComment = decryptWalletComment
     }
 }
 
@@ -142,18 +150,27 @@ public final class ChatControllerInteraction: ChatControllerInteractionProtocol 
     public struct OpenUrl {
         public var url: String
         public var concealed: Bool
+        /// Ask "Open link?" whatever the URL: `parseUrl` clears `concealed` for Telegram's own hosts and `tel:`.
+        public var forceConcealed: Bool
         public var external: Bool?
         public var message: EngineRawMessage?
         public var allowInlineWebpageResolution: Bool
         public var progress: Promise<Bool>?
-        
-        public init(url: String, concealed: Bool, external: Bool? = nil, message: EngineRawMessage? = nil, allowInlineWebpageResolution: Bool = false, progress: Promise<Bool>? = nil) {
+        /// The confirmation shows the whole URL (SDK v1 §5.2, a message widget's link).
+        public var fullUrl: Bool
+        /// Told the confirmation when it appears and nil when it goes (a message widget's one-dialog guard).
+        public var alertDisplayUpdated: ((ViewController?) -> Void)?
+
+        public init(url: String, concealed: Bool, forceConcealed: Bool = false, external: Bool? = nil, message: EngineRawMessage? = nil, allowInlineWebpageResolution: Bool = false, progress: Promise<Bool>? = nil, fullUrl: Bool = false, alertDisplayUpdated: ((ViewController?) -> Void)? = nil) {
             self.url = url
             self.concealed = concealed
+            self.forceConcealed = forceConcealed
             self.external = external
             self.message = message
             self.allowInlineWebpageResolution = allowInlineWebpageResolution
             self.progress = progress
+            self.fullUrl = fullUrl
+            self.alertDisplayUpdated = alertDisplayUpdated
         }
     }
     
@@ -285,7 +302,10 @@ public final class ChatControllerInteraction: ChatControllerInteractionProtocol 
     public let commitEmojiInteraction: (EngineMessage.Id, String, EmojiInteraction, TelegramMediaFile) -> Void
     public let openLargeEmojiInfo: (String, String?, TelegramMediaFile) -> Void
     public let openJoinLink: (String) -> Void
-    public let openWebView: (String, String, Bool, ChatOpenWebViewSource) -> Void
+    /// The trailing promise reports the open request's progress. Supply one from a surface that can
+    /// show the loading state on the button itself (an InstantPage V2 pill); pass nil from a surface
+    /// that cannot, and `openWebAppImpl` falls back to the `.requestInProgress` title panel.
+    public let openWebView: (String, String, Bool, ChatOpenWebViewSource, Promise<Bool>?) -> Void
     public let activateAdAction: (EngineMessage.Id, Promise<Bool>?, Bool, Bool) -> Void
     public let adContextAction: (EngineRawMessage, ASDisplayNode, ContextGesture?) -> Void
     public let removeAd: (Data) -> Void
@@ -349,6 +369,10 @@ public final class ChatControllerInteraction: ChatControllerInteractionProtocol 
     public var searchTextHighightState: (String, [EngineMessage.Index])?
     public var unreadMessageRange: [UnreadMessageRangeKey: Range<Int32>] = [:]
     public var seenOneTimeAnimatedMedia = Set<EngineMessage.Id>()
+    public var freshWalletTransferMessageIds = Set<EngineMessage.Id>()
+    public var requestWalletTransferArrival: ((EngineRawMessage) -> Void)?
+    public var walletTransferArrivalState: ((EngineMessage.Id) -> WalletTransferArrivalState?)?
+    public var cancelWalletTransferArrival: ((EngineMessage.Id) -> Void)?
     public var currentMessageWithLoadingReplyThread: EngineMessage.Id?
     public var updatedPresentationData: (initial: PresentationData, signal: Signal<PresentationData, NoError>)?
     public let presentationContext: ChatPresentationContext
@@ -360,6 +384,7 @@ public final class ChatControllerInteraction: ChatControllerInteractionProtocol 
     public var summarizedMessageIds: Set<EngineMessage.Id> = Set()
     public var focusedTextInputIsMedia: Bool = false
     public var focusedPollAddOptionMessageId: EngineMessage.Id?
+    public var isAwaitingWalletTransferFlight: ((EngineRawMessage) -> Bool)?
     
     private var isOpeningMediaValue: Bool = false
     public var isOpeningMedia: Bool {
@@ -374,11 +399,13 @@ public final class ChatControllerInteraction: ChatControllerInteractionProtocol 
             
             if let isOpeningMediaSignal = self.isOpeningMediaSignal {
                 self.isOpeningMediaValue = true
-                self.isOpeningMediaDisposable = (isOpeningMediaSignal |> filter { !$0 } |> take(1) |> timeout(1.0, queue: .mainQueue(), alternate: .single(false)) |> deliverOnMainQueue).startStrict(next: { [weak self] _ in
+                // A gallery reports `false` once it is on screen; that waits for its first item (up to 2 s), so the
+                // longer timeout only matters should it never report.
+                self.isOpeningMediaDisposable = (chatIsOpeningMedia(blockInteraction: isOpeningMediaSignal, unannouncedTimeout: 1.0, announcedTimeout: 4.0, queue: .mainQueue()) |> deliverOnMainQueue).startStrict(next: { [weak self] value in
                     guard let self else {
                         return
                     }
-                    self.isOpeningMediaValue = false
+                    self.isOpeningMediaValue = value
                 })
             }
         }
@@ -478,7 +505,7 @@ public final class ChatControllerInteraction: ChatControllerInteractionProtocol 
         commitEmojiInteraction: @escaping (EngineMessage.Id, String, EmojiInteraction, TelegramMediaFile) -> Void,
         openLargeEmojiInfo: @escaping (String, String?, TelegramMediaFile) -> Void,
         openJoinLink: @escaping (String) -> Void,
-        openWebView: @escaping (String, String, Bool, ChatOpenWebViewSource) -> Void,
+        openWebView: @escaping (String, String, Bool, ChatOpenWebViewSource, Promise<Bool>?) -> Void,
         activateAdAction: @escaping (EngineMessage.Id, Promise<Bool>?, Bool, Bool) -> Void,
         adContextAction: @escaping (EngineRawMessage, ASDisplayNode, ContextGesture?) -> Void,
         removeAd: @escaping (Data) -> Void,

@@ -1093,10 +1093,10 @@ public class ChatMessageTodoBubbleContentNode: ChatMessageBubbleContentNode {
             }
         }
         
-        return { item, layoutConstants, _, _, _, _ in
+        return { [weak self] item, layoutConstants, _, _, _, _ in
             let contentProperties = ChatMessageBubbleContentProperties(hidesSimpleAuthorHeader: false, headerSpacing: 0.0, hidesBackground: .never, forceFullCorners: false, forceAlignment: .none)
             
-            return (contentProperties, nil, CGFloat.greatestFiniteMagnitude, { constrainedSize, position in
+            return (contentProperties, nil, CGFloat.greatestFiniteMagnitude, { [weak self] constrainedSize, position in
                 let message = item.message
                 
                 let incoming = item.message.effectivelyIncoming(item.context.account.peerId)
@@ -1146,7 +1146,7 @@ public class ChatMessageTodoBubbleContentNode: ChatMessageBubbleContentNode {
                     switch position {
                     case .linear(_, .None), .linear(_, .Neighbour(true, _, _)):
                         if incoming {
-                            statusType = .BubbleIncoming
+                            statusType = item.bubbleStyle.hidesIncomingStatus ? nil : .BubbleIncoming
                         } else {
                             if message.flags.contains(.Failed) {
                                 statusType = .BubbleOutgoing(.Failed)
@@ -1314,7 +1314,7 @@ public class ChatMessageTodoBubbleContentNode: ChatMessageBubbleContentNode {
                 
                 boundingSize.width = max(boundingSize.width, min(270.0, constrainedSize.width))
                 
-                return (boundingSize.width, { boundingWidth in
+                return (boundingSize.width, { [weak self] boundingWidth in
                     var resultSize = CGSize(width: max(boundingSize.width, boundingWidth), height: boundingSize.height)
                     
                     let titleTypeSpacing: CGFloat = -4.0
@@ -1331,7 +1331,8 @@ public class ChatMessageTodoBubbleContentNode: ChatMessageBubbleContentNode {
                     
                     let statusSpacing: CGFloat = 33.0
                     let optionsButtonSpacing: CGFloat = 12.0
-                    resultSize.height += 44.0
+                    // Without a time under it (without bubbles) the summary line keeps the poll's even margins.
+                    resultSize.height += item.bubbleStyle.hidesIncomingStatus ? 40.0 : 44.0
                     
                     var statusSizeAndApply: (CGSize, (ListViewItemUpdateAnimation) -> Void)?
                     if let statusSuggestedWidthAndContinue = statusSuggestedWidthAndContinue {

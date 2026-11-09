@@ -10,11 +10,15 @@ public final class GlassControlPanelComponent: Component {
         public let items: [GlassControlGroupComponent.Item]
         public let background: GlassControlGroupComponent.Background
         public let keepWide: Bool
+        public let minWidth: CGFloat?
+        public let textHorizontalInset: CGFloat
 
-        public init(items: [GlassControlGroupComponent.Item], background: GlassControlGroupComponent.Background, keepWide: Bool = false) {
+        public init(items: [GlassControlGroupComponent.Item], background: GlassControlGroupComponent.Background, keepWide: Bool = false, minWidth: CGFloat? = nil, textHorizontalInset: CGFloat = 10.0) {
             self.items = items
             self.background = background
             self.keepWide = keepWide
+            self.minWidth = minWidth
+            self.textHorizontalInset = textHorizontalInset
         }
         
         public static func ==(lhs: Item, rhs: Item) -> Bool {
@@ -25,6 +29,12 @@ public final class GlassControlPanelComponent: Component {
                 return false
             }
             if lhs.keepWide != rhs.keepWide {
+                return false
+            }
+            if lhs.minWidth != rhs.minWidth {
+                return false
+            }
+            if lhs.textHorizontalInset != rhs.textHorizontalInset {
                 return false
             }
             return true
@@ -38,6 +48,7 @@ public final class GlassControlPanelComponent: Component {
     public let centralItem: Item?
     public let centerAlignmentIfPossible: Bool
     public let isDark: Bool?
+    public let sideItemsAppearWithBlur: Bool
     public let tag: AnyObject?
 
     public init(
@@ -48,6 +59,7 @@ public final class GlassControlPanelComponent: Component {
         rightItem: Item?,
         centerAlignmentIfPossible: Bool = false,
         isDark: Bool? = nil,
+        sideItemsAppearWithBlur: Bool = false,
         tag: AnyObject? = nil
     ) {
         self.theme = theme
@@ -57,6 +69,7 @@ public final class GlassControlPanelComponent: Component {
         self.rightItem = rightItem
         self.centerAlignmentIfPossible = centerAlignmentIfPossible
         self.isDark = isDark
+        self.sideItemsAppearWithBlur = sideItemsAppearWithBlur
         self.tag = tag
     }
 
@@ -80,6 +93,9 @@ public final class GlassControlPanelComponent: Component {
             return false
         }
         if lhs.isDark != rhs.isDark {
+            return false
+        }
+        if lhs.sideItemsAppearWithBlur != rhs.sideItemsAppearWithBlur {
             return false
         }
         if lhs.tag !== rhs.tag {
@@ -119,6 +135,11 @@ public final class GlassControlPanelComponent: Component {
         public var rightItemView: GlassControlGroupComponent.View? {
             return self.rightItemComponent?.view as? GlassControlGroupComponent.View
         }
+        
+        /// Glass added here merges with the panel's own while the two touch.
+        public var glassContentView: UIView {
+            return self.glassContainerView.contentView
+        }
 
         override public init(frame: CGRect) {
             self.glassContainerView = GlassBackgroundContainerView()
@@ -130,6 +151,20 @@ public final class GlassControlPanelComponent: Component {
         
         required public init(coder aDecoder: NSCoder) {
             fatalError("init(coder:) has not been implemented")
+        }
+        
+        /// Leading to trailing, as the groups are laid out: they are added to the view as left, right, central.
+        override public var accessibilityElements: [Any]? {
+            get {
+                return [self.leftItemComponent, self.centralItemComponent, self.rightItemComponent].compactMap { item -> UIView? in
+                    guard let view = item?.view, view.superview != nil, !view.isHidden, view.alpha > 0.01 else {
+                        return nil
+                    }
+                    return view
+                }
+            }
+            set {
+            }
         }
         
         func update(component: GlassControlPanelComponent, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
@@ -158,7 +193,8 @@ public final class GlassControlPanelComponent: Component {
                         preferClearGlass: component.preferClearGlass,
                         background: leftItem.background,
                         items: leftItem.items,
-                        minWidth: availableSize.height
+                        minWidth: leftItem.minWidth ?? availableSize.height,
+                        textHorizontalInset: leftItem.textHorizontalInset
                     )),
                     environment: {},
                     containerSize: CGSize(width: availableSize.width, height: availableSize.height)
@@ -170,19 +206,36 @@ public final class GlassControlPanelComponent: Component {
                     if leftItemComponentView.superview == nil {
                         animateIn = true
                         self.glassContainerView.contentView.addSubview(leftItemComponentView)
-                        ComponentTransition.immediate.setScale(view: leftItemComponentView, scale: 0.001)
+                        ComponentTransition.immediate.setScale(view: leftItemComponentView, scale: component.sideItemsAppearWithBlur ? 1.0 : 0.001)
                     }
                     leftItemTransition.setPosition(view: leftItemComponentView, position: leftItemFrameValue.center)
                     leftItemTransition.setBounds(view: leftItemComponentView, bounds: CGRect(origin: CGPoint(), size: leftItemFrameValue.size))
                     if animateIn {
                         alphaTransition.animateAlpha(view: leftItemComponentView, from: 0.0, to: 1.0)
-                        transition.setScale(view: leftItemComponentView, scale: 1.0)
+                        if component.sideItemsAppearWithBlur {
+                            if !alphaTransition.animation.isImmediate {
+                                ComponentTransition.animateTransientBlur(layer: leftItemComponentView.layer, fromRadius: 8.0, toRadius: 0.0, duration: 0.2)
+                                if let groupView = leftItemComponentView as? GlassControlGroupComponent.View {
+                                    groupView.setGlassHidden(true, transition: .immediate)
+                                    groupView.setGlassHidden(false, transition: alphaTransition)
+                                }
+                            }
+                        } else {
+                            transition.setScale(view: leftItemComponentView, scale: 1.0)
+                        }
                     }
                 }
             } else if let leftItemComponent = self.leftItemComponent {
                 self.leftItemComponent = nil
                 if let leftItemComponentView = leftItemComponent.view {
-                    transition.setScale(view: leftItemComponentView, scale: 0.001)
+                    if component.sideItemsAppearWithBlur {
+                        if !alphaTransition.animation.isImmediate {
+                            ComponentTransition.animateTransientBlur(layer: leftItemComponentView.layer, fromRadius: 0.0, toRadius: 8.0, duration: 0.2)
+                            ((leftItemComponentView) as? GlassControlGroupComponent.View)?.setGlassHidden(true, transition: alphaTransition)
+                        }
+                    } else {
+                        transition.setScale(view: leftItemComponentView, scale: 0.001)
+                    }
                     alphaTransition.setAlpha(view: leftItemComponentView, alpha: 0.0, completion: { [weak leftItemComponentView] _ in
                         leftItemComponentView?.removeFromSuperview()
                     })
@@ -208,7 +261,8 @@ public final class GlassControlPanelComponent: Component {
                         preferClearGlass: component.preferClearGlass,
                         background: rightItem.background,
                         items: rightItem.items,
-                        minWidth: availableSize.height
+                        minWidth: rightItem.minWidth ?? availableSize.height,
+                        textHorizontalInset: rightItem.textHorizontalInset
                     )),
                     environment: {},
                     containerSize: CGSize(width: availableSize.width, height: availableSize.height)
@@ -220,19 +274,36 @@ public final class GlassControlPanelComponent: Component {
                     if rightItemComponentView.superview == nil {
                         animateIn = true
                         self.glassContainerView.contentView.addSubview(rightItemComponentView)
-                        ComponentTransition.immediate.setScale(view: rightItemComponentView, scale: 0.001)
+                        ComponentTransition.immediate.setScale(view: rightItemComponentView, scale: component.sideItemsAppearWithBlur ? 1.0 : 0.001)
                     }
                     rightItemTransition.setPosition(view: rightItemComponentView, position: rightItemFrameValue.center)
                     rightItemTransition.setBounds(view: rightItemComponentView, bounds: CGRect(origin: CGPoint(), size: rightItemFrameValue.size))
                     if animateIn {
                         alphaTransition.animateAlpha(view: rightItemComponentView, from: 0.0, to: 1.0)
-                        transition.setScale(view: rightItemComponentView, scale: 1.0)
+                        if component.sideItemsAppearWithBlur {
+                            if !alphaTransition.animation.isImmediate {
+                                ComponentTransition.animateTransientBlur(layer: rightItemComponentView.layer, fromRadius: 8.0, toRadius: 0.0, duration: 0.2)
+                                if let groupView = rightItemComponentView as? GlassControlGroupComponent.View {
+                                    groupView.setGlassHidden(true, transition: .immediate)
+                                    groupView.setGlassHidden(false, transition: alphaTransition)
+                                }
+                            }
+                        } else {
+                            transition.setScale(view: rightItemComponentView, scale: 1.0)
+                        }
                     }
                 }
             } else if let rightItemComponent = self.rightItemComponent {
                 self.rightItemComponent = nil
                 if let rightItemComponentView = rightItemComponent.view {
-                    transition.setScale(view: rightItemComponentView, scale: 0.001)
+                    if component.sideItemsAppearWithBlur {
+                        if !alphaTransition.animation.isImmediate {
+                            ComponentTransition.animateTransientBlur(layer: rightItemComponentView.layer, fromRadius: 0.0, toRadius: 8.0, duration: 0.2)
+                            ((rightItemComponentView) as? GlassControlGroupComponent.View)?.setGlassHidden(true, transition: alphaTransition)
+                        }
+                    } else {
+                        transition.setScale(view: rightItemComponentView, scale: 0.001)
+                    }
                     alphaTransition.setAlpha(view: rightItemComponentView, alpha: 0.0, completion: { [weak rightItemComponentView] _ in
                         rightItemComponentView?.removeFromSuperview()
                     })
@@ -275,7 +346,8 @@ public final class GlassControlPanelComponent: Component {
                         preferClearGlass: component.preferClearGlass,
                         background: centralItem.background,
                         items: centralItem.items,
-                        minWidth: centralItem.keepWide ? 165.0 : availableSize.height
+                        minWidth: centralItem.minWidth ?? (centralItem.keepWide ? 165.0 : availableSize.height),
+                        textHorizontalInset: centralItem.textHorizontalInset
                     )),
                     environment: {},
                     containerSize: maxCentralItemSize

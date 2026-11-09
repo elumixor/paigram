@@ -10,6 +10,7 @@ swift_library(
     ],
     deps = [
         "//submodules/AsyncDisplayKit:AsyncDisplayKit",
+        "//submodules/TelegramUI/Components/MessageWidget/MessageWidgetStorage",
         "//submodules/Display:Display",
         "//submodules/TelegramCore:TelegramCore",
         "//submodules/SSignalKit/SwiftSignalKit:SwiftSignalKit",
@@ -17,6 +18,7 @@ swift_library(
         "//submodules/Components/ViewControllerComponent:ViewControllerComponent",
         "//submodules/Components/ComponentDisplayAdapters:ComponentDisplayAdapters",
         "//submodules/Components/MultilineTextComponent:MultilineTextComponent",
+        "//submodules/Components/BalancedTextComponent:BalancedTextComponent",
         "//submodules/TelegramUI/Components/ButtonComponent",
         "//submodules/TelegramPresentationData:TelegramPresentationData",
         "//submodules/AccountContext:AccountContext",

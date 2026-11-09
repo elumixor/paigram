@@ -1,4 +1,4 @@
-load("@build_bazel_rules_swift//swift:swift.bzl", "swift_library")
+load("@build_bazel_rules_swift//swift:swift.bzl", "swift_library", "swift_test")
 
 swift_library(
     name = "MediaPickerUI",
@@ -12,7 +12,6 @@ swift_library(
         "//submodules/SSignalKit/SwiftSignalKit:SwiftSignalKit",
         "//submodules/AsyncDisplayKit:AsyncDisplayKit",
         "//submodules/Display:Display",
-        "//submodules/Postbox:Postbox",
         "//submodules/TelegramCore:TelegramCore",
         "//submodules/TelegramPresentationData:TelegramPresentationData",
         "//submodules/TelegramUIPreferences:TelegramUIPreferences",
@@ -43,6 +42,7 @@ swift_library(
         "//submodules/TelegramUI/Components/MediaEditor",
         "//submodules/RadialStatusNode",
         "//submodules/Camera",
+        "//submodules/Camera/CameraLegacy",
         "//submodules/TelegramUI/Components/MediaEditor/ImageObjectSeparation",
         "//submodules/ChatSendMessageActionUI",
         "//submodules/ComponentFlow",
@@ -59,8 +59,33 @@ swift_library(
         "//submodules/TelegramUI/Components/LottieComponent",
         "//submodules/TelegramUI/Components/AlertComponent",
         "//submodules/Components/BundleIconComponent",
+        "//submodules/TelegramUI/Components/ChatMediaSend",
+        "//submodules/TelegramUI/Components/MediaGrid",
+        "//submodules/TelegramUI/Components/MediaGridPhotoLibrary",
     ],
     visibility = [
         "//visibility:public",
+    ],
+)
+
+swift_test(
+    name = "MediaGroupsContextMenuLayoutTests",
+    srcs = [
+        "Sources/MediaGroupsContextMenuLayout.swift",
+        "Tests/MediaGroupsContextMenuLayoutTests.swift",
+    ],
+    copts = [
+        "-warnings-as-errors",
+    ],
+)
+
+swift_test(
+    name = "MediaPickerGridCellDecorationsTests",
+    srcs = [
+        "Sources/MediaPickerGridCellDecorations.swift",
+        "Tests/MediaPickerGridCellDecorationsTests.swift",
+    ],
+    copts = [
+        "-warnings-as-errors",
     ],
 )

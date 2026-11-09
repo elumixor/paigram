@@ -9,8 +9,8 @@ swift_library(
     copts = [
     ],
     deps = [
+        "//submodules/ShimmerEffect",
         "//submodules/AsyncDisplayKit",
-        "//submodules/Postbox",
         "//submodules/SSignalKit/SwiftSignalKit",
         "//submodules/Display",
         "//submodules/ComponentFlow",
@@ -44,6 +44,7 @@ swift_library(
         "//submodules/Utils/RangeSet",
         "//submodules/MediaResources",
         "//submodules/UIKitRuntimeUtils",
+        "//submodules/TelegramUI/Components/GlassBackgroundComponent",
     ],
     visibility = [
         "//visibility:public",

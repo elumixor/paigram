@@ -1389,6 +1389,39 @@ private final class SparseItemGridBindingImpl: SparseItemGridBinding {
         }
         self.onTapImpl?(item, itemLayer, point)
     }
+    
+    var accessibilityContextMenuEnabledImpl: (() -> Bool)?
+    var accessibilityContextActionImpl: ((VisualMediaItem, CALayer) -> Bool)?
+    
+    /// VoiceOver: a tile reads "Story", then a video's duration (the tile shows it) and the date; selection is `.selected`; the
+    /// long-press menu is "More" while the gesture is on.
+    func accessibilityItem(item: SparseItemGrid.Item) -> SparseItemGrid.AccessibilityItem? {
+        guard let item = item as? VisualMediaItem else {
+            return nil
+        }
+        var value: String?
+        if case let .file(file) = item.story.media, file.isVideo, let duration = file.duration {
+            value = stringForDuration(Int32(floor(duration)))
+        }
+        // The date tells otherwise identical tiles apart.
+        let date = stringForMediumDate(timestamp: item.story.timestamp, strings: self.strings, dateTimeFormat: self.chatPresentationData.dateTimeFormat, withTime: false)
+        value = [value, date].compactMap { $0 }.joined(separator: ", ")
+        var traits: UIAccessibilityTraits = .button
+        if !item.isEnabled {
+            traits.insert(.notEnabled)
+        } else if let selectedIds = self.itemInteraction?.selectedIds, selectedIds.contains(item.story.id) {
+            traits.insert(.selected)
+        }
+        let contextActionName = (self.accessibilityContextMenuEnabledImpl?() ?? false) ? self.strings.Common_More : nil
+        return SparseItemGrid.AccessibilityItem(label: self.strings.Message_Story, value: value, traits: traits, contextActionName: contextActionName)
+    }
+    
+    func accessibilityPerformContextAction(item: SparseItemGrid.Item, itemLayer: CALayer) -> Bool {
+        guard let item = item as? VisualMediaItem else {
+            return false
+        }
+        return self.accessibilityContextActionImpl?(item, itemLayer) ?? false
+    }
 
     func onTagTap() {
         self.onTagTapImpl?()
@@ -2301,6 +2334,25 @@ public final class PeerInfoStoryPaneNode: ASDisplayNode, PeerInfoPaneNode, ASScr
             }
         }
 
+        self.itemGrid.accessibilityItemFocused = { [weak self] rect in
+            guard let self else {
+                return
+            }
+            // A focused story below the fold: the profile scrolls the pane up, as for a story opened from elsewhere.
+            self.ensureRectVisible?(self.itemGrid.view, rect)
+        }
+        self.itemGridBinding.accessibilityContextMenuEnabledImpl = { [weak self] in
+            return self?.contextGestureContainerNode.isGestureEnabled ?? false
+        }
+        self.itemGridBinding.accessibilityContextActionImpl = { [weak self] item, itemLayer in
+            guard let self, let itemLayer = itemLayer as? ItemLayer, self.contextGestureContainerNode.isGestureEnabled else {
+                return false
+            }
+            let rect = self.itemGrid.frameForItem(layer: itemLayer)
+            self.openContextMenu(item: item.story, itemLayer: itemLayer, rect: rect, gesture: nil)
+            return true
+        }
+        
         self.contextGestureContainerNode.activated = { [weak self] gesture, _ in
             guard let strongSelf = self, let currentGestureItem = strongSelf.currentGestureItem else {
                 return
@@ -2473,6 +2525,23 @@ public final class PeerInfoStoryPaneNode: ASDisplayNode, PeerInfoPaneNode, ASScr
                     }
                 }
             })
+        }
+    }
+    
+    /// VoiceOver: the album tabs above the grid, then the grid. The grid's container starts at the pane's top (under
+    /// the tabs), so the frame sort would read the stories before the tabs.
+    override public var accessibilityElements: [Any]? {
+        get {
+            guard var elements = super.accessibilityElements else {
+                return nil
+            }
+            if self.contextGestureContainerNode.isNodeLoaded, let folderTabView = self.folderTab?.view, let gridIndex = elements.firstIndex(where: { ($0 as AnyObject) === self.contextGestureContainerNode.view }), let tabIndex = elements.firstIndex(where: { ($0 as AnyObject) === folderTabView }), gridIndex < tabIndex {
+                let grid = elements.remove(at: gridIndex)
+                elements.insert(grid, at: tabIndex)
+            }
+            return elements
+        } set(value) {
+            super.accessibilityElements = value
         }
     }
     
@@ -2768,7 +2837,7 @@ public final class PeerInfoStoryPaneNode: ASDisplayNode, PeerInfoPaneNode, ASScr
                             return
                         }
                         
-                        let shareController = self.context.sharedContext.makeShareController(context: self.context, params: ShareControllerParams(
+                        let shareController = self.context.sharedContext.makeShareScreen(context: self.context, params: ShareControllerParams(
                             subject: .media(.story(peer: peerReference, id: item.id, media: TelegramMediaStory(storyId: EngineStoryId(peerId: peer.id, id: item.id), isMention: false)), nil),
                             externalShare: false
                         ))
@@ -3704,11 +3773,14 @@ public final class PeerInfoStoryPaneNode: ASDisplayNode, PeerInfoPaneNode, ASScr
                 deviceMetrics: deviceMetrics,
                 intrinsicInsets: UIEdgeInsets(top: mapOverscrollInset, left: 0.0, bottom: 0.0, right: 0.0),
                 safeInsets: UIEdgeInsets(),
+                reservedCorners: .none,
+                division: nil,
                 additionalInsets: UIEdgeInsets(),
                 statusBarHeight: nil,
                 inputHeight: nil,
                 inputHeightIsInteractivellyChanging: false,
-                inVoiceOver: false
+                inVoiceOver: false,
+                presentedInFormSheet: false
             ),
             navigationBarHeight: 0.0,
             topPadding: mapOverscrollInset + self.additionalNavigationHeight,
@@ -3769,7 +3841,7 @@ public final class PeerInfoStoryPaneNode: ASDisplayNode, PeerInfoPaneNode, ASScr
             
             let mapInfoFrame = CGRect(origin: CGPoint(x: 0.0, y: mapFrame.maxY + mapInfoTopInset), size: mapInfoLayout.contentSize)
             transition.updateFrame(node: mapInfoNode, frame: mapInfoFrame)
-            mapInfoReadyAndApply().1(ListViewItemApply(isOnScreen: true))
+            mapInfoReadyAndApply().1(ListViewItemApply())
             
             self.effectiveMapHeight += mapInfoLayout.contentSize.height + mapInfoTopInset
             
@@ -3983,7 +4055,8 @@ public final class PeerInfoStoryPaneNode: ASDisplayNode, PeerInfoPaneNode, ASScr
                             )
                             controller.presentInGlobalOverlay(contextController)
                         }
-                    }
+                    },
+                    contextAccessibilityLabel: self.presentationData.strings.Common_More
                 ))
             }
         }
@@ -4576,7 +4649,7 @@ public final class PeerInfoStoryPaneNode: ASDisplayNode, PeerInfoPaneNode, ASScr
                         context: self.context,
                         theme: presentationData.theme,
                         fitToHeight: self.isProfileEmbedded,
-                        animationName: "StoryListEmpty",
+                        animationName: "Photos",
                         title: isArchived ? presentationData.strings.StoryList_ArchivedEmptyState_Title : presentationData.strings.StoryList_SavedEmptyPosts_Title,
                         text: isArchived ? presentationData.strings.StoryList_ArchivedEmptyState_Text : presentationData.strings.StoryList_SavedEmptyPosts_Text,
                         actionTitle: (isArchived || !self.canManageStories) ? nil : presentationData.strings.StoryList_SavedAddAction,
@@ -5361,7 +5434,7 @@ public final class PeerInfoStoryPaneNode: ASDisplayNode, PeerInfoPaneNode, ASScr
                 urlBase = "\(peer.id.id._internalGetInt64Value())"
             }
             
-            let shareController = self.context.sharedContext.makeShareController(context: self.context, params: ShareControllerParams(
+            let shareController = self.context.sharedContext.makeShareScreen(context: self.context, params: ShareControllerParams(
                 subject: .url("https://t.me/\(urlBase)/a/\(id)"),
                 externalShare: false,
                 actionCompleted: { [weak self] in
@@ -5565,11 +5638,11 @@ private final class ExtractedContentSourceImpl: ContextExtractedContentSource {
     }
     
     func takeView() -> ContextControllerTakeViewInfo? {
-        return ContextControllerTakeViewInfo(containingItem: .node(self.sourceNode), contentAreaInScreenSpace: UIScreen.main.bounds)
+        return ContextControllerTakeViewInfo(containingItem: .node(self.sourceNode), contentAreaInScreenSpace: mainWindowScreenBounds)
     }
     
     func putBack() -> ContextControllerPutBackViewInfo? {
-        return ContextControllerPutBackViewInfo(contentAreaInScreenSpace: UIScreen.main.bounds)
+        return ContextControllerPutBackViewInfo(contentAreaInScreenSpace: mainWindowScreenBounds)
     }
 }
 
@@ -5800,11 +5873,11 @@ private final class ItemExtractedContentSource: ContextExtractedContentSource {
         
         return ContextControllerTakeViewInfo(
             containingItem: .node(self.sourceNode),
-            contentAreaInScreenSpace: contentArea ?? UIScreen.main.bounds
+            contentAreaInScreenSpace: contentArea ?? mainWindowScreenBounds
         )
     }
     
     func putBack() -> ContextControllerPutBackViewInfo? {
-        return ContextControllerPutBackViewInfo(contentAreaInScreenSpace: UIScreen.main.bounds)
+        return ContextControllerPutBackViewInfo(contentAreaInScreenSpace: mainWindowScreenBounds)
     }
 }

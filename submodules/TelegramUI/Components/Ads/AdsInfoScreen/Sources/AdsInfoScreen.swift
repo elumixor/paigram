@@ -681,7 +681,7 @@ private final class AdsInfoSheetComponent: CombinedComponent {
                         metrics: environment.metrics,
                         deviceMetrics: environment.deviceMetrics,
                         isDisplaying: environment.value.isVisible,
-                        isCentered: environment.metrics.widthClass == .regular,
+                        isCentered: environment.presentsFloatingPanels,
                         screenSize: context.availableSize,
                         regularMetricsSize: CGSize(width: 430.0, height: 900.0),
                         dismiss: { animated in
@@ -980,7 +980,7 @@ public final class AdsInfoScreen: ViewControllerComponentContainer {
             source: .reference(
                 AdsInfoContextReferenceContentSource(
                     controller: self,
-                    sourceView: referenceView,
+                    sourceView: (referenceView as? GlassBarButtonComponent.View)?.menuSourceView ?? referenceView,
                     insets: .zero,
                     contentInsets: .zero
                 )
@@ -1035,7 +1035,7 @@ private final class AdsInfoContextReferenceContentSource: ContextReferenceConten
     func transitionInfo() -> ContextControllerReferenceViewInfo? {
         return ContextControllerReferenceViewInfo(
             referenceView: self.sourceView,
-            contentAreaInScreenSpace: UIScreen.main.bounds.inset(by: self.insets),
+            contentAreaInScreenSpace: mainWindowScreenBounds.inset(by: self.insets),
             insets: self.contentInsets
         )
     }

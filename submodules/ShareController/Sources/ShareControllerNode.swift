@@ -275,7 +275,7 @@ private final class ShareContentInfoView: UIView {
         let iconSize = self.icon.update(
             transition: .immediate,
             component: AnyComponent(LottieComponent(
-                content: LottieComponent.AppBundleContent(name: "ToastCollectibleUsernameEmoji"),
+                content: LottieComponent.AppBundleContent(name: "anim_collectible_username"),
                 loop: false
             )),
             environment: {},
@@ -1101,9 +1101,10 @@ final class ShareControllerNode: ViewControllerTracingNode, ASScrollViewDelegate
         
         let maximumContentHeight = layout.size.height - insets.top - max(bottomInset + buttonHeight, insets.bottom) - sectionSpacing
         
-        let width = horizontalContainerFillingSizeForLayout(layout: layout, sideInset: 10.0 + layout.safeInsets.left)
-        
-        let sideInset = floor((layout.size.width - width) / 2.0)
+        // Centered, or in the band beside a side strip (iPhone Duo).
+        let placement = horizontalContainerFillingPlacementForLayout(layout: layout, margin: 10.0, includesSafeInsets: true)
+        let width = placement.width
+        let sideInset = placement.left
         
         let contentContainerFrame = CGRect(origin: CGPoint(x: sideInset, y: insets.top), size: CGSize(width: width, height: maximumContentHeight))
         let contentFrame = contentContainerFrame.insetBy(dx: 0.0, dy: 0.0)
@@ -1196,11 +1197,14 @@ final class ShareControllerNode: ViewControllerTracingNode, ASScrollViewDelegate
                 deviceMetrics: layout.deviceMetrics,
                 intrinsicInsets: UIEdgeInsets(top: 0.0, left: 4.0, bottom: layout.size.height - contentFrame.maxY - 6.0, right: 4.0),
                 safeInsets: layout.safeInsets,
+                reservedCorners: layout.reservedCorners,
+                division: layout.division,
                 additionalInsets: UIEdgeInsets(),
                 statusBarHeight: nil,
                 inputHeight: nil,
                 inputHeightIsInteractivellyChanging: false,
-                inVoiceOver: false
+                inVoiceOver: false,
+                presentedInFormSheet: false
             )
             controller.presentationContext.containerLayoutUpdated(subLayout, transition: transition)
         }
@@ -1226,9 +1230,9 @@ final class ShareControllerNode: ViewControllerTracingNode, ASScrollViewDelegate
             let buttonHeight: CGFloat = 57.0
             let sectionSpacing: CGFloat = 8.0
             
-            let width = horizontalContainerFillingSizeForLayout(layout: layout, sideInset: 10.0 + layout.safeInsets.left)
-            
-            let sideInset = floor((layout.size.width - width) / 2.0)
+            let placement = horizontalContainerFillingPlacementForLayout(layout: layout, margin: 10.0, includesSafeInsets: true)
+            let width = placement.width
+            let sideInset = placement.left
             
             let maximumContentHeight = layout.size.height - insets.top - max(bottomInset + buttonHeight, insets.bottom) - sectionSpacing
             let contentFrame = CGRect(origin: CGPoint(x: sideInset, y: insets.top), size: CGSize(width: width, height: maximumContentHeight))
@@ -1971,7 +1975,7 @@ private final class ShareContextReferenceContentSource: ContextReferenceContentS
     }
 
     func transitionInfo() -> ContextControllerReferenceViewInfo? {
-        return ContextControllerReferenceViewInfo(referenceView: self.sourceNode.view, contentAreaInScreenSpace: UIScreen.main.bounds, customPosition: self.customPosition)
+        return ContextControllerReferenceViewInfo(referenceView: self.sourceNode.view, contentAreaInScreenSpace: mainWindowScreenBounds, customPosition: self.customPosition)
     }
 }
 

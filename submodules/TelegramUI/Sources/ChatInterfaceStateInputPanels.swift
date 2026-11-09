@@ -12,6 +12,7 @@ import ChatTextInputPanelNode
 import RichTextEditorMediaView
 import RichTextEditorUIKit
 import InstantPageUI
+import BrowserUI
 
 func chatInputFormulaRenderResult(context: RichTextFormulaRenderContext) -> RichTextFormulaRenderResult? {
     guard let attachment = instantPageMathAttachment(
@@ -449,11 +450,11 @@ func inputPanelForChatPresentationIntefaceState(_ chatPresentationInterfaceState
         switch customChatContents.kind {
         case .hashTagSearch:
             displayInputTextPanel = false
-        case .quickReplyMessageInput, .businessLinkSetup:
+        case .quickReplyMessageInput, .businessLinkSetup, .welcomeMessages:
             displayInputTextPanel = true
         }
         
-        if let chatHistoryState = chatPresentationInterfaceState.chatHistoryState, case .loaded(_, true) = chatHistoryState {
+        if let chatHistoryState = chatPresentationInterfaceState.chatHistoryState, case .loaded(_, true) = chatHistoryState, chatPresentationInterfaceState.interfaceState.editMessage == nil {
             if let currentPanel = (currentPanel as? ChatRestrictedInputPanelNode) ?? (currentSecondaryPanel as? ChatRestrictedInputPanelNode) {
                 return (currentPanel, nil)
             } else {
@@ -513,6 +514,9 @@ func inputPanelForChatPresentationIntefaceState(_ chatPresentationInterfaceState
                 panel.chatControllerInteraction = chatControllerInteraction
                 panel.interfaceInteraction = interfaceInteraction
                 panel.context = context
+                panel.pastedMarkdownParser = { context, text in
+                    return chatInputContentFromPastedMarkdown(context: context, plainText: text, keepsBlankLines: true)
+                }
                 return (panel, nil)
             }
         }

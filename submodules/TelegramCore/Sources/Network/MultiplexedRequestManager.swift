@@ -1,5 +1,5 @@
 import Foundation
-import TelegramApi
+internal import TelegramApi
 import Postbox
 import SwiftSignalKit
 import MtProtoKit
@@ -99,6 +99,8 @@ private final class MultiplexedRequestManagerContext {
     
     private let queue: Queue
     private let takeWorker: (MultiplexedRequestTarget, MediaResourceFetchTag?, Bool) -> Download?
+    private let cdnMaxRequestsPerWorker: Int
+    private let cdnMaxWorkersPerTarget: Int
     
     private let priorityContext = RequestManagerPriorityContext()
     private var queuedRequests: [RequestData] = []
@@ -107,8 +109,10 @@ private final class MultiplexedRequestManagerContext {
     private var targetContexts: [MultiplexedRequestTargetKey: [RequestTargetContext]] = [:]
     private var emptyTargetDisposables: [MultiplexedRequestTargetTimerKey: Disposable] = [:]
     
-    init(queue: Queue, takeWorker: @escaping (MultiplexedRequestTarget, MediaResourceFetchTag?, Bool) -> Download?) {
+    init(queue: Queue, cdnMaxRequestsPerWorker: Int, cdnMaxWorkersPerTarget: Int, takeWorker: @escaping (MultiplexedRequestTarget, MediaResourceFetchTag?, Bool) -> Download?) {
         self.queue = queue
+        self.cdnMaxRequestsPerWorker = cdnMaxRequestsPerWorker
+        self.cdnMaxWorkersPerTarget = cdnMaxWorkersPerTarget
         self.takeWorker = takeWorker
     }
     
@@ -202,33 +206,82 @@ private final class MultiplexedRequestManagerContext {
         }
     }
     
+    private func limits(_ target: MultiplexedRequestTarget) -> (requestsPerWorker: Int, workersPerTarget: Int) {
+        switch target {
+        case .main:
+            return (3, 4)
+        case .cdn:
+            return (self.cdnMaxRequestsPerWorker, self.cdnMaxWorkersPerTarget)
+        }
+    }
+    
+    private func completeExecutingRequest(_ request: RequestData, requestId: Int32, context: RequestTargetContext?, result: Any, info: NetworkResponseInfo) {
+        if let context {
+            for i in 0 ..< context.requests.count {
+                if context.requests[i].requestId == requestId {
+                    context.requests.remove(at: i)
+                    break
+                }
+            }
+        }
+        request.completed(result, info)
+        self.updateState()
+    }
+
+    private func isTargetSaturated(_ targetKey: MultiplexedRequestTargetKey) -> Bool {
+        let (maxRequestsPerWorker, maxWorkersPerTarget) = self.limits(targetKey.target)
+        guard let contexts = self.targetContexts[targetKey], contexts.count >= maxWorkersPerTarget else {
+            return false
+        }
+        for context in contexts {
+            if context.requests.count < maxRequestsPerWorker {
+                return false
+            }
+        }
+        return true
+    }
+    
     private func updateState() {
-        let maxRequestsPerWorker = 3
-        let maxWorkersPerTarget = 4
+        var checkedTargets = Set<MultiplexedRequestTargetKey>()
+        var hasAvailableTarget = false
+        for request in self.queuedRequests {
+            let targetKey = MultiplexedRequestTargetKey(target: request.target, continueInBackground: request.continueInBackground)
+            if checkedTargets.insert(targetKey).inserted, !self.isTargetSaturated(targetKey) {
+                hasAvailableTarget = true
+                break
+            }
+        }
+        if !hasAvailableTarget {
+            self.checkEmptyContexts()
+            return
+        }
         
-        for request in self.queuedRequests.sorted(by: { lhs, rhs in
-            let lhsPriority = lhs.resourceId.flatMap { id in
-                if let counters = self.priorityContext.resourceCounters[id] {
-                    return counters.copyItems().max() ?? 0
-                } else {
-                    return 0
-                }
-            } ?? 0
-            let rhsPriority = rhs.resourceId.flatMap { id in
-                if let counters = self.priorityContext.resourceCounters[id] {
-                    return counters.copyItems().max() ?? 0
-                } else {
-                    return 0
-                }
-            } ?? 0
-            
-            if lhsPriority != rhsPriority {
-                return lhsPriority > rhsPriority
+        var resourcePriorities: [String: Int] = [:]
+        let prioritizedRequests = self.queuedRequests.map { request -> (priority: Int, request: RequestData) in
+            guard let resourceId = request.resourceId else {
+                return (0, request)
+            }
+            if let priority = resourcePriorities[resourceId] {
+                return (priority, request)
+            }
+            let priority = self.priorityContext.resourceCounters[resourceId].flatMap { $0.copyItems().max() } ?? 0
+            resourcePriorities[resourceId] = priority
+            return (priority, request)
+        }
+        var saturatedTargets = Set<MultiplexedRequestTargetKey>()
+        
+        for (_, request) in prioritizedRequests.sorted(by: { lhs, rhs in
+            if lhs.priority != rhs.priority {
+                return lhs.priority > rhs.priority
             }
             
-            return lhs.id < rhs.id
+            return lhs.request.id < rhs.request.id
         }) {
             let targetKey = MultiplexedRequestTargetKey(target: request.target, continueInBackground: request.continueInBackground)
+            if saturatedTargets.contains(targetKey) {
+                continue
+            }
+            let (maxRequestsPerWorker, maxWorkersPerTarget) = self.limits(request.target)
             
             if self.targetContexts[targetKey] == nil {
                 self.targetContexts[targetKey] = []
@@ -240,15 +293,19 @@ private final class MultiplexedRequestManagerContext {
                     break
                 }
             }
-            if selectedContext == nil && self.targetContexts[targetKey]!.count < maxWorkersPerTarget {
-                if let worker = self.takeWorker(request.target, request.tag, request.continueInBackground) {
-                    let contextId = self.nextId
-                    self.nextId += 1
-                    let targetContext = RequestTargetContext(id: contextId, worker: worker)
-                    self.targetContexts[targetKey]!.append(targetContext)
-                    selectedContext = targetContext
+            if selectedContext == nil {
+                if self.targetContexts[targetKey]!.count < maxWorkersPerTarget {
+                    if let worker = self.takeWorker(request.target, request.tag, request.continueInBackground) {
+                        let contextId = self.nextId
+                        self.nextId += 1
+                        let targetContext = RequestTargetContext(id: contextId, worker: worker)
+                        self.targetContexts[targetKey]!.append(targetContext)
+                        selectedContext = targetContext
+                    } else {
+                        Logger.shared.log("MultiplexedRequestManager", "couldn't take worker")
+                    }
                 } else {
-                    Logger.shared.log("MultiplexedRequestManager", "couldn't take worker")
+                    saturatedTargets.insert(targetKey)
                 }
             }
             if let selectedContext = selectedContext {
@@ -256,21 +313,52 @@ private final class MultiplexedRequestManagerContext {
                 let requestId = request.id
                 selectedContext.requests.append(ExecutingRequestData(requestId: requestId, disposable: disposable))
                 let queue = self.queue
-                disposable.set(selectedContext.worker.rawRequest((request.functionDescription, request.payload, request.deserializeResponse), automaticFloodWait: request.automaticFloodWait, onFloodWaitError: request.onFloodWaitError, expectedResponseSize: request.expectedResponseSize).start(next: { [weak self, weak selectedContext] result, info in
+                #if DEBUG
+                // Only with a profile: without one, the request does no more than in a release build.
+                let shaping: (shaper: DebugNetworkShaper, sentAt: Double, responseBytes: Atomic<Int>)? = DebugNetworkShaper.shared.map { shaper in
+                    return (shaper, CFAbsoluteTimeGetCurrent(), Atomic<Int>(value: 0))
+                }
+                let deserializeResponse: (Buffer) -> Any?
+                if let shaping {
+                    let deserialize = request.deserializeResponse
+                    deserializeResponse = { buffer in
+                        let _ = shaping.responseBytes.swap(Int(buffer.size))
+                        return deserialize(buffer)
+                    }
+                } else {
+                    deserializeResponse = request.deserializeResponse
+                }
+                #else
+                let deserializeResponse = request.deserializeResponse
+                #endif
+                disposable.set(selectedContext.worker.rawRequest((request.functionDescription, request.payload, deserializeResponse), automaticFloodWait: request.automaticFloodWait, onFloodWaitError: request.onFloodWaitError, expectedResponseSize: request.expectedResponseSize).start(next: { [weak self, weak selectedContext] result, info in
                     queue.async {
                         guard let strongSelf = self else {
                             return
                         }
-                        if let selectedContext = selectedContext {
-                            for i in 0 ..< selectedContext.requests.count {
-                                if selectedContext.requests[i].requestId == requestId {
-                                    selectedContext.requests.remove(at: i)
-                                    break
-                                }
+                        #if DEBUG
+                        if let shaping {
+                            let now = CFAbsoluteTimeGetCurrent()
+                            let hold = shaping.shaper.holdDuration(bytes: shaping.responseBytes.with { $0 }, sentAt: shaping.sentAt, now: now)
+                            // The request's network time is the shaped link's, as the download meter
+                            // (`DownloadThroughputMeter`) must see it.
+                            var shapedInfo = info
+                            shapedInfo.networkDuration = max(info.networkDuration, now + max(0.0, hold) - shaping.sentAt)
+                            if hold > 0.0 {
+                                // The request keeps its worker slot while held; one disposed meanwhile delivers nothing.
+                                queue.after(hold, { [weak strongSelf, weak selectedContext] in
+                                    guard let strongSelf, let selectedContext, selectedContext.requests.contains(where: { $0.requestId == requestId }) else {
+                                        return
+                                    }
+                                    strongSelf.completeExecutingRequest(request, requestId: requestId, context: selectedContext, result: result, info: shapedInfo)
+                                })
+                                return
                             }
+                            strongSelf.completeExecutingRequest(request, requestId: requestId, context: selectedContext, result: result, info: shapedInfo)
+                            return
                         }
-                        request.completed(result, info)
-                        strongSelf.updateState()
+                        #endif
+                        strongSelf.completeExecutingRequest(request, requestId: requestId, context: selectedContext, result: result, info: info)
                     }
                 }, error: { [weak self, weak selectedContext] error, timestamp in
                     queue.async {
@@ -341,10 +429,10 @@ final class MultiplexedRequestManager {
     private let queue = Queue()
     private let context: QueueLocalObject<MultiplexedRequestManagerContext>
     
-    init(takeWorker: @escaping (MultiplexedRequestTarget, MediaResourceFetchTag?, Bool) -> Download?) {
+    init(cdnMaxRequestsPerWorker: Int = 3, cdnMaxWorkersPerTarget: Int = 4, takeWorker: @escaping (MultiplexedRequestTarget, MediaResourceFetchTag?, Bool) -> Download?) {
         let queue = self.queue
         self.context = QueueLocalObject(queue: self.queue, generate: {
-            return MultiplexedRequestManagerContext(queue: queue, takeWorker: takeWorker)
+            return MultiplexedRequestManagerContext(queue: queue, cdnMaxRequestsPerWorker: cdnMaxRequestsPerWorker, cdnMaxWorkersPerTarget: cdnMaxWorkersPerTarget, takeWorker: takeWorker)
         })
     }
     

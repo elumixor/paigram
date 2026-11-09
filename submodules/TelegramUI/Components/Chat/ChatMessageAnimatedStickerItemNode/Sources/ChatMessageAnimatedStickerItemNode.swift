@@ -4,7 +4,6 @@ import AVFoundation
 import AsyncDisplayKit
 import Display
 import SwiftSignalKit
-import Postbox
 import TelegramCore
 import CoreImage
 import TelegramPresentationData
@@ -48,6 +47,7 @@ import MessageHaptics
 import ChatMessageTransitionNode
 import ChatMessageSuggestedPostInfoNode
 import TelegramStringFormatting
+import StaticGlassBackground
 
 private let nameFont = Font.medium(14.0)
 private let inlineBotPrefixFont = Font.regular(14.0)
@@ -80,6 +80,37 @@ extension ManagedDiceAnimationNode: GenericAnimatedStickerNode {
 }
 
 public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
+    // Bubble mode off: the reply and the forward header beside a sticker stand on glass drawn from images instead of
+    // the wallpaper's plates, and fade with the other panels in selection.
+    private var replyGlassView: StaticGlassBackgroundView?
+    private var forwardGlassView: StaticGlassBackgroundView?
+    
+    private func updateBubblelessInfoPlates(isGlass: Bool, replyFrame: CGRect?, forwardFrame: CGRect?, alpha: CGFloat, isDark: Bool) {
+        func update(_ view: inout StaticGlassBackgroundView?, frame: CGRect?) {
+            if isGlass, let frame {
+                let glassView: StaticGlassBackgroundView
+                if let current = view {
+                    glassView = current
+                } else {
+                    glassView = StaticGlassBackgroundView()
+                    glassView.isUserInteractionEnabled = false
+                    self.contextSourceNode.contentNode.view.insertSubview(glassView, at: 0)
+                    view = glassView
+                }
+                glassView.frame = frame
+                glassView.alpha = alpha
+                glassView.update(size: frame.size, cornerRadius: min(12.0, frame.height * 0.5), isDark: isDark, tint: .panel)
+            } else if let current = view {
+                view = nil
+                current.removeFromSuperview()
+            }
+        }
+        update(&self.replyGlassView, frame: replyFrame)
+        update(&self.forwardGlassView, frame: forwardFrame)
+        self.replyBackgroundContent?.isHidden = isGlass
+        self.forwardBackgroundContent?.isHidden = isGlass
+    }
+    
     public let contextSourceNode: ContextExtractedContentContainingNode
     private let containerNode: ContextControllerSourceNode
     public let imageNode: TransformImageNode
@@ -106,6 +137,8 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
     private var cachedMaskLabelBackgroundImage: (CGPoint, UIImage, [CGRect])?
     
     private var selectionNode: ChatMessageSelectionNode?
+    // Without bubbles: where the selection checkmark centres, from the last layout (nil with bubbles).
+    private var bubblelessSelectionCheckCenterY: CGFloat?
     private var deliveryFailedNode: ChatMessageDeliveryFailedNode?
     private var shareButtonNode: ChatMessageShareButton?
     
@@ -140,7 +173,7 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
     
     private var currentSwipeToReplyTranslation: CGFloat = 0.0
     
-    private var appliedForwardInfo: (Peer?, String?)?
+    private var appliedForwardInfo: ChatMessageAppliedForwardInfo?
     
     private var replyRecognizer: ChatSwipeToReplyRecognizer?
     private var currentSwipeAction: ChatControllerInteractionSwipeAction?
@@ -151,6 +184,10 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
     private var fetchEffectDisposable: Disposable?
     
     private var suggestedPostInfoNode: ChatMessageSuggestedPostInfoNode?
+    /// Without bubbles: the author's name and time over the first sticker of a run.
+    private var bubblelessHeaderNode: ChatMessageBubblelessHeaderNode?
+    /// Whether the time is hidden because the sticker has no bubble, so that it comes back with bubbles.
+    private var hidesStatusWithoutBubbles = false
     
     required public init(rotated: Bool) {
         self.contextSourceNode = ContextExtractedContentContainingNode()
@@ -179,6 +216,7 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
             guard let strongSelf = self else {
                 return false
             }
+            let location = strongSelf.pressLocation(location)
             if !strongSelf.imageNode.frame.contains(location) {
                 return false
             }
@@ -203,7 +241,7 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
                 return
             }
             
-            if let action = strongSelf.gestureRecognized(gesture: .longTap, location: location, recognizer: nil) {
+            if let action = strongSelf.gestureRecognized(gesture: .longTap, location: strongSelf.pressLocation(location), recognizer: nil) {
                 switch action {
                 case .action, .optionalAction:
                     break
@@ -257,6 +295,14 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
     
     required public init?(coder aDecoder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+    
+    /// Without bubbles a long press anywhere across an incoming row acts on its sticker (spec 5.8).
+    private func pressLocation(_ location: CGPoint) -> CGPoint {
+        if let item = self.item, item.bubbleStyle.isBubbleless, !self.imageNode.frame.contains(location), self.containerNode.bounds.contains(location) {
+            return CGPoint(x: self.imageNode.frame.midX, y: self.imageNode.frame.midY)
+        }
+        return location
     }
     
     private func removePlaceholder(animated: Bool) {
@@ -744,9 +790,6 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
 
             self.placeholderNode.updateAbsoluteRect(CGRect(origin: CGPoint(x: rect.minX + self.placeholderNode.frame.minX, y: rect.minY + self.placeholderNode.frame.minY), size: self.placeholderNode.frame.size), within: containerSize)
             
-            if let backgroundNode = self.backgroundNode {
-                backgroundNode.update(rect: CGRect(origin: CGPoint(x: rect.minX + self.placeholderNode.frame.minX, y: rect.minY + self.placeholderNode.frame.minY), size: self.placeholderNode.frame.size), within: containerSize, transition: .immediate)
-            }
             
             if let threadInfoNode = self.threadInfoNode {
                 var threadInfoNodeFrame = threadInfoNode.frame
@@ -780,23 +823,6 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
                 reactionButtonsNode.update(rect: rect, within: containerSize, transition: .immediate)
             }
                         
-            if let replyBackgroundContent = self.replyBackgroundContent {
-                var replyBackgroundContentFrame = replyBackgroundContent.frame
-                replyBackgroundContentFrame.origin.x += rect.minX
-                replyBackgroundContentFrame.origin.y += rect.minY
-                
-                replyBackgroundContent.update(rect: rect, within: containerSize, transition: .immediate)
-            }
-        }
-    }
-    
-    override public func applyAbsoluteOffset(value: CGPoint, animationCurve: ContainedViewLayoutTransitionCurve, duration: Double) {
-        if let backgroundNode = self.backgroundNode {
-            backgroundNode.offset(value: value, animationCurve: animationCurve, duration: duration)
-        }
-        
-        if let reactionButtonsNode = self.reactionButtonsNode {
-            reactionButtonsNode.offset(value: value, animationCurve: animationCurve, duration: duration)
         }
     }
     
@@ -857,6 +883,8 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
         let textLayout = TextNodeWithEntities.asyncLayout(self.textNode)
         
         let makeSuggestedPostInfoNodeLayout: ChatMessageSuggestedPostInfoNode.AsyncLayout = ChatMessageSuggestedPostInfoNode.asyncLayout(self.suggestedPostInfoNode)
+        // Made only while the node shows a header (none with bubbles); a new one is laid out without a node.
+        let bubblelessHeaderLayout = self.bubblelessHeaderNode.map { ChatMessageBubblelessHeaderNode.asyncLayout($0) }
         
         func continueAsyncLayout(_ weakSelf: Weak<ChatMessageAnimatedStickerItemNode>, _ item: ChatMessageItem, _ params: ListViewItemLayoutParams, _ mergedTop: ChatMessageMerge, _ mergedBottom: ChatMessageMerge, _ dateHeaderAtBottom: ChatMessageHeaderSpec) -> (ListViewItemNodeLayout, (ListViewItemUpdateAnimation, ListViewItemApply, Bool) -> Void) {
             let accessibilityData = ChatMessageAccessibilityData(item: item, isSelected: nil)
@@ -960,7 +988,17 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
                 hasAvatar = false
             }
             
-            if hasAvatar {
+            // Without bubbles a person's messages in a chat with them carry their avatar (see `ChatMessageItemImpl`): the row
+            // keeps the avatar column clear.
+            if item.bubbleStyle.isBubbleless, chatMessageBubblelessPrivateChatHasAvatar(style: item.bubbleStyle, isPreview: item.presentationData.isPreview, chatPeer: item.message.peers[item.message.id.peerId].flatMap({ EnginePeer($0) })) {
+                hasAvatar = true
+            }
+            
+            // Without bubbles an incoming sticker lines up with the text column (less the image's transparent inset).
+            let isBubbleless = item.bubbleStyle.isBubbleless
+            if isBubbleless {
+                avatarInset = chatMessageBubblelessStickerInset(hasAvatarColumn: hasAvatar, edgeInset: layoutConstants.bubble.edgeInset, contentInsetLeft: layoutConstants.bubble.contentInsets.left, transparentInset: 0.0)
+            } else if hasAvatar {
                 avatarInset = layoutConstants.avatarInset
             } else {
                 avatarInset = 0.0
@@ -1018,7 +1056,14 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
                 }
             }
             
+            // Without bubbles there is no share button beside an incoming sticker: sharing stays in the menu.
+            if isBubbleless {
+                needsShareButton = false
+            }
             if let subject = item.associatedData.subject, case .messageOptions = subject {
+                needsShareButton = false
+            }
+            if Namespaces.Message.allEphemeral.contains(item.message.id.namespace) || Namespaces.Message.allWelcomeMessages.contains(item.message.id.namespace) {
                 needsShareButton = false
             }
             
@@ -1048,7 +1093,8 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
                 }
             } else if let _ = emojiString {
                 imageVerticalInset = 0.0
-                imageTopPadding = 16.0
+                // Without bubbles the author header is above the emoji already.
+                imageTopPadding = isBubbleless ? 0.0 : 16.0
                 imageBottomPadding = 20.0
 
                 let baseWidth = params.width
@@ -1153,6 +1199,26 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
             }
             
             let dateText = stringForMessageTimestampStatus(context: item.context, message: EngineMessage(item.message), dateTimeFormat: item.presentationData.dateTimeFormat, nameDisplayOrder: item.presentationData.nameDisplayOrder, strings: item.presentationData.strings, format: .regular, associatedData: item.associatedData)
+
+            // Without bubbles a sticker is headed by the rule text is (the first of a run, every post of a channel without
+            // profiles, never in a secret chat) with the header text messages have: the name, just the time and a post's
+            // views; who signed a post is in its context menu.
+            var bubblelessHeader: (size: CGSize, nameHeight: CGFloat, apply: () -> ChatMessageBubblelessHeaderNode)?
+            if isBubbleless && chatMessageBubblelessHeadsRow(isMergedWithPrevious: mergedTop.merged, isChannelPostWithoutProfiles: chatMessageBubblelessIsChannelPostWithoutProfiles(chatPeer: item.message.peers[item.message.id.peerId].flatMap({ EnginePeer($0) })), chatPeerId: item.message.id.peerId), let author = item.message.author ?? item.message.peers[item.message.id.peerId] {
+                let headerDateText = stringForMessageTimestampStatus(context: item.context, message: EngineMessage(item.message), dateTimeFormat: item.presentationData.dateTimeFormat, nameDisplayOrder: item.presentationData.nameDisplayOrder, strings: item.presentationData.strings, format: .regular, associatedData: item.associatedData, ignoreAuthor: true)
+                let column = chatMessageBubblelessColumn(baseWidth: params.width - params.leftInset - params.rightInset, leftInset: params.leftInset, hasAvatarColumn: hasAvatar, inSelection: false, deliveryFailedInset: 0.0, hasSideButtons: false, widthFill: layoutConstants.bubble.maximumWidthFill)
+                bubblelessHeader = (bubblelessHeaderLayout ?? ChatMessageBubblelessHeaderNode.asyncLayout(nil))(item, EnginePeer(author), headerDateText, (item.message.attributes.first(where: { $0 is ViewCountMessageAttribute }) as? ViewCountMessageAttribute)?.count, column.width)
+            }
+            // Large emoji are set as text, and their line box reaches well past the glyphs: without bubbles the row leaves
+            // the room below them out (unless reactions keep the time there), and under a name the room above them too.
+            if isBubbleless, emojiString != nil {
+                let emojiInsets = chatMessageBubblelessLargeEmojiInsets(emojiHeight: fontSizeForEmojiString(item.message.text), hasReactions: !dateReactionsAndPeers.reactions.isEmpty, underHeader: bubblelessHeader != nil)
+                if dateReactionsAndPeers.reactions.isEmpty {
+                    imageBottomPadding = emojiInsets.bottom
+                }
+                imageTopPadding -= emojiInsets.headerOverlap
+                imageFrame.origin.y -= emojiInsets.headerOverlap
+            }
             
             var isReplyThread = false
             if case .replyThread = item.chatLocation {
@@ -1212,14 +1278,15 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
                 }
             }
             
-            var replyMessage: Message?
+            var replyMessage: EngineRawMessage?
             var replyForward: QuotedReplyMessageAttribute?
             var replyQuote: (quote: EngineMessageReplyQuote, isQuote: Bool)?
             var replyInnerSubject: EngineMessageReplyInnerSubject?
-            var replyStory: StoryId?
+            var replyStory: EngineStoryId?
+            var replyIsLoading = false
+            var inlineBotNameString: String?
             for attribute in item.message.attributes {
                 if let attribute = attribute as? InlineBotMessageAttribute {
-                    var inlineBotNameString: String?
                     if let peerId = attribute.peerId, let bot = item.message.peers[peerId] as? TelegramUser {
                         inlineBotNameString = bot.addressName
                     } else {
@@ -1241,6 +1308,9 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
                     if case let .replyThread(replyThreadMessage) = item.chatLocation, Int32(clamping: replyThreadMessage.threadId) == replyAttribute.messageId.id {
                     } else {
                         replyMessage = item.message.associatedMessages[replyAttribute.messageId]
+                        if replyMessage == nil {
+                            replyIsLoading = item.context.account.viewTracker.pendingMessageReferences.hasLoadingReferences(messageId: item.message.id)
+                        }
                     }
                     replyQuote = replyAttribute.quote.flatMap { ($0, replyAttribute.isQuote) }
                     replyInnerSubject = replyAttribute.innerSubject
@@ -1248,12 +1318,20 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
                     replyForward = quoteReplyAttribute
                 } else if let attribute = attribute as? ReplyStoryAttribute {
                     replyStory = attribute.storyId
+                    if item.message.associatedStories[attribute.storyId] == nil {
+                        replyIsLoading = item.context.account.viewTracker.pendingMessageReferences.hasLoadingReferences(messageId: item.message.id)
+                    }
                 } else if let attribute = attribute as? ReplyMarkupMessageAttribute, attribute.flags.contains(.inline), !attribute.rows.isEmpty {
                     replyMarkup = attribute
                 }
             }
             
-            var hasReply = replyMessage != nil || replyForward != nil || replyStory != nil
+            // A suspicious sender's buttons are not shown, as their links are not.
+            if item.associatedData.isSuspiciousPeer && item.message.effectivelyIncoming(item.context.account.peerId) {
+                replyMarkup = nil
+            }
+            
+            var hasReply = replyMessage != nil || replyForward != nil || replyStory != nil || replyIsLoading
             if case let .peer(peerId) = item.chatLocation, (peerId == replyMessage?.id.peerId || item.message.threadId == 1), let peer = item.message.peers[item.message.id.peerId], peer.isForumOrMonoForum, item.message.associatedThreadInfo != nil {
                 if let threadId = item.message.threadId, let replyMessage = replyMessage, Int64(replyMessage.id.id) == threadId {
                     hasReply = false
@@ -1274,7 +1352,7 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
                 ))*/
             }
             
-            if hasReply, (replyMessage != nil || replyForward != nil || replyStory != nil) {
+            if hasReply, (replyMessage != nil || replyForward != nil || replyStory != nil || replyIsLoading) {
                 replyInfoApply = makeReplyInfoLayout(ChatMessageReplyInfoNode.Arguments(
                     presentationData: item.presentationData,
                     strings: item.presentationData.strings,
@@ -1286,6 +1364,7 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
                     innerSubject: replyInnerSubject,
                     story: replyStory,
                     isSummarized: false,
+                    isLoading: replyIsLoading,
                     parentMessage: item.message,
                     constrainedSize: CGSize(width: availableContentWidth, height: CGFloat.greatestFiniteMagnitude),
                     animationCache: item.controllerInteraction.presentationContext.animationCache,
@@ -1324,7 +1403,7 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
                 contentHeight = max(imageSize.height + imageVerticalInset * 2.0, layoutConstants.image.minDimensions.height)
             }
             
-            var forwardSource: Peer?
+            var forwardSource: EnginePeer?
             var forwardAuthorSignature: String?
             var forwardPsaType: String?
             
@@ -1333,26 +1412,13 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
             if !ignoreForward, let forwardInfo = item.message.forwardInfo {
                 forwardPsaType = forwardInfo.psaType
                 
-                if let source = forwardInfo.source {
-                    forwardSource = source
-                    if let authorSignature = forwardInfo.authorSignature {
-                        forwardAuthorSignature = authorSignature
-                    } else if let forwardInfoAuthor = forwardInfo.author, forwardInfoAuthor.id != source.id {
-                        forwardAuthorSignature = EnginePeer(forwardInfoAuthor).displayTitle(strings: item.presentationData.strings, displayOrder: item.presentationData.nameDisplayOrder)
-                    } else {
-                        forwardAuthorSignature = nil
-                    }
-                } else {
-                    if let currentForwardInfo = currentForwardInfo, forwardInfo.author == nil && currentForwardInfo.0 != nil {
-                        forwardSource = nil
-                        forwardAuthorSignature = currentForwardInfo.0.flatMap(EnginePeer.init)?.displayTitle(strings: item.presentationData.strings, displayOrder: item.presentationData.nameDisplayOrder)
-                    } else {
-                        forwardSource = forwardInfo.author
-                        forwardAuthorSignature = forwardInfo.authorSignature
-                    }
-                }
+                let resolvedForwardInfo = chatMessageForwardInfoDisplay(forwardInfo: forwardInfo, messageId: item.message.id, previouslyApplied: currentForwardInfo, peerDisplayTitle: { peer in
+                    return peer.displayTitle(strings: item.presentationData.strings, displayOrder: item.presentationData.nameDisplayOrder)
+                })
+                forwardSource = resolvedForwardInfo.source
+                forwardAuthorSignature = resolvedForwardInfo.authorSignature
                 let availableWidth = max(60.0, availableContentWidth + 6.0)
-                forwardInfoSizeApply = makeForwardInfoLayout(item.context, item.presentationData, item.presentationData.strings, .standalone, forwardSource.flatMap(EnginePeer.init), forwardAuthorSignature, forwardPsaType, nil, CGSize(width: availableWidth, height: CGFloat.greatestFiniteMagnitude))
+                forwardInfoSizeApply = makeForwardInfoLayout(item.context, item.presentationData, item.presentationData.strings, .standalone, forwardSource, forwardAuthorSignature, forwardPsaType == nil ? inlineBotNameString : nil, forwardPsaType, nil, CGSize(width: availableWidth, height: CGFloat.greatestFiniteMagnitude))
             }
             
             var needsReplyBackground = false
@@ -1380,13 +1446,13 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
                 }
                 
                 var buttonDeclineValue: UInt8 = 0
-                let buttonDecline = MemoryBuffer(data: Data(bytes: &buttonDeclineValue, count: 1))
+                let buttonDecline = EngineMemoryBuffer(data: Data(bytes: &buttonDeclineValue, count: 1))
                 var buttonApproveValue: UInt8 = 1
-                let buttonApprove = MemoryBuffer(data: Data(bytes: &buttonApproveValue, count: 1))
+                let buttonApprove = EngineMemoryBuffer(data: Data(bytes: &buttonApproveValue, count: 1))
                 var buttonSuggestChangesValue: UInt8 = 2
-                let buttonSuggestChanges = MemoryBuffer(data: Data(bytes: &buttonSuggestChangesValue, count: 1))
+                let buttonSuggestChanges = EngineMemoryBuffer(data: Data(bytes: &buttonSuggestChangesValue, count: 1))
                 
-                let customInfos: [MemoryBuffer: ChatMessageActionButtonsNode.CustomInfo] = [
+                let customInfos: [EngineMemoryBuffer: ChatMessageActionButtonsNode.CustomInfo] = [
                     buttonDecline: ChatMessageActionButtonsNode.CustomInfo(
                         isEnabled: true,
                         icon: .suggestedPostReject
@@ -1452,7 +1518,8 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
                     accountPeer: item.associatedData.accountPeer,
                     isIncoming: item.message.effectivelyIncoming(item.context.account.peerId),
                     constrainedWidth: maxReactionsWidth,
-                    centerAligned: false
+                    centerAligned: false,
+                    colorType: item.presentationData.chatBubbleCorners.bubbleMode ? .freeform : .incoming
                 ))
                 maxContentWidth = max(maxContentWidth, minWidth)
                 reactionButtonsFinalize = buttonsLayout
@@ -1483,6 +1550,13 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
             if let suggestedPostInfoNodeLayout {
                 additionalTopHeight += 4.0 + suggestedPostInfoNodeLayout.0.height + 8.0
             }
+            var bubblelessHeaderOriginY: CGFloat = 0.0
+            if let bubblelessHeader {
+                bubblelessHeaderOriginY = additionalTopHeight + chatMessageBubblelessStickerHeaderSpacing.above
+                additionalTopHeight += chatMessageBubblelessStickerHeaderSpacing.above + bubblelessHeader.size.height + chatMessageBubblelessStickerHeaderSpacing.below
+            }
+            // Without bubbles the time is in the header (or the menu); it stays by the reactions when there are some.
+            let hidesStatusForBubbleless = isBubbleless && dateReactionsAndPeers.reactions.isEmpty
             layoutSize.height += additionalTopHeight
             imageFrame.origin.y += additionalTopHeight
             
@@ -1535,7 +1609,7 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
             
             func finishLayout(_ animation: ListViewItemUpdateAnimation, _ apply: ListViewItemApply, _ synchronousLoads: Bool) {
                 if let strongSelf = weakSelf.value {
-                    strongSelf.appliedForwardInfo = (forwardSource, forwardAuthorSignature)
+                    strongSelf.appliedForwardInfo = ChatMessageAppliedForwardInfo(messageId: item.message.id, source: forwardSource, authorSignature: forwardAuthorSignature)
                     strongSelf.updateAccessibilityData(accessibilityData)
                     
                     strongSelf.updateAttachedDateHeader(hasDate: dateHeaderAtBottom.hasDate, hasPeer: dateHeaderAtBottom.hasTopic)
@@ -1585,6 +1659,71 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
                     if isEmoji && emojiString == nil {
                         updatedContentFrame = updatedContentFrame.insetBy(dx: -imageInset, dy: -imageInset)
                         contextContentFrame = updatedContentFrame
+                    }
+                    
+                    if let bubblelessHeader {
+                        let headerNode = bubblelessHeader.apply()
+                        let headerFrame = CGRect(origin: CGPoint(x: imageFrame.minX + imageInset, y: bubblelessHeaderOriginY), size: bubblelessHeader.size)
+                        if headerNode !== strongSelf.bubblelessHeaderNode {
+                            strongSelf.bubblelessHeaderNode?.removeFromSupernode()
+                            strongSelf.bubblelessHeaderNode = headerNode
+                            // Without bubbles a sticker lifts without its name and time, which would sit under the reaction picker.
+                            strongSelf.contextSourceNode.willUpdateIsExtractedToContextPreview = { [weak strongSelf] isExtractedToContextPreview, transition in
+                                guard let strongSelf, let headerNode = strongSelf.bubblelessHeaderNode else {
+                                    return
+                                }
+                                transition.updateAlpha(node: headerNode, alpha: isExtractedToContextPreview ? 0.0 : 1.0)
+                            }
+                            strongSelf.contextSourceNode.contentNode.addSubnode(headerNode)
+                            headerNode.frame = headerFrame
+                        } else {
+                            transition.updateFrame(node: headerNode, frame: headerFrame)
+                        }
+                    } else if let headerNode = strongSelf.bubblelessHeaderNode {
+                        strongSelf.bubblelessHeaderNode = nil
+                        strongSelf.contextSourceNode.willUpdateIsExtractedToContextPreview = nil
+                        headerNode.removeFromSupernode()
+                    }
+                    // The run's avatar header starts where the avatar, centred on the lead, has its top.
+                    var bubblelessAvatarBandTrim: CGFloat = 0.0
+                    if let bubblelessHeader, hasAvatar {
+                        bubblelessAvatarBandTrim = bubblelessHeaderOriginY + chatMessageBubblelessLeadCenterY(nameFont: ChatMessageBubblelessHeaderNode.nameFont(presentationData: item.presentationData), firstLineFont: item.presentationData.bubblelessIncomingBodyFont, nameHeight: bubblelessHeader.nameHeight) - chatMessageAvatarHeaderSize * 0.5
+                    }
+                    if strongSelf.stickyHeaderBandTrim != bubblelessAvatarBandTrim {
+                        strongSelf.stickyHeaderBandTrim = bubblelessAvatarBandTrim
+                    }
+                    // Without bubbles the selection checkmark centres on the lead, or on the sticker's first 35pt (spec 5.8).
+                    var bubblelessSelectionCheckCenterY: CGFloat?
+                    if !item.presentationData.chatBubbleCorners.bubbleMode {
+                        if let bubblelessHeader {
+                            bubblelessSelectionCheckCenterY = chatMessageBubblelessCheckCenterY(.lead(centerY: bubblelessHeaderOriginY + chatMessageBubblelessLeadCenterY(nameFont: ChatMessageBubblelessHeaderNode.nameFont(presentationData: item.presentationData), firstLineFont: item.presentationData.bubblelessIncomingBodyFont, nameHeight: bubblelessHeader.nameHeight)))
+                        } else {
+                            bubblelessSelectionCheckCenterY = chatMessageBubblelessCheckCenterY(.bubble(updatedImageFrame))
+                        }
+                    }
+                    if strongSelf.bubblelessSelectionCheckCenterY != bubblelessSelectionCheckCenterY {
+                        strongSelf.bubblelessSelectionCheckCenterY = bubblelessSelectionCheckCenterY
+                    }
+                    // Without bubbles a selected sticker stands on a rounded band too (spec 5.8, 3.3 #4); its highlight keeps
+                    // master's overlay on the sticker.
+                    var bubblelessRowBandInputs: ChatMessageBubblelessRowBandInputs?
+                    if !item.presentationData.chatBubbleCorners.bubbleMode {
+                        let selectedNeighbors = chatMessageBubblelessBandSelectedNeighbors(inSelection: item.content.isInSelection, above: dateHeaderAtBottom.selectedAbove, below: dateHeaderAtBottom.selectedBelow, previous: strongSelf.bubblelessRowBandInputs)
+                        bubblelessRowBandInputs = ChatMessageBubblelessRowBandInputs(nameTop: bubblelessHeader != nil ? bubblelessHeaderOriginY : nil, selectedAbove: selectedNeighbors.above, selectedBelow: selectedNeighbors.below, hasSelectionBand: true, hasHighlightBand: false)
+                    }
+                    if strongSelf.bubblelessRowBandInputs != bubblelessRowBandInputs {
+                        strongSelf.bubblelessRowBandInputs = bubblelessRowBandInputs
+                        if bubblelessRowBandInputs == nil {
+                            strongSelf.removeBubblelessRowBands()
+                        }
+                    }
+                    if !item.presentationData.chatBubbleCorners.bubbleMode {
+                        // A row laid out in selection (one scrolled into view) takes this layout's check centre and band
+                        // here: its selection was updated before they existed.
+                        if let selectionNode = strongSelf.selectionNode {
+                            strongSelf.updateSelectionNodeLayout(selectionNode, size: selectionNode.frame.size, leftInset: strongSelf.safeInsets.left)
+                        }
+                        strongSelf.updateBubblelessSelectionBand(isSelected: strongSelf.selectionNode?.selected ?? false, contentShift: strongSelf.subnodeTransform.m41, previousContentShift: strongSelf.subnodeTransform.m41, animated: false)
                     }
                     
                     let labelFrame = CGRect(origin: CGPoint(x: floorToScreenPixels((params.width - labelLayout.size.width) / 2.0), y: updatedImageFrame.maxY + 6.0), size: labelLayout.size)
@@ -1724,6 +1863,12 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
                     dateAndStatusApply(animation)
                     if case .customChatContents = item.associatedData.subject {
                         strongSelf.dateAndStatusNode.isHidden = true
+                    } else if hidesStatusForBubbleless {
+                        strongSelf.hidesStatusWithoutBubbles = true
+                        strongSelf.dateAndStatusNode.isHidden = true
+                    } else if strongSelf.hidesStatusWithoutBubbles {
+                        strongSelf.hidesStatusWithoutBubbles = false
+                        strongSelf.dateAndStatusNode.isHidden = false
                     }
 
                     if needsReplyBackground {
@@ -1866,23 +2011,11 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
                     if let backgroundContent = strongSelf.replyBackgroundContent, let replyBackgroundFrame {
                         backgroundContent.cornerRadius = 4.0
                         backgroundContent.frame = replyBackgroundFrame
-                        if let (rect, containerSize) = strongSelf.absoluteRect {
-                            var backgroundFrame = backgroundContent.frame
-                            backgroundFrame.origin.x += rect.minX
-                            backgroundFrame.origin.y += rect.minY
-                            backgroundContent.update(rect: backgroundFrame, within: containerSize, transition: .immediate)
-                        }
                     }
                     
                     if let backgroundContent = strongSelf.forwardBackgroundContent, let forwardBackgroundFrame {
                         backgroundContent.cornerRadius = 4.0
                         backgroundContent.frame = forwardBackgroundFrame
-                        if let (rect, containerSize) = strongSelf.absoluteRect {
-                            var backgroundFrame = backgroundContent.frame
-                            backgroundFrame.origin.x += rect.minX
-                            backgroundFrame.origin.y += rect.minY
-                            backgroundContent.update(rect: backgroundFrame, within: containerSize, transition: .immediate)
-                        }
                     }
                     
                     let panelsAlpha: CGFloat = item.controllerInteraction.selectionState == nil ? 1.0 : 0.0
@@ -1892,6 +2025,7 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
                     strongSelf.forwardInfoNode?.alpha = panelsAlpha
                     strongSelf.replyBackgroundContent?.alpha = panelsAlpha
                     strongSelf.forwardBackgroundContent?.alpha = panelsAlpha
+                    strongSelf.updateBubblelessInfoPlates(isGlass: !item.presentationData.chatBubbleCorners.bubbleMode, replyFrame: replyBackgroundFrame, forwardFrame: forwardBackgroundFrame, alpha: panelsAlpha, isDark: item.presentationData.theme.theme.overallDarkAppearance)
                     
                     if isFailed {
                         let deliveryFailedNode: ChatMessageDeliveryFailedNode
@@ -2221,7 +2355,7 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
         self.playEffectAnimation(resource: effect.resource, isStickerEffect: true)
     }
     
-    public func playEffectAnimation(resource: MediaResource, isStickerEffect: Bool = false) {
+    public func playEffectAnimation(resource: TelegramMediaResource, isStickerEffect: Bool = false) {
         guard let item = self.item else {
             return
         }
@@ -2398,7 +2532,7 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
                    }
                }
             } else if let item = self.item, self.imageNode.frame.contains(location) {
-                let emojiTapAction: (Bool) -> InternalBubbleTapAction? = { shouldPlay in
+                let emojiTapAction: (Bool) -> InternalBubbleTapAction? = { [self] shouldPlay in
                     let beatingHearts: [UInt32] = [0x2764, 0x1F90E, 0x1F9E1, 0x1F499, 0x1F49A, 0x1F49C, 0x1F49B, 0x1F5A4, 0x1F90D]
                     let heart = 0x2764
                     let peach = 0x1F351
@@ -2428,7 +2562,11 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
                         
                         let syncAnimations = item.message.id.peerId.namespace == Namespaces.Peer.CloudUser
                     
-                        return .optionalAction({
+                        return .optionalAction({ [weak self] in
+                            guard let self else {
+                                return
+                            }
+
                             var haptic: EmojiHaptic?
                             if let current = self.haptic {
                                 haptic = current
@@ -2672,7 +2810,8 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
         var leftOffset: CGFloat = 0.0
         var swipeOffset: CGFloat = 45.0
         if let item = self.item, item.content.effectivelyIncoming(item.context.account.peerId, associatedData: item.associatedData) {
-            offset = -24.0
+            // Without bubbles the reply icon comes in where it does beside text.
+            offset = item.bubbleStyle == .bubble ? -24.0 : chatMessageBubblelessReplySwipeOffset
             leftOffset = -10.0
         } else {
             offset = 10.0
@@ -2806,10 +2945,19 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
         return super.hitTest(point, with: event)
     }
     
+    private func updateSelectionNodeLayout(_ selectionNode: ChatMessageSelectionNode, size: CGSize, leftInset: CGFloat) {
+        if let item = self.item, !item.presentationData.chatBubbleCorners.bubbleMode {
+            selectionNode.updateLayout(size: size, leftInset: leftInset, checkX: chatMessageBubblelessSelectionCheckX, checkCenterY: self.bubblelessSelectionCheckCenterY)
+        } else {
+            selectionNode.updateLayout(size: size, leftInset: leftInset)
+        }
+    }
+    
     override public func updateSelectionState(animated: Bool) {
         guard let item = self.item else {
             return
         }
+        let previousContentShift = self.subnodeTransform.m41
         
         if case let .replyThread(replyThreadMessage) = item.chatLocation, replyThreadMessage.effectiveTopId == item.message.id {
             return
@@ -2832,21 +2980,27 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
         if let forwardBackgroundContent = self.forwardBackgroundContent {
             transition.updateAlpha(node: forwardBackgroundContent, alpha: panelsAlpha)
         }
+        for glassView in [self.replyGlassView, self.forwardGlassView] {
+            if let glassView {
+                transition.updateAlpha(layer: glassView.layer, alpha: panelsAlpha)
+            }
+        }
         
         if let selectionState = item.controllerInteraction.selectionState {
             let selected = selectionState.selectedIds.contains(item.message.id)
             let incoming = item.message.effectivelyIncoming(item.context.account.peerId)
             
-            let offset: CGFloat = incoming ? 42.0 : 0.0
+            let offset: CGFloat = chatMessageSelectionContentOffset(incoming: incoming, bubbleMode: item.presentationData.chatBubbleCorners.bubbleMode)
             
             if let selectionNode = self.selectionNode {
                 selectionNode.updateSelected(selected, animated: animated)
+                selectionNode.updateTheme(wallpaper: item.presentationData.theme.wallpaper, theme: item.presentationData.theme.theme, bubbleMode: item.presentationData.chatBubbleCorners.bubbleMode)
                 let selectionFrame = CGRect(origin: CGPoint(x: -offset, y: 0.0), size: CGSize(width: self.contentBounds.size.width, height: self.contentBounds.size.height))
                 selectionNode.frame = selectionFrame
-                selectionNode.updateLayout(size: selectionFrame.size, leftInset: self.safeInsets.left)
+                self.updateSelectionNodeLayout(selectionNode, size: selectionFrame.size, leftInset: self.safeInsets.left)
                 self.subnodeTransform = CATransform3DMakeTranslation(offset, 0.0, 0.0);
             } else {
-                let selectionNode = ChatMessageSelectionNode(wallpaper: item.presentationData.theme.wallpaper, theme: item.presentationData.theme.theme, toggle: { [weak self] value in
+                let selectionNode = ChatMessageSelectionNode(wallpaper: item.presentationData.theme.wallpaper, theme: item.presentationData.theme.theme, bubbleMode: item.presentationData.chatBubbleCorners.bubbleMode, toggle: { [weak self] value in
                     if let strongSelf = self, let item = strongSelf.item {
                         item.controllerInteraction.toggleMessagesSelection([item.message.id], value)
                     }
@@ -2854,7 +3008,7 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
                 
                 let selectionFrame = CGRect(origin: CGPoint(x: -offset, y: 0.0), size: CGSize(width: self.contentBounds.size.width, height: self.contentBounds.size.height))
                 selectionNode.frame = selectionFrame
-                selectionNode.updateLayout(size: selectionFrame.size, leftInset: self.safeInsets.left)
+                self.updateSelectionNodeLayout(selectionNode, size: selectionFrame.size, leftInset: self.safeInsets.left)
                 self.addSubnode(selectionNode)
                 self.selectionNode = selectionNode
                 selectionNode.updateSelected(selected, animated: false)
@@ -2888,6 +3042,10 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
                     selectionNode.removeFromSupernode()
                 }
             }
+        }
+        
+        if self.bubblelessRowBandInputs != nil || !item.presentationData.chatBubbleCorners.bubbleMode {
+            self.updateBubblelessSelectionBand(isSelected: self.selectionNode?.selected ?? false, contentShift: self.subnodeTransform.m41, previousContentShift: previousContentShift, animated: animated)
         }
     }
     
@@ -3206,6 +3364,13 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
                 transition.animatePositionAdditive(layer: forwardBackgroundContent.layer, offset: offset)
                 forwardBackgroundContent.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.1)
             }
+            // Bubble mode off: the glass plates stand in for the backgrounds above.
+            for glassView in [self.replyGlassView, self.forwardGlassView] {
+                if let glassView {
+                    transition.animatePositionAdditive(layer: glassView.layer, offset: offset)
+                    glassView.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.1)
+                }
+            }
         }
     }
     
@@ -3236,7 +3401,7 @@ public class ChatMessageAnimatedStickerItemNode: ChatMessageItemView {
         return nil
     }
     
-    override public func targetForStoryTransition(id: StoryId) -> UIView? {
+    override public func targetForStoryTransition(id: EngineStoryId) -> UIView? {
         guard let item = self.item else {
             return nil
         }
@@ -3310,7 +3475,7 @@ public struct AnimatedEmojiSoundsConfiguration {
                     
                     if let idString = dict["id"], let id = Int64(idString), let accessHashString = dict["access_hash"], let accessHash = Int64(accessHashString), let fileReference = Data(base64Encoded: fileReferenceString) {
                         let resource = CloudDocumentMediaResource(datacenterId: 1, fileId: id, accessHash: accessHash, size: nil, fileReference: fileReference, fileName: nil)
-                        let file = TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: 0), partialReference: nil, resource: resource, previewRepresentations: [], videoThumbnails: [], immediateThumbnailData: nil, mimeType: "audio/ogg", size: nil, attributes: [], alternativeRepresentations: [])
+                        let file = TelegramMediaFile(fileId: EngineMedia.Id(namespace: Namespaces.Media.LocalFile, id: 0), partialReference: nil, resource: resource, previewRepresentations: [], videoThumbnails: [], immediateThumbnailData: nil, mimeType: "audio/ogg", size: nil, attributes: [], alternativeRepresentations: [])
                         sounds[key] = file
                     }
                 }
@@ -3359,4 +3524,12 @@ private func fontSizeForEmojiString(_ string: String) -> CGFloat {
             multiplier = 0.21
     }
     return floor(basicSize * multiplier)
+}
+
+extension ChatMessageAnimatedStickerItemNode: ChatMessageBubblelessStickySelectionCheck {
+    public func updateBubblelessSelectionVisibleTop(_ visibleTop: CGFloat) {
+        if let selectionNode = self.selectionNode {
+            selectionNode.updateVisibleTop(visibleTop - selectionNode.frame.minY)
+        }
+    }
 }

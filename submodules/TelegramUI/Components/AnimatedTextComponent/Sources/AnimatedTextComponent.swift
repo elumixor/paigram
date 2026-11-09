@@ -23,12 +23,21 @@ extension ComponentTransition {
     }
 }
 
+/// A number item as the component draws it: the decimal digits, zero-padded to `minDigits` (any Int width).
+public func animatedTextNumberString(_ value: Int, minDigits: Int) -> String {
+    var valueText: String = "\(value)"
+    while valueText.count < minDigits {
+        valueText.insert("0", at: valueText.startIndex)
+    }
+    return valueText
+}
+
 public final class AnimatedTextComponent: Component {
     public struct Item: Equatable {
         public enum Content: Equatable {
             case text(String)
             case number(Int, minDigits: Int)
-            case icon(String, tint: Bool, offset: CGPoint)
+            case icon(String, tint: Bool, offset: CGPoint, scaleFactor: CGFloat = 1.0)
         }
         
         public var id: AnyHashable
@@ -50,6 +59,10 @@ public final class AnimatedTextComponent: Component {
     public let animateSlide: Bool
     public let preferredDirectionIsDown: Bool
     public let blur: Bool
+    public let useTransitionAnimation: Bool
+    /// Its text drawn by `SplitTintTextView`s: in white, coloured by their text layers' multiply colour
+    /// (`textTintLayers`), emoji apart and untinted, so a transition can run the colour on the render server.
+    public let splitsEmoji: Bool
     
     public init(
         font: UIFont,
@@ -59,7 +72,9 @@ public final class AnimatedTextComponent: Component {
         animateScale: Bool = true,
         animateSlide: Bool = true,
         preferredDirectionIsDown: Bool = false,
-        blur: Bool = false
+        blur: Bool = false,
+        useTransitionAnimation: Bool = false,
+        splitsEmoji: Bool = false
     ) {
         self.font = font
         self.color = color
@@ -69,6 +84,8 @@ public final class AnimatedTextComponent: Component {
         self.animateSlide = animateSlide
         self.preferredDirectionIsDown = preferredDirectionIsDown
         self.blur = blur
+        self.useTransitionAnimation = useTransitionAnimation
+        self.splitsEmoji = splitsEmoji
     }
 
     public static func ==(lhs: AnimatedTextComponent, rhs: AnimatedTextComponent) -> Bool {
@@ -96,6 +113,12 @@ public final class AnimatedTextComponent: Component {
         if lhs.blur != rhs.blur {
             return false
         }
+        if lhs.useTransitionAnimation != rhs.useTransitionAnimation {
+            return false
+        }
+        if lhs.splitsEmoji != rhs.splitsEmoji {
+            return false
+        }
         return true
     }
     
@@ -108,10 +131,79 @@ public final class AnimatedTextComponent: Component {
     public final class View: UIView {
         private var characters: [CharacterKey: ComponentView<Empty>] = [:]
         
+        /// The layers its text is coloured through (`splitsEmoji`): their multiply colour is the text's colour, emoji
+        /// drawn apart.
+        public var textTintLayers: [CALayer] {
+            return self.characters.values.compactMap { ($0.view as? SplitTintTextView)?.tintView.layer }
+        }
+        
         private var spaceSize: CGSize?
         
         private var component: AnimatedTextComponent?
         private weak var state: EmptyComponentState?
+        
+        // VoiceOver: a visible text is a static-text element reading exactly what it shows, unless a call site
+        // decides otherwise (anything it sets wins). A parent that is itself an element (a button) hides it as usual.
+        // Computed in the getters, so nothing runs while no accessibility client asks.
+        private var explicitIsAccessibilityElement: Bool?
+        private var explicitAccessibilityLabel: String??
+        private var explicitAccessibilityTraits: UIAccessibilityTraits?
+        
+        override public var isAccessibilityElement: Bool {
+            get {
+                if let explicitIsAccessibilityElement = self.explicitIsAccessibilityElement {
+                    return explicitIsAccessibilityElement
+                }
+                if self.isHidden || self.alpha < 0.01 {
+                    return false
+                }
+                guard let label = self.accessibilityLabel, !label.isEmpty else {
+                    return false
+                }
+                // Silent when an element drawn over it already speaks these words (a hand-labelled area beside it).
+                return !accessibilityTextIsSpokenByCoveringElement(self, text: label)
+            } set(value) {
+                self.explicitIsAccessibilityElement = value
+            }
+        }
+        
+        override public var accessibilityLabel: String? {
+            get {
+                if let explicitAccessibilityLabel = self.explicitAccessibilityLabel {
+                    return explicitAccessibilityLabel
+                }
+                if self.explicitIsAccessibilityElement == false {
+                    // Turned off by the call site: nothing to announce from here either.
+                    return nil
+                }
+                return self.component.flatMap { component -> String? in
+                    let text = component.items.compactMap { item -> String? in
+                        switch item.content {
+                        case let .text(value):
+                            return value
+                        case let .number(value, minDigits):
+                            return animatedTextNumberString(value, minDigits: minDigits)
+                        case .icon:
+                            return nil
+                        }
+                    }.joined()
+                    return text.isEmpty ? nil : text
+                }
+            } set(value) {
+                self.explicitAccessibilityLabel = .some(value)
+            }
+        }
+        
+        override public var accessibilityTraits: UIAccessibilityTraits {
+            get {
+                if let explicitAccessibilityTraits = self.explicitAccessibilityTraits {
+                    return explicitAccessibilityTraits
+                }
+                return self.explicitIsAccessibilityElement == false ? [] : .staticText
+            } set(value) {
+                self.explicitAccessibilityTraits = value
+            }
+        }
         
         override init(frame: CGRect) {
             super.init(frame: frame)
@@ -136,7 +228,9 @@ public final class AnimatedTextComponent: Component {
             
             var size = CGSize()
             
-            let delayNorm: CGFloat = 0.002
+            let motionTransition: ComponentTransition = component.useTransitionAnimation ? transition : .spring(duration: 0.4)
+            let alphaTransition: ComponentTransition = component.useTransitionAnimation ? transition : .easeInOut(duration: 0.18)
+            let delayNorm: CGFloat = component.useTransitionAnimation && component.noDelay ? 0.0 : 0.002
             var offsetNorm: CGFloat = 0.4
             let transitionBlurRadius: CGFloat = 6.0
             
@@ -167,7 +261,7 @@ public final class AnimatedTextComponent: Component {
                     } else {
                         itemText = valueText.map(String.init)
                     }
-                case let .icon(iconName, _, _):
+                case let .icon(iconName, _, _, _):
                     let characterKey = CharacterKey(itemId: item.id, index: 0, value: iconName)
                     validKeys.append(characterKey)
                 }
@@ -206,11 +300,11 @@ public final class AnimatedTextComponent: Component {
             for item in component.items {
                 enum AnimatedTextCharacter {
                     case text(String)
-                    case icon(String, Bool, CGPoint)
+                    case icon(String, Bool, CGPoint, CGFloat)
                     
                     var value: String {
                         switch self {
-                        case let .text(value), let .icon(value, _, _):
+                        case let .text(value), let .icon(value, _, _, _):
                             return value
                         }
                     }
@@ -234,8 +328,8 @@ public final class AnimatedTextComponent: Component {
                     } else {
                         itemText = valueText.map { .text(String($0)) }
                     }
-                case let .icon(iconName, tint, offset):
-                    itemText = [.icon(iconName, tint, offset)]
+                case let .icon(iconName, tint, offset, scaleFactor):
+                    itemText = [.icon(iconName, tint, offset, scaleFactor)]
                 }
                 var index = 0
                 characterLoop: for character in itemText {
@@ -267,14 +361,23 @@ public final class AnimatedTextComponent: Component {
                                 addTrailingSpace = true
                             }
                             
-                            characterComponent = AnyComponent(MultilineTextComponent(
-                                text: .plain(NSAttributedString(string: text, font: component.font, textColor: component.color))
-                            ))
+                            if component.splitsEmoji {
+                                characterComponent = AnyComponent(SplitTintTextComponent(
+                                    text: text,
+                                    font: component.font,
+                                    color: component.color
+                                ))
+                            } else {
+                                characterComponent = AnyComponent(MultilineTextComponent(
+                                    text: .plain(NSAttributedString(string: text, font: component.font, textColor: component.color))
+                                ))
+                            }
                         }
-                    case let .icon(iconName, tint, offset):
+                    case let .icon(iconName, tint, offset, scaleFactor):
                         characterComponent = AnyComponent(BundleIconComponent(
                             name: iconName,
-                            tintColor: tint ? component.color : nil
+                            tintColor: tint ? component.color : nil,
+                            scaleFactor: scaleFactor
                         ))
                         characterOffset = offset
                     }
@@ -314,7 +417,7 @@ public final class AnimatedTextComponent: Component {
                                 
                                 let deltaPosition = CGPoint(x: characterFrame.minX - characterComponentView.frame.minX, y: characterFrame.minY - characterComponentView.frame.minY)
                                 characterComponentView.center = characterFrame.origin
-                                characterComponentView.layer.animatePosition(from: CGPoint(x: -deltaPosition.x, y: -deltaPosition.y), to: CGPoint(), duration: 0.4, delay: delayNorm * delayWidth, timingFunction: kCAMediaTimingFunctionSpring, additive: true)
+                                motionTransition.animatePosition(layer: characterComponentView.layer, from: CGPoint(x: -deltaPosition.x, y: -deltaPosition.y), to: CGPoint(), delay: delayNorm * delayWidth, additive: true)
                             }
                         }
                         characterTransition.setFrame(view: characterComponentView, frame: characterFrame)
@@ -330,15 +433,15 @@ public final class AnimatedTextComponent: Component {
                             }
                             
                             if component.animateScale {
-                                characterComponentView.layer.animateScale(from: 0.001, to: 1.0, duration: 0.4, delay: delayNorm * delayWidth, timingFunction: kCAMediaTimingFunctionSpring)
+                                motionTransition.animateScale(layer: characterComponentView.layer, from: 0.001, to: 1.0, delay: delayNorm * delayWidth, completion: characterComponentView.layer.beginRasterizedAnimation())
                             }
                             if component.blur {
                                 ComponentTransition.easeInOut(duration: 0.2).animateBlur(layer: characterComponentView.layer, from: transitionBlurRadius, to: 0.0, delay: delayNorm * delayWidth)
                             }
                             if component.animateSlide {
-                                characterComponentView.layer.animatePosition(from: CGPoint(x: 0.0, y: characterSize.height * offsetNorm), to: CGPoint(), duration: 0.4, delay: delayNorm * delayWidth, timingFunction: kCAMediaTimingFunctionSpring, additive: true)
+                                motionTransition.animatePosition(layer: characterComponentView.layer, from: CGPoint(x: 0.0, y: characterSize.height * offsetNorm), to: CGPoint(), delay: delayNorm * delayWidth, additive: true)
                             }
-                            characterComponentView.layer.animateAlpha(from: 0.0, to: 1.0, duration: 0.18, delay: delayNorm * delayWidth)
+                            alphaTransition.animateAlpha(layer: characterComponentView.layer, from: 0.0, to: 1.0, delay: delayNorm * delayWidth)
                         }
                     }
                     
@@ -351,9 +454,6 @@ public final class AnimatedTextComponent: Component {
                     }
                 }
             }
-            
-            let outScaleTransition: ComponentTransition = .spring(duration: 0.4)
-            let outAlphaTransition: ComponentTransition = .easeInOut(duration: 0.18)
             
             var removedKeys: [CharacterKey] = []
             for (key, characterView) in self.characters {
@@ -371,7 +471,9 @@ public final class AnimatedTextComponent: Component {
                             delayWidth = max(0.0, delayWidth)
                             
                             if component.animateScale {
-                                outScaleTransition.setScale(view: characterComponentView, scale: 0.01, delay: delayNorm * delayWidth)
+                                characterComponentView.layer.rasterizationScale = UIScreenScale
+                                characterComponentView.layer.shouldRasterize = true
+                                motionTransition.setScale(view: characterComponentView, scale: 0.01, delay: delayNorm * delayWidth)
                             }
                             let targetY: CGFloat
                             if component.preferredDirectionIsDown {
@@ -380,13 +482,13 @@ public final class AnimatedTextComponent: Component {
                                 targetY = characterComponentView.center.y - characterComponentView.bounds.height * offsetNorm
                             }
                             if component.animateSlide {
-                                outScaleTransition.setPosition(view: characterComponentView, position: CGPoint(x: characterComponentView.center.x, y: targetY), delay: delayNorm * delayWidth)
+                                motionTransition.setPosition(view: characterComponentView, position: CGPoint(x: characterComponentView.center.x, y: targetY), delay: delayNorm * delayWidth)
                             }
-                            outAlphaTransition.setAlpha(view: characterComponentView, alpha: 0.0, delay: delayNorm * delayWidth, completion: { [weak characterComponentView] _ in
+                            alphaTransition.setAlpha(view: characterComponentView, alpha: 0.0, delay: delayNorm * delayWidth, completion: { [weak characterComponentView] _ in
                                 characterComponentView?.removeFromSuperview()
                             })
                             if component.blur {
-                                outAlphaTransition.animateBlur(layer: characterComponentView.layer, from: 0.0, to: transitionBlurRadius, delay: delayNorm * delayWidth, removeOnCompletion: false)
+                                alphaTransition.animateBlur(layer: characterComponentView.layer, from: 0.0, to: transitionBlurRadius, delay: delayNorm * delayWidth, removeOnCompletion: false)
                             }
                         } else {
                             characterComponentView.removeFromSuperview()
@@ -440,5 +542,38 @@ public extension AnimatedTextComponent {
         }
         
         return textItems
+    }
+}
+
+/// One line of text drawn by a `SplitTintTextView`: white, coloured by its text layer's multiply colour, emoji untinted.
+private final class SplitTintTextComponent: Component {
+    let text: String
+    let font: UIFont
+    let color: UIColor
+
+    init(text: String, font: UIFont, color: UIColor) {
+        self.text = text
+        self.font = font
+        self.color = color
+    }
+
+    static func ==(lhs: SplitTintTextComponent, rhs: SplitTintTextComponent) -> Bool {
+        return lhs.text == rhs.text && lhs.font == rhs.font && lhs.color == rhs.color
+    }
+
+    final class View: SplitTintTextView {
+        func update(component: SplitTintTextComponent, availableSize: CGSize) -> CGSize {
+            self.attributedText = NSAttributedString(string: component.text, font: component.font, textColor: .white)
+            self.textColor = component.color
+            return self.updateLayout(availableSize)
+        }
+    }
+
+    func makeView() -> View {
+        return View(frame: CGRect())
+    }
+
+    func update(view: View, availableSize: CGSize, state: EmptyComponentState, environment: Environment<Empty>, transition: ComponentTransition) -> CGSize {
+        return view.update(component: self, availableSize: availableSize)
     }
 }

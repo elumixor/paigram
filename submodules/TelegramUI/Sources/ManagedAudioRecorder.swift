@@ -151,6 +151,7 @@ final class ManagedAudioRecorderContext {
     private let previewState: ValuePromise<AudioPreviewState>
 
     private let beginWithTone: Bool
+    private let pauseMusicOnRecording: Bool
     private let beganWithTone: (Bool) -> Void
     
     private var trimRange: Range<Double>?
@@ -198,6 +199,7 @@ final class ManagedAudioRecorderContext {
         recordingState: ValuePromise<AudioRecordingState>,
         previewState: ValuePromise<AudioPreviewState>,
         beginWithTone: Bool,
+        pauseMusicOnRecording: Bool,
         beganWithTone: @escaping (Bool) -> Void
     ) {
         assert(queue.isCurrent())
@@ -205,6 +207,7 @@ final class ManagedAudioRecorderContext {
         self.id = getNextRecorderContextId()
         self.micLevel = micLevel
         self.beginWithTone = beginWithTone
+        self.pauseMusicOnRecording = pauseMusicOnRecording
         self.beganWithTone = beganWithTone
         
         self.recordingState = recordingState
@@ -339,10 +342,14 @@ final class ManagedAudioRecorderContext {
                 Logger.shared.log("ManagedAudioRecorder", "Failed to deserialize JSON")
                 return
             }
-            let success = self.oggWriter.resume(with: self.dataItem, encoderState: stateDict)
-            if !success {
-                Logger.shared.log("ManagedAudioRecorder", "Failed to resume OggWriter")
-                return
+            // A draft's compressed data is the finished stream, which the paused encoder state does not match;
+            // appending re-encodes it into a fresh writer instead.
+            if !self.oggWriter.resume(with: self.dataItem, encoderState: stateDict) {
+                self.oggWriter = TGOggOpusWriter()
+                if !self.oggWriter.beginAppend(with: self.dataItem) {
+                    Logger.shared.log("ManagedAudioRecorder", "Failed to resume OggWriter")
+                    return
+                }
             }
         } else {
             self.oggWriter.begin(with: self.dataItem)
@@ -437,7 +444,7 @@ final class ManagedAudioRecorderContext {
     
         if self.audioSessionDisposable == nil {
             let queue = self.queue
-            self.audioSessionDisposable = self.mediaManager.audioSession.push(audioSessionType: .record(speaker: self.beginWithTone, video: false, withOthers: false), activate: { [weak self] state in
+            self.audioSessionDisposable = self.mediaManager.audioSession.push(audioSessionType: .voiceMessageRecording(beginWithTone: self.beginWithTone, pauseMusicOnRecording: self.pauseMusicOnRecording), activate: { [weak self] state in
                 queue.async {
                     if let strongSelf = self, !strongSelf.paused {
                         strongSelf.hasAudioSession = true
@@ -691,6 +698,21 @@ final class ManagedAudioRecorderContext {
     }
     
     func takeData() -> RecordedAudioData? {
+        // writeFrame(nil) finishes the stream for good: the writer drops every later frame. Finish a copy and
+        // put the live writer back from its paused state, so a resumed recording keeps appending.
+        let liveState = self.oggWriter.pause()
+        let liveData = self.dataItem.data()
+        defer {
+            let dataItem: TGDataItem = TGDataItem(data: liveData)
+            let oggWriter = TGOggOpusWriter()
+            if oggWriter.resume(with: dataItem, encoderState: liveState) {
+                self.dataItem = dataItem
+                self.oggWriter = oggWriter
+            } else {
+                Logger.shared.log("ManagedAudioRecorder", "Failed to restore OggWriter after taking data")
+            }
+        }
+
         if self.oggWriter.writeFrame(nil, frameByteCount: 0) {
             let scaledSamplesMemory = malloc(100 * 2)!
             let scaledSamples: UnsafeMutablePointer<Int16> = scaledSamplesMemory.assumingMemoryBound(to: Int16.self)
@@ -779,11 +801,12 @@ final class ManagedAudioRecorderImpl: ManagedAudioRecorder {
         resumeData: AudioRecorderResumeData?,
         pushIdleTimerExtension: @escaping () -> Disposable,
         beginWithTone: Bool,
+        pauseMusicOnRecording: Bool,
         beganWithTone: @escaping (Bool) -> Void
     ) {
         self.beginWithTone = beginWithTone
         self.queue.async {
-            let context = ManagedAudioRecorderContext(queue: self.queue, mediaManager: mediaManager, resumeData: resumeData, pushIdleTimerExtension: pushIdleTimerExtension, micLevel: self.micLevelValue, recordingState: self.recordingStateValue, previewState: self.previewStateValue, beginWithTone: beginWithTone, beganWithTone: beganWithTone)
+            let context = ManagedAudioRecorderContext(queue: self.queue, mediaManager: mediaManager, resumeData: resumeData, pushIdleTimerExtension: pushIdleTimerExtension, micLevel: self.micLevelValue, recordingState: self.recordingStateValue, previewState: self.previewStateValue, beginWithTone: beginWithTone, pauseMusicOnRecording: pauseMusicOnRecording, beganWithTone: beganWithTone)
             self.contextRef = Unmanaged.passRetained(context)
         }
     }

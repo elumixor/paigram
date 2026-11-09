@@ -34,6 +34,34 @@ struct ChatHistoryEntriesForViewState {
     }
 }
 
+/// Whether `message` is the root of the forum topic `location` shows, which the topic's history does not display: its
+/// `topicCreated` action, or the `groupCreated` one in a monoforum channel's or a forum bot's topic.
+func isUndisplayedForumTopicRoot(_ message: Message, location: ChatLocation, additionalData: [AdditionalMessageHistoryViewDataEntry]) -> Bool {
+    guard case let .replyThread(replyThreadMessage) = location, replyThreadMessage.isForumPost else {
+        return false
+    }
+    for media in message.media {
+        if let action = media as? TelegramMediaAction {
+            if case .topicCreated = action.action {
+                return true
+            } else if case .groupCreated = action.action {
+                var chatPeer: Peer?
+                for entry in additionalData {
+                    if case let .peer(_, peer) = entry {
+                        chatPeer = peer
+                    }
+                }
+                if let channel = chatPeer as? TelegramChannel, channel.isMonoForum {
+                    return true
+                } else if let user = chatPeer as? TelegramUser, user.isForum {
+                    return true
+                }
+            }
+        }
+    }
+    return false
+}
+
 func chatHistoryEntriesForView(
     currentState: ChatHistoryEntriesForViewState,
     context: AccountContext,
@@ -143,7 +171,7 @@ func chatHistoryEntriesForView(
     
     var count = 0
     loop: for entry in view.entries {
-        var message = entry.message
+        var message = entry.message.withAppliedEphemeralReplacementMessage()
         var isRead = entry.isRead
         
         var pinToTop = false
@@ -156,24 +184,8 @@ func chatHistoryEntriesForView(
         }
         
         if case let .replyThread(replyThreadMessage) = location, replyThreadMessage.isForumPost {
-            for media in message.media {
-                if let action = media as? TelegramMediaAction {
-                    if case .topicCreated = action.action {
-                        continue loop
-                    } else if case .groupCreated = action.action {
-                        var chatPeer: Peer?
-                        for entry in view.additionalData {
-                            if case let .peer(_, peer) = entry {
-                                chatPeer = peer
-                            }
-                        }
-                        if let channel = chatPeer as? TelegramChannel, channel.isMonoForum {
-                            continue loop
-                        } else if let user = chatPeer as? TelegramUser, user.isForum {
-                            continue loop
-                        }
-                    }
-                }
+            if isUndisplayedForumTopicRoot(message, location: location, additionalData: view.additionalData) {
+                continue loop
             }
         } else if case .peer = location {
             for media in message.media {
@@ -275,6 +287,8 @@ func chatHistoryEntriesForView(
                         
                         var currentMessages: [(Message, Bool, ChatHistoryMessageSelection, ChatMessageEntryAttributes, MessageHistoryEntryLocation?)] = []
                         
+                        var currentAttributes = currentAttributes
+                        currentAttributes.groupStableId = nil
                         currentMessages.append((currentMessage, currentIsRead, currentSelection, currentAttributes, currentLocation))
                         if reverseGroupedMessages {
                             currentMessages.insert((message, isRead, selection, attributes, entry.location), at: 0)
@@ -296,6 +310,12 @@ func chatHistoryEntriesForView(
                     }
                 }
                 if !found {
+                    var attributes = attributes
+                    if groupMessages {
+                        // Alone so far: keep the identity of the album entry it becomes once another of
+                        // the album's messages loads. Not when albums are split into messages below.
+                        attributes.groupStableId = groupStableId
+                    }
                     entries.append(.MessageEntry(message, presentationData, isRead, entry.location, selection, attributes))
                 }
             } else {
@@ -824,10 +844,28 @@ func chatHistoryEntriesForView(
         }
     }
     
-    if let subject = associatedData.subject, case let .customChatContents(customChatContents) = subject, case let .quickReplyMessageInput(_, shortcutType) = customChatContents.kind, case .generic = shortcutType {
-        if !view.isLoading && view.laterId == nil && !view.entries.isEmpty {
-            for i in 0 ..< 2 {
-                let string = i == 1 ? presentationData.strings.Chat_QuickReply_ServiceHeader1 : presentationData.strings.Chat_QuickReply_ServiceHeader2
+    if let subject = associatedData.subject, case let .customChatContents(customChatContents) = subject {
+        var serviceHeaders: [String] = []
+        switch customChatContents.kind {
+        case let .quickReplyMessageInput(_, shortcutType):
+            if case .generic = shortcutType {
+                serviceHeaders = [
+                    presentationData.strings.Chat_QuickReply_ServiceHeader1,
+                    presentationData.strings.Chat_QuickReply_ServiceHeader2
+                ]
+            }
+        case .welcomeMessages:
+            serviceHeaders = [
+                presentationData.strings.WelcomeMessages_ServiceHeader1,
+                presentationData.strings.WelcomeMessages_ServiceHeader2
+            ]
+        case .businessLinkSetup, .hashTagSearch:
+            break
+        }
+
+        if !serviceHeaders.isEmpty && !view.isLoading && view.laterId == nil && !view.entries.isEmpty {
+            let peerId = view.entries[0].message.id.peerId
+            for (i, string) in serviceHeaders.reversed().enumerated() {
                 let formattedString = parseMarkdownIntoAttributedString(
                     string,
                     attributes: MarkdownAttributes(
@@ -854,7 +892,7 @@ func chatHistoryEntriesForView(
                 let message = Message(
                     stableId: UInt32.max - 1001 - UInt32(i),
                     stableVersion: 0,
-                    id: MessageId(peerId: context.account.peerId, namespace: Namespaces.Message.Local, id: Int32.max - 100 - Int32(i)),
+                    id: MessageId(peerId: peerId, namespace: Namespaces.Message.Local, id: Int32.max - 100 - Int32(i)),
                     globallyUniqueId: nil,
                     groupingKey: nil,
                     groupInfo: nil,

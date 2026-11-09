@@ -103,10 +103,10 @@ public class ChatMessageGiftOfferBubbleContentNode: ChatMessageBubbleContentNode
         let makeTitleLayout = TextNode.asyncLayout(self.titleNode)
         let makeSubtitleLayout = TextNodeWithEntities.asyncLayout(self.subtitleNode)
                             
-        return { item, layoutConstants, _, _, _, _ in
+        return { [weak self] item, layoutConstants, _, _, _, _ in
             let contentProperties = ChatMessageBubbleContentProperties(hidesSimpleAuthorHeader: true, headerSpacing: 0.0, hidesBackground: .always, forceFullCorners: false, forceAlignment: .center)
                         
-            return (contentProperties, nil, CGFloat.greatestFiniteMagnitude, { constrainedSize, position in
+            return (contentProperties, nil, CGFloat.greatestFiniteMagnitude, { [weak self] constrainedSize, position in
                 var giftSize = CGSize(width: 260.0, height: 240.0)
                 var uniqueGift: StarGift.UniqueGift?
                 
@@ -198,7 +198,7 @@ public class ChatMessageGiftOfferBubbleContentNode: ChatMessageBubbleContentNode
                 
                 let backgroundSize = CGSize(width: giftSize.width, height: giftSize.height + 4.0)
                 
-                return (backgroundSize.width, { boundingWidth in
+                return (backgroundSize.width, { [weak self] boundingWidth in
                     return (backgroundSize, { [weak self] animation, synchronousLoads, info in
                         if let strongSelf = self {
                             strongSelf.item = item
@@ -300,22 +300,8 @@ public class ChatMessageGiftOfferBubbleContentNode: ChatMessageBubbleContentNode
     override public func updateAbsoluteRect(_ rect: CGRect, within containerSize: CGSize) {
         self.absoluteRect = (rect, containerSize)
         
-        if let mediaBackgroundContent = self.mediaBackgroundContent {
-            var backgroundFrame = mediaBackgroundContent.frame
-            backgroundFrame.origin.x += rect.minX
-            backgroundFrame.origin.y += rect.minY
-            mediaBackgroundContent.update(rect: backgroundFrame, within: containerSize, transition: .immediate)
-        }
     }
 
-    override public func applyAbsoluteOffset(value: CGPoint, animationCurve: ContainedViewLayoutTransitionCurve, duration: Double) {
-
-    }
-
-    override public func applyAbsoluteOffsetSpring(value: CGFloat, duration: Double, damping: CGFloat) {
-
-    }
-    
     override public func unreadMessageRangeUpdated() {
         self.updateVisibility()
     }

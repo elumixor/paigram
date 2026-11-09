@@ -108,7 +108,7 @@ public func renderAttachAppIcon(iconImage: UIImage?) -> UIImage? {
 
 let colorRed = UIColor(rgb: 0xFF453A)
 let colorGreen = UIColor(rgb: 0x34C759)
-let colorBlue = UIColor(rgb: 0x0079ff)
+let colorBlue = UIColor(rgb: 0x0a84ff)
 let colorLightBlue = UIColor(rgb: 0x32ADE6)
 let colorTeal = UIColor(rgb: 0x00c7be)
 let colorOrange = UIColor(rgb: 0xFF9F0A)
@@ -120,6 +120,7 @@ public struct PresentationResourcesSettings {
     public static let proxy = renderSettingsIcon(name: "Item List/Icons/Proxy", backgroundColors: [colorGreen])
     public static let savedMessages = renderSettingsIcon(name: "Item List/Icons/SavedMessages", backgroundColors: [colorBlue])
     public static let recentCalls = renderSettingsIcon(name: "Item List/Icons/Phone", backgroundColors: [colorGreen])
+    public static let contacts = renderSettingsIcon(name: "Item List/Icons/Members", backgroundColors: [colorViolet])
     public static let devices = renderSettingsIcon(name: "Item List/Icons/Devices", backgroundColors: [colorOrange])
     public static let chatFolders = renderSettingsIcon(name: "Item List/Icons/Folder", backgroundColors: [colorLightBlue])
     public static let stickers = renderSettingsIcon(name: "Item List/Icons/Sticker", backgroundColors: [colorOrange])
@@ -219,6 +220,9 @@ public struct PresentationResourcesSettings {
     })
     
     public static let ton = renderSettingsIcon(name: "Item List/Icons/Gram", backgroundColors: [colorBlue])
+    public static let gramEarnings = renderSettingsIcon(name: "Item List/Icons/Earnings", backgroundColors: [colorBlue])
+    
+    public static let money = UIImage(bundleImageName: "Settings/Gram")
  
     public static let stars = generateImage(CGSize(width: 30.0, height: 30.0), contextGenerator: { size, context in
         let bounds = CGRect(origin: CGPoint(), size: size)
@@ -353,4 +357,6 @@ public struct PresentationResourcesSettings {
     public static let voices = renderSettingsIcon(name: "Item List/Icons/Microphone", backgroundColors: [colorPurple])
     public static let upload = renderSettingsIcon(name: "Item List/Icons/Upload", backgroundColors: [colorBlue])
     public static let download = renderSettingsIcon(name: "Item List/Icons/Download", backgroundColors: [colorGreen])
+    
+    public static let welcome = renderSettingsIcon(name: "Item List/Icons/Hand", backgroundColors: [colorViolet])
 }

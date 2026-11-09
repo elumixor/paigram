@@ -9,6 +9,7 @@ swift_library(
     copts = [
     ],
     deps = [
+        "//submodules/TelegramUI/Components/SideColumnLayout",
         "//submodules/Display",
         "//submodules/AsyncDisplayKit",
         "//submodules/AppBundle",
@@ -21,6 +22,7 @@ swift_library(
         "//submodules/PresentationDataUtils",
         "//submodules/ContactsPeerItem",
         "//submodules/TelegramUI/Components/ChatListHeaderComponent",
+        "//submodules/TelegramUI/Components/NavigationBarComponent",
         "//submodules/SearchBarNode",
         "//submodules/Components/ViewControllerComponent",
         "//submodules/ComponentFlow",

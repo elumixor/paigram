@@ -1,4 +1,5 @@
 import Foundation
+import AccountContext
 import UIKit
 import Display
 import ComponentFlow
@@ -10,17 +11,22 @@ import BalancedTextComponent
 import LottieComponent
 
 final class QuickReplyEmptyStateComponent: Component {
+    let context: AccountContext
     let theme: PresentationTheme
     let strings: PresentationStrings
     let insets: UIEdgeInsets
     let action: () -> Void
     
     init(
+    
+        context: AccountContext,
         theme: PresentationTheme,
         strings: PresentationStrings,
         insets: UIEdgeInsets,
         action: @escaping () -> Void
     ) {
+    
+        self.context = context
         self.theme = theme
         self.strings = strings
         self.insets = insets
@@ -63,7 +69,12 @@ final class QuickReplyEmptyStateComponent: Component {
             self.componentState = state
             
             let _ = previousComponent
-            
+
+            // Centred in the band between the side insets when they differ (iPhone Duo's side strip); equal insets keep
+            // the full width.
+            let bandMinX: CGFloat = component.insets.left != component.insets.right ? component.insets.left : 0.0
+            let bandWidth: CGFloat = component.insets.left != component.insets.right ? availableSize.width - component.insets.left - component.insets.right : availableSize.width
+
             let buttonSize = self.button.update(
                 transition: transition,
                 component: AnyComponent(ButtonComponent(
@@ -93,9 +104,9 @@ final class QuickReplyEmptyStateComponent: Component {
                     }
                 )),
                 environment: {},
-                containerSize: CGSize(width: min(availableSize.width - 16.0 * 2.0, 280.0), height: 52.0)
+                containerSize: CGSize(width: min(bandWidth - 16.0 * 2.0, 280.0), height: 52.0)
             )
-            let buttonFrame = CGRect(origin: CGPoint(x: floor((availableSize.width - buttonSize.width) * 0.5), y: availableSize.height - component.insets.bottom - 14.0 - buttonSize.height), size: buttonSize)
+            let buttonFrame = CGRect(origin: CGPoint(x: bandMinX + floor((bandWidth - buttonSize.width) * 0.5), y: availableSize.height - component.insets.bottom - 14.0 - buttonSize.height), size: buttonSize)
             if let buttonView = self.button.view {
                 if buttonView.superview == nil {
                     self.addSubview(buttonView)
@@ -123,7 +134,7 @@ final class QuickReplyEmptyStateComponent: Component {
                     horizontalAlignment: .center
                 )),
                 environment: {},
-                containerSize: CGSize(width: availableSize.width - 16.0 * 2.0, height: 100.0)
+                containerSize: CGSize(width: bandWidth - 16.0 * 2.0, height: 100.0)
             )
             
             let textSize = self.text.update(
@@ -135,7 +146,7 @@ final class QuickReplyEmptyStateComponent: Component {
                     lineSpacing: 0.2
                 )),
                 environment: {},
-                containerSize: CGSize(width: availableSize.width - 16.0 * 2.0, height: 100.0)
+                containerSize: CGSize(width: bandWidth - 16.0 * 2.0, height: 100.0)
             )
             
             let topInset: CGFloat = component.insets.top
@@ -143,7 +154,7 @@ final class QuickReplyEmptyStateComponent: Component {
             let centralContentsHeight: CGFloat = iconSize.height + iconTitleSpacing + titleSize.height + titleTextSpacing
             var centralContentsY: CGFloat = topInset + floor((buttonFrame.minY - topInset - centralContentsHeight) * 0.426)
             
-            let iconFrame = CGRect(origin: CGPoint(x: floor((availableSize.width - iconSize.width) * 0.5), y: centralContentsY), size: iconSize)
+            let iconFrame = CGRect(origin: CGPoint(x: bandMinX + floor((bandWidth - iconSize.width) * 0.5), y: centralContentsY), size: iconSize)
             
             if let iconView = self.icon.view as? LottieComponent.View {
                 if iconView.superview == nil {
@@ -154,7 +165,7 @@ final class QuickReplyEmptyStateComponent: Component {
             }
             centralContentsY += iconSize.height + iconTitleSpacing
             
-            let titleFrame = CGRect(origin: CGPoint(x: floor((availableSize.width - titleSize.width) * 0.5), y: centralContentsY), size: titleSize)
+            let titleFrame = CGRect(origin: CGPoint(x: bandMinX + floor((bandWidth - titleSize.width) * 0.5), y: centralContentsY), size: titleSize)
             if let titleView = self.title.view {
                 if titleView.superview == nil {
                     self.addSubview(titleView)
@@ -164,7 +175,7 @@ final class QuickReplyEmptyStateComponent: Component {
             }
             centralContentsY += titleSize.height + titleTextSpacing
             
-            let textFrame = CGRect(origin: CGPoint(x: floor((availableSize.width - textSize.width) * 0.5), y: centralContentsY), size: textSize)
+            let textFrame = CGRect(origin: CGPoint(x: bandMinX + floor((bandWidth - textSize.width) * 0.5), y: centralContentsY), size: textSize)
             if let textView = self.text.view {
                 if textView.superview == nil {
                     self.addSubview(textView)

@@ -34,10 +34,10 @@ public class InviteLinkHeaderItem: ListViewItem, ItemListItem {
         self.linkAction = linkAction
     }
     
-    public func nodeConfiguredForParams(async: @escaping (@escaping () -> Void) -> Void, params: ListViewItemLayoutParams, synchronousLoads: Bool, previousItem: ListViewItem?, nextItem: ListViewItem?, completion: @escaping (ListViewItemNode, @escaping () -> (Signal<Void, NoError>?, (ListViewItemApply) -> Void)) -> Void) {
+    public func nodeConfiguredForParams(async: @escaping (@escaping () -> Void) -> Void, params: ListViewItemLayoutParams, synchronousLoads: Bool, neighbors: ListViewItemNeighbors, completion: @escaping (ListViewItemNode, @escaping () -> (Signal<Void, NoError>?, (ListViewItemApply) -> Void)) -> Void) {
         async {
             let node = InviteLinkHeaderItemNode()
-            let (layout, apply) = node.asyncLayout()(self, params, itemListNeighbors(item: self, topItem: previousItem as? ItemListItem, bottomItem: nextItem as? ItemListItem))
+            let (layout, apply) = node.asyncLayout()(self, params, itemListNeighbors(item: self, topFacet: neighbors.previous?.base(ItemListNeighborFacet.self), bottomFacet: neighbors.next?.base(ItemListNeighborFacet.self)))
             
             node.contentSize = layout.contentSize
             node.insets = layout.insets
@@ -50,7 +50,7 @@ public class InviteLinkHeaderItem: ListViewItem, ItemListItem {
         }
     }
     
-    public func updateNode(async: @escaping (@escaping () -> Void) -> Void, node: @escaping () -> ListViewItemNode, params: ListViewItemLayoutParams, previousItem: ListViewItem?, nextItem: ListViewItem?, animation: ListViewItemUpdateAnimation, completion: @escaping (ListViewItemNodeLayout, @escaping (ListViewItemApply) -> Void) -> Void) {
+    public func updateNode(async: @escaping (@escaping () -> Void) -> Void, node: @escaping () -> ListViewItemNode, params: ListViewItemLayoutParams, neighbors: ListViewItemNeighbors, animation: ListViewItemUpdateAnimation, completion: @escaping (ListViewItemNodeLayout, @escaping (ListViewItemApply) -> Void) -> Void) {
         Queue.mainQueue().async {
             guard let nodeValue = node() as? InviteLinkHeaderItemNode else {
                 assertionFailure()
@@ -60,7 +60,7 @@ public class InviteLinkHeaderItem: ListViewItem, ItemListItem {
             let makeLayout = nodeValue.asyncLayout()
             
             async {
-                let (layout, apply) = makeLayout(self, params, itemListNeighbors(item: self, topItem: previousItem as? ItemListItem, bottomItem: nextItem as? ItemListItem))
+                let (layout, apply) = makeLayout(self, params, itemListNeighbors(item: self, topFacet: neighbors.previous?.base(ItemListNeighborFacet.self), bottomFacet: neighbors.next?.base(ItemListNeighborFacet.self)))
                 Queue.mainQueue().async {
                     completion(layout, { _ in
                         apply()
@@ -81,6 +81,7 @@ class InviteLinkHeaderItemNode: ListViewItemNode {
     
     private var item: InviteLinkHeaderItem?
     
+
     init() {
         self.titleNode = TextNode()
         self.titleNode.isUserInteractionEnabled = false
@@ -115,8 +116,7 @@ class InviteLinkHeaderItemNode: ListViewItemNode {
         let makeTitleLayout = TextNode.asyncLayout(self.titleNode)
         let makeTextLayout = TextNodeWithEntities.asyncLayout(self.textNode)
         
-        return { item, params, neighbors in
-            let leftInset: CGFloat = 24.0 + params.leftInset
+        return { [weak self] item, params, neighbors in
             let iconSize: CGSize
             if params.width > params.availableHeight && params.width > 320.0 {
                 iconSize = CGSize(width: 140.0, height: 140.0)
@@ -149,9 +149,9 @@ class InviteLinkHeaderItemNode: ListViewItemNode {
                 }
             })
             
-            let (titleLayout, titleApply) = makeTitleLayout(TextNodeLayoutArguments(attributedString: attributedTitle, backgroundColor: nil, maximumNumberOfLines: 0, truncationType: .end, constrainedSize: CGSize(width: params.width - leftInset * 2.0, height: CGFloat.greatestFiniteMagnitude), alignment: .center, cutout: nil, insets: UIEdgeInsets()))
+            let (titleLayout, titleApply) = makeTitleLayout(TextNodeLayoutArguments(attributedString: attributedTitle, backgroundColor: nil, maximumNumberOfLines: 0, truncationType: .end, constrainedSize: CGSize(width: params.width - 24.0 * 2.0 - params.leftInset - params.rightInset, height: CGFloat.greatestFiniteMagnitude), alignment: .center, cutout: nil, insets: UIEdgeInsets()))
             
-            let (textLayout, textApply) = makeTextLayout(TextNodeLayoutArguments(attributedString: attributedText, backgroundColor: nil, maximumNumberOfLines: 0, truncationType: .end, constrainedSize: CGSize(width: params.width - leftInset * 2.0, height: CGFloat.greatestFiniteMagnitude), alignment: .center, cutout: nil, insets: UIEdgeInsets()))
+            let (textLayout, textApply) = makeTextLayout(TextNodeLayoutArguments(attributedString: attributedText, backgroundColor: nil, maximumNumberOfLines: 0, truncationType: .end, constrainedSize: CGSize(width: params.width - 24.0 * 2.0 - params.leftInset - params.rightInset, height: CGFloat.greatestFiniteMagnitude), alignment: .center, cutout: nil, insets: UIEdgeInsets()))
             
             var contentSize = CGSize(width: params.width, height: topInset + textLayout.size.height)
             if let _ = item.title {
@@ -169,15 +169,19 @@ class InviteLinkHeaderItemNode: ListViewItemNode {
                         strongSelf.animationNode.visibility = true
                     }
                     strongSelf.item = item
-                    strongSelf.accessibilityLabel = attributedText.string
+                    // VoiceOver: the header is one text element (title and text); the animation is decoration. Without
+                    // being an element its label was only a container's and was never read.
+                    strongSelf.isAccessibilityElement = true
+                    strongSelf.accessibilityTraits = .staticText
+                    strongSelf.accessibilityLabel = [item.title, attributedText.string].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
                                         
-                    strongSelf.animationNode.frame = CGRect(origin: CGPoint(x: floor((layout.size.width - iconSize.width) / 2.0), y: -10.0), size: iconSize)
+                    strongSelf.animationNode.frame = CGRect(origin: CGPoint(x: params.leftInset + floor((layout.size.width - params.leftInset - params.rightInset - iconSize.width) / 2.0), y: -10.0), size: iconSize)
                     strongSelf.animationNode.updateLayout(size: iconSize)
                     
                     var origin: CGFloat = topInset + 8.0
                     
                     let _ = titleApply()
-                    strongSelf.titleNode.frame = CGRect(origin: CGPoint(x: floor((layout.size.width - titleLayout.size.width) / 2.0), y: origin), size: titleLayout.size)
+                    strongSelf.titleNode.frame = CGRect(origin: CGPoint(x: params.leftInset + floor((layout.size.width - params.leftInset - params.rightInset - titleLayout.size.width) / 2.0), y: origin), size: titleLayout.size)
                     if titleLayout.size.height > 0.0 {
                         origin += titleLayout.size.height + spacing
                     }
@@ -189,7 +193,7 @@ class InviteLinkHeaderItemNode: ListViewItemNode {
                         placeholderColor: item.theme.list.mediaPlaceholderColor,
                         attemptSynchronous: true
                     ))
-                    strongSelf.textNode.textNode.frame = CGRect(origin: CGPoint(x: floor((layout.size.width - textLayout.size.width) / 2.0), y: origin), size: textLayout.size)
+                    strongSelf.textNode.textNode.frame = CGRect(origin: CGPoint(x: params.leftInset + floor((layout.size.width - params.leftInset - params.rightInset - textLayout.size.width) / 2.0), y: origin), size: textLayout.size)
                     strongSelf.textNode.visibilityRect = .infinite
                 }
             })

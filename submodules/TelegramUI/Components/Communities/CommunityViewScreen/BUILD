@@ -9,6 +9,7 @@ swift_library(
     copts = [
     ],
     deps = [
+        "//submodules/TelegramUI/Components/SideColumnLayout",
         "//submodules/AccountContext",
         "//submodules/AlertUI",
         "//submodules/AsyncDisplayKit",
@@ -22,7 +23,6 @@ swift_library(
         "//submodules/ContextUI",
         "//submodules/Display",
         "//submodules/ItemListUI",
-        "//submodules/Postbox",
         "//submodules/SSignalKit/SwiftSignalKit",
         "//submodules/TelegramCore",
         "//submodules/TelegramPresentationData",
@@ -33,6 +33,7 @@ swift_library(
         "//submodules/TelegramUI/Components/AlertComponent",
         "//submodules/TelegramUI/Components/ButtonComponent",
         "//submodules/TelegramUI/Components/ChatListHeaderComponent",
+        "//submodules/TelegramUI/Components/NavigationBarComponent",
         "//submodules/TelegramUI/Components/ChatListTitleView",
         "//submodules/TelegramUI/Components/Communities/CommunityPrivateChatScreen",
         "//submodules/TelegramUI/Components/EdgeEffect",

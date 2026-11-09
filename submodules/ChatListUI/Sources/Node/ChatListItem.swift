@@ -162,6 +162,8 @@ public enum ChatListItemContent {
         public var displayAsTopicList: Bool
         public var tags: [Tag]
         public var customMessageListData: CustomMessageListData?
+        /// The chat side list's "All Messages" row: the parent's own chat, previewing its latest message.
+        public var isSideListAllThreadsItem: Bool
         
         public init(
             messages: [EngineMessage],
@@ -188,7 +190,8 @@ public enum ChatListItemContent {
             requiresPremiumForMessaging: Bool,
             displayAsTopicList: Bool,
             tags: [Tag],
-            customMessageListData: CustomMessageListData? = nil
+            customMessageListData: CustomMessageListData? = nil,
+            isSideListAllThreadsItem: Bool = false
         ) {
             self.messages = messages
             self.peer = peer
@@ -215,6 +218,7 @@ public enum ChatListItemContent {
             self.displayAsTopicList = displayAsTopicList
             self.tags = tags
             self.customMessageListData = customMessageListData
+            self.isSideListAllThreadsItem = isSideListAllThreadsItem
         }
     }
     
@@ -255,6 +259,9 @@ public enum ChatListItemContent {
         case .loading:
             return nil
         case let .peer(peerData):
+            if peerData.isSideListAllThreadsItem {
+                return nil
+            }
             return .peer(id: peerData.peer.peerId)
         case .groupReference:
             return nil
@@ -486,6 +493,22 @@ public class ChatListItem: ListViewItem {
     let context: AccountContext
     let chatListLocation: ChatListControllerLocation
     let filterData: ChatListItemFilterData?
+    
+    static let sideListInlineAvatarDiameter: CGFloat = 18.0
+    /// The side list's content inset from the list's edges: 12pt inside the highlighted plate (inset 8pt).
+    static let sideListContentInset: CGFloat = 18.0
+    
+    /// A Saved Messages or direct-messages row in the chat side list: the peer's avatar is small and inline before
+    /// the title, as a topic's icon is in the inline list.
+    var isSideListCompactPeerRow: Bool {
+        if !self.interaction.isSideListMode {
+            return false
+        }
+        if case .savedMessagesChats = self.chatListLocation {
+            return true
+        }
+        return false
+    }
     let index: EngineChatList.Item.Index
     public let content: ChatListItemContent
     let editing: Bool
@@ -505,8 +528,34 @@ public class ChatListItem: ListViewItem {
     }
     
     let header: ListViewItemHeader?
+
+    public var neighborDescriptor: AnyEquatable {
+        return AnyEquatable(ChatListItemNeighborDescriptor(
+            headerId: self.header?.id,
+            isPinned: self.isPinned,
+            hasActiveRevealControls: self.hasActiveRevealControls,
+            sideListHighlightKey: self.sideListHighlightKey
+        ))
+    }
     
+    var sideListHighlightKey: ChatListSideListHighlightKey? {
+        if !self.interaction.isSideListMode {
+            return nil
+        }
+        if case let .peer(peerData) = self.content, peerData.isSideListAllThreadsItem {
+            return .allThreads
+        }
+        // A topic's or bot thread's row: its chat location names only the parent, the same for every row.
+        if !self.isSideListCompactPeerRow, case let .peer(peerData) = self.content, let threadInfo = peerData.threadInfo {
+            return .thread(peerId: peerData.peer.peerId, threadId: threadInfo.id)
+        }
+        return self.content.chatLocation.flatMap(ChatListSideListHighlightKey.location)
+    }
+
     public var isPinned: Bool {
+        if case let .peer(peerData) = self.content, peerData.isSideListAllThreadsItem {
+            return false
+        }
         switch self.index {
         case let .chatList(index):
             return index.pinningIndex != nil
@@ -538,10 +587,10 @@ public class ChatListItem: ListViewItem {
         self.displayHiddenPeerIcon = displayHiddenPeerIcon
     }
     
-    public func nodeConfiguredForParams(async: @escaping (@escaping () -> Void) -> Void, params: ListViewItemLayoutParams, synchronousLoads: Bool, previousItem: ListViewItem?, nextItem: ListViewItem?, completion: @escaping (ListViewItemNode, @escaping () -> (Signal<Void, NoError>?, (ListViewItemApply) -> Void)) -> Void) {
+    public func nodeConfiguredForParams(async: @escaping (@escaping () -> Void) -> Void, params: ListViewItemLayoutParams, synchronousLoads: Bool, neighbors: ListViewItemNeighbors, completion: @escaping (ListViewItemNode, @escaping () -> (Signal<Void, NoError>?, (ListViewItemApply) -> Void)) -> Void) {
         async {
             let node = ChatListItemNode()
-            let mergeType = ChatListItem.mergeType(item: self, previousItem: previousItem, nextItem: nextItem)
+            let mergeType = ChatListItem.mergeType(item: self, neighbors: neighbors)
             let first = mergeType.first
             var last = mergeType.last
             let firstWithHeader = mergeType.firstWithHeader
@@ -551,6 +600,7 @@ public class ChatListItem: ListViewItem {
                 last = true
             }
             node.insets = ChatListItemNode.insets(first: first, last: last, firstWithHeader: firstWithHeader)
+            let nextSideListHighlightKey = neighbors.next?.base(ChatListNeighborFacet.self)?.sideListHighlightKey
             
             let (nodeLayout, apply) = node.asyncLayout()(self, params, first, last, firstWithHeader, nextIsPinned, nextHasActiveRevealControls)
             
@@ -560,6 +610,7 @@ public class ChatListItem: ListViewItem {
             Queue.mainQueue().async {
                 completion(node, {
                     return (nil, { _ in
+                        node.nextSideListHighlightKey = nextSideListHighlightKey
                         node.setupItem(item: self, synchronousLoads: synchronousLoads)
                         apply(synchronousLoads, false)
                         node.updateIsHighlighted(transition: .immediate)
@@ -569,14 +620,14 @@ public class ChatListItem: ListViewItem {
         }
     }
     
-    public func updateNode(async: @escaping (@escaping () -> Void) -> Void, node: @escaping () -> ListViewItemNode, params: ListViewItemLayoutParams, previousItem: ListViewItem?, nextItem: ListViewItem?, animation: ListViewItemUpdateAnimation, completion: @escaping (ListViewItemNodeLayout, @escaping (ListViewItemApply) -> Void) -> Void) {
+    public func updateNode(async: @escaping (@escaping () -> Void) -> Void, node: @escaping () -> ListViewItemNode, params: ListViewItemLayoutParams, neighbors: ListViewItemNeighbors, animation: ListViewItemUpdateAnimation, completion: @escaping (ListViewItemNodeLayout, @escaping (ListViewItemApply) -> Void) -> Void) {
         Queue.mainQueue().async {
             assert(node() is ChatListItemNode)
             if let nodeValue = node() as? ChatListItemNode {
                 nodeValue.setupItem(item: self, synchronousLoads: false)
                 let layout = nodeValue.asyncLayout()
                 async {
-                    let mergeType = ChatListItem.mergeType(item: self, previousItem: previousItem, nextItem: nextItem)
+                    let mergeType = ChatListItem.mergeType(item: self, neighbors: neighbors)
                     let first = mergeType.first
                     var last = mergeType.last
                     let firstWithHeader = mergeType.firstWithHeader
@@ -590,9 +641,11 @@ public class ChatListItem: ListViewItem {
                         animated = false
                     }
                     
+                    let nextSideListHighlightKey = neighbors.next?.base(ChatListNeighborFacet.self)?.sideListHighlightKey
                     let (nodeLayout, apply) = layout(self, params, first, last, firstWithHeader, nextIsPinned, nextHasActiveRevealControls)
                     Queue.mainQueue().async {
                         completion(nodeLayout, { _ in
+                            nodeValue.nextSideListHighlightKey = nextSideListHighlightKey
                             apply(false, animated)
                         })
                     }
@@ -605,6 +658,8 @@ public class ChatListItem: ListViewItem {
         switch self.content {
         case .loading:
             break
+        case let .peer(peerData) where peerData.isSideListAllThreadsItem:
+            self.interaction.openSideListAllThreads?()
         case let .peer(peerData):
             if let message = peerData.messages.last, let peer = peerData.peer.peer {
                 if case .community = peer {
@@ -637,14 +692,14 @@ public class ChatListItem: ListViewItem {
         }
     }
         
-    static func mergeType(item: ChatListItem, previousItem: ListViewItem?, nextItem: ListViewItem?) -> (first: Bool, last: Bool, firstWithHeader: Bool, nextIsPinned: Bool, nextHasActiveRevealControls: Bool) {
+    static func mergeType(item: ChatListItem, neighbors: ListViewItemNeighbors) -> (first: Bool, last: Bool, firstWithHeader: Bool, nextIsPinned: Bool, nextHasActiveRevealControls: Bool) {
         var first = false
         var last = false
         var firstWithHeader = false
-        if let previousItem = previousItem {
+        if neighbors.previous != nil {
             if let header = item.header {
-                if let previousItem = previousItem as? ChatListItem {
-                    firstWithHeader = header.id != previousItem.header?.id
+                if let previousItem = neighbors.previous?.base(HeaderNeighborFacet.self), previousItem.headerFamily == .chatList {
+                    firstWithHeader = header.id != previousItem.headerId
                 } else {
                     firstWithHeader = true
                 }
@@ -655,10 +710,8 @@ public class ChatListItem: ListViewItem {
         }
         var nextIsPinned = false
         var nextHasActiveRevealControls = false
-        if let nextItem = nextItem as? ChatListItem {
-            if case let .chatList(nextIndex) = nextItem.index, nextIndex.pinningIndex != nil {
-                nextIsPinned = true
-            }
+        if let nextItem = neighbors.next?.base(ChatListNeighborFacet.self) {
+            nextIsPinned = nextItem.isPinned
             nextHasActiveRevealControls = nextItem.hasActiveRevealControls
         } else {
             last = true
@@ -667,24 +720,25 @@ public class ChatListItem: ListViewItem {
     }
 }
 
-private let pinIcon = ItemListRevealOptionIcon.animation(animation: "anim_pin", scale: 1.0, offset: 0.0, replaceColors: nil, flip: false, startFrame: 3)
-private let unpinIcon = ItemListRevealOptionIcon.animation(animation: "anim_unpin", scale: 1.0, offset: 0.0, replaceColors: [0x1993fa], flip: false, startFrame: 5)
-private let muteIcon = ItemListRevealOptionIcon.animation(animation: "anim_mute", scale: 1.0, offset: 0.0, replaceColors: [0xff9500], flip: false, startFrame: 3)
-private let unmuteIcon = ItemListRevealOptionIcon.animation(animation: "anim_unmute", scale: 1.0, offset: 0.0, replaceColors: nil, flip: false, startFrame: 3)
-private let deleteIcon = ItemListRevealOptionIcon.animation(animation: "anim_delete", scale: 1.0, offset: 0.0, replaceColors: nil, flip: false, startFrame: 3)
-private let groupIcon = ItemListRevealOptionIcon.animation(animation: "anim_group", scale: 1.0, offset: 0.0, replaceColors: nil, flip: false, startFrame: 5)
-private let ungroupIcon = ItemListRevealOptionIcon.animation(animation: "anim_ungroup", scale: 1.0, offset: 0.0, replaceColors: nil, flip: false, startFrame: 5)
-private let readIcon = ItemListRevealOptionIcon.animation(animation: "anim_read", scale: 1.0, offset: 0.0, replaceColors: nil, flip: false, startFrame: 5)
-private let unreadIcon = ItemListRevealOptionIcon.animation(animation: "anim_unread", scale: 1.0, offset: 0.0, replaceColors: [0x2194fa], flip: false, startFrame: 5)
-private let archiveIcon = ItemListRevealOptionIcon.animation(animation: "anim_archive", scale: 1.0, offset: 2.0, replaceColors: [0xa9a9ad], flip: false, startFrame: 5)
-private let unarchiveIcon = ItemListRevealOptionIcon.animation(animation: "anim_unarchive", scale: 0.52, offset: -6.0, replaceColors: [0xa9a9ad], flip: false, startFrame: 5)
-private let hideIcon = ItemListRevealOptionIcon.animation(animation: "anim_hide", scale: 1.1, offset: 2.0, replaceColors: [0xbdbdc2], flip: false, startFrame: 5)
-private let unhideIcon = ItemListRevealOptionIcon.animation(animation: "anim_hide", scale: 1.0, offset: -15.0, replaceColors: [0xbdbdc2], flip: true, startFrame: 5)
-private let startIcon = ItemListRevealOptionIcon.animation(animation: "anim_play", scale: 1.0, offset: 0.0, replaceColors: [0xbdbdc2], flip: false, startFrame: 5)
-private let closeIcon = ItemListRevealOptionIcon.animation(animation: "anim_pause", scale: 1.0, offset: 0.0, replaceColors: [0xbdbdc2], flip: false, startFrame: 5)
+
+private let pinIcon = ItemListRevealOptionIcon.animation(animation: "anim_pin", scale: 1.0, offset: 0.0, replaceColors: nil, flip: false)
+private let unpinIcon = ItemListRevealOptionIcon.animation(animation: "anim_unpin", scale: 1.0, offset: 0.0, replaceColors: [0x1993fa], flip: false)
+private let muteIcon = ItemListRevealOptionIcon.animation(animation: "anim_mute", scale: 1.0, offset: 0.0, replaceColors: [0xff9500], flip: false)
+private let unmuteIcon = ItemListRevealOptionIcon.animation(animation: "anim_unmute", scale: 1.0, offset: 0.0, replaceColors: nil, flip: false)
+private let deleteIcon = ItemListRevealOptionIcon.animation(animation: "anim_delete", scale: 1.0, offset: 0.0, replaceColors: nil, flip: false)
+private let groupIcon = ItemListRevealOptionIcon.animation(animation: "anim_group", scale: 1.0, offset: 0.0, replaceColors: nil, flip: false)
+private let ungroupIcon = ItemListRevealOptionIcon.animation(animation: "anim_ungroup", scale: 1.0, offset: 0.0, replaceColors: nil, flip: false)
+private let readIcon = ItemListRevealOptionIcon.animation(animation: "anim_read_reveal", scale: 1.0, offset: 0.0, replaceColors: nil, flip: false)
+private let unreadIcon = ItemListRevealOptionIcon.animation(animation: "anim_unread", scale: 1.0, offset: 0.0, replaceColors: [0x2194fa], flip: false)
+private let archiveIcon = ItemListRevealOptionIcon.animation(animation: "anim_archive", scale: 1.0, offset: 2.0, replaceColors: [0xa9a9ad], flip: false)
+private let unarchiveIcon = ItemListRevealOptionIcon.animation(animation: "anim_unarchive", scale: 0.52, offset: -6.0, replaceColors: [0xa9a9ad], flip: false)
+private let hideIcon = ItemListRevealOptionIcon.animation(animation: "anim_hide", scale: 1.1, offset: 2.0, replaceColors: [0xbdbdc2], flip: false)
+private let unhideIcon = ItemListRevealOptionIcon.animation(animation: "anim_hide", scale: 1.0, offset: -15.0, replaceColors: [0xbdbdc2], flip: true)
+private let startIcon = ItemListRevealOptionIcon.animation(animation: "anim_play", scale: 1.0, offset: 0.0, replaceColors: [0xbdbdc2], flip: false)
+private let closeIcon = ItemListRevealOptionIcon.animation(animation: "anim_pause", scale: 1.0, offset: 0.0, replaceColors: [0xbdbdc2], flip: false)
 private let ungroupCommunityIcon = ItemListRevealOptionIcon.animation(animation: "anim_ungroupcom", scale: 0.5, offset: -4.0, replaceColors: nil, flip: false, startFrame: 0)
 
-private enum RevealOptionKey: Int32 {
+enum RevealOptionKey: Int32 {
     case pin
     case unpin
     case mute
@@ -714,19 +768,54 @@ private func canArchivePeer(id: EnginePeer.Id, accountPeerId: EnginePeer.Id) -> 
 }
 
 private func communitySourcePeer(peerData: ChatListItemContent.PeerData, message: EngineMessage) -> EnginePeer? {
-    guard case .community = peerData.peer.peer else {
+    return communitySourcePeer(chatPeer: peerData.peer, message: message)
+}
+
+private func communitySourcePeer(chatPeer: EngineRenderedPeer, message: EngineMessage) -> EnginePeer? {
+    guard case .community = chatPeer.peer else {
         return nil
     }
-    guard message.id.peerId != peerData.peer.peerId else {
+    guard message.id.peerId != chatPeer.peerId else {
         return nil
     }
     if let sourcePeer = message.enginePeers[message.id.peerId] {
         return sourcePeer
     }
-    if let sourcePeer = peerData.peer.peers[message.id.peerId] {
+    if let sourcePeer = chatPeer.peers[message.id.peerId] {
         return sourcePeer
     }
     return nil
+}
+
+enum ChatListCommunitySourcePlacement: Equatable {
+    /// After the author on the line above the preview ("Author ▸ Source").
+    case authorLine
+    /// In front of the preview, after the author ("Author › Source: text", `chatListCommunityPreviewAuthor`), as a
+    /// group's author is inlined.
+    case previewPrefix
+}
+
+/// The chat a collapsed community row names for its last message, and where. A row with folder tags has one preview
+/// line, because the tags take the last one, so the name goes in front of the preview: on a line of its own it pushed
+/// the preview onto the tags' line, under them.
+func chatListCommunitySource(chatPeer: EngineRenderedPeer, message: EngineMessage, hasTags: Bool) -> (peer: EnginePeer, placement: ChatListCommunitySourcePlacement)? {
+    guard let sourcePeer = communitySourcePeer(chatPeer: chatPeer, message: message) else {
+        return nil
+    }
+    return (sourcePeer, hasTags ? .previewPrefix : .authorLine)
+}
+
+/// The author a community row with folder tags names before the source chat in front of the preview ("Author › Source:
+/// text"), the order of the line above the preview without tags. `authorTitle` is the author that line would show. No
+/// author when it shows none, or when the author is the source chat itself (a channel's post), which would name it twice.
+func chatListCommunityPreviewAuthor(authorTitle: String?, authorId: EnginePeer.Id?, sourcePeerId: EnginePeer.Id) -> String? {
+    guard let authorTitle, !authorTitle.isEmpty else {
+        return nil
+    }
+    if authorId == sourcePeerId {
+        return nil
+    }
+    return authorTitle
 }
 
 public struct ChatListItemFilterData: Equatable {
@@ -763,7 +852,7 @@ private func revealOptions(strings: PresentationStrings, theme: PresentationThem
         }
     }
     if canDelete {
-        options.append(ItemListRevealOption(key: RevealOptionKey.delete.rawValue, title: strings.Common_Delete, icon: deleteIcon, color: theme.list.itemDisclosureActions.destructive.fillColor, iconColor: theme.list.itemDisclosureActions.destructive.foregroundColor, textColor: theme.chatList.dateTextColor))
+        options.append(ItemListRevealOption(key: RevealOptionKey.delete.rawValue, title: strings.Common_Delete, icon: deleteIcon, color: theme.list.itemDisclosureActions.destructive.fillColor, iconColor: theme.list.itemDisclosureActions.destructive.foregroundColor, textColor: theme.chatList.dateTextColor, isDestructive: true))
     }
     if case .savedMessagesChats = location {
     } else {
@@ -858,7 +947,7 @@ private func forumThreadRevealOptions(strings: PresentationStrings, theme: Prese
         }
     }
     if canDelete {
-        options.append(ItemListRevealOption(key: RevealOptionKey.delete.rawValue, title: strings.Common_Delete, icon: deleteIcon, color: theme.list.itemDisclosureActions.destructive.fillColor, iconColor: theme.list.itemDisclosureActions.destructive.foregroundColor, textColor: theme.chatList.dateTextColor))
+        options.append(ItemListRevealOption(key: RevealOptionKey.delete.rawValue, title: strings.Common_Delete, icon: deleteIcon, color: theme.list.itemDisclosureActions.destructive.fillColor, iconColor: theme.list.itemDisclosureActions.destructive.foregroundColor, textColor: theme.chatList.dateTextColor, isDestructive: true))
     }
     if canOpenClose {
         if !isEditing {
@@ -901,9 +990,7 @@ private func leftRevealOptions(strings: PresentationStrings, theme: Presentation
                 if isPinned {
                     options.append(ItemListRevealOption(key: RevealOptionKey.unpin.rawValue, title: strings.DialogList_Unpin, icon: unpinIcon, color: theme.list.itemDisclosureActions.constructive.fillColor, iconColor: theme.list.itemDisclosureActions.constructive.foregroundColor, textColor: theme.chatList.dateTextColor))
                 } else {
-                    if filterData == nil || peer.id.namespace != Namespaces.Peer.SecretChat {
-                        options.append(ItemListRevealOption(key: RevealOptionKey.pin.rawValue, title: strings.DialogList_Pin, icon: pinIcon, color: theme.list.itemDisclosureActions.constructive.fillColor, iconColor: theme.list.itemDisclosureActions.constructive.foregroundColor, textColor: theme.chatList.dateTextColor))
-                    }
+                    options.append(ItemListRevealOption(key: RevealOptionKey.pin.rawValue, title: strings.DialogList_Pin, icon: pinIcon, color: theme.list.itemDisclosureActions.constructive.fillColor, iconColor: theme.list.itemDisclosureActions.constructive.foregroundColor, textColor: theme.chatList.dateTextColor))
                 }
             }
             return options
@@ -1478,6 +1565,18 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
     private var onlineIsVoiceChat: Bool = false
     private var currentOnline: Bool?
     
+    /// State the row shows only as icons (pin, muted bell), read out after the title.
+    private var accessibilityIsPinned: Bool = false
+    private var accessibilityIsMuted: Bool = false
+    /// Shown text the row's label and value read besides the title and the last message: the verified / premium /
+    /// scam / fake badge, the date, and the draft or typing line when the row shows one instead of the message.
+    private var accessibilityCredibilityText: String?
+    private var accessibilityDateText: String?
+    private var accessibilityDraftText: String?
+    private var accessibilityActivityText: String?
+    /// The custom actions are rebuilt only when this changes (option keys and names, open-app and "More" presence).
+    private var accessibilityCustomActionsKey: [String]?
+    
     override public var canBeSelected: Bool {
         if self.selectableControlNode != nil || self.item?.editing == true {
             return false
@@ -1530,8 +1629,23 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                     } else {
                         result += chatMainPeer.displayTitle(strings: item.presentationData.strings, displayOrder: item.presentationData.nameDisplayOrder)
                     }
+                    if let accessibilityCredibilityText = self.accessibilityCredibilityText {
+                        result += ", \(accessibilityCredibilityText)"
+                    }
                     if let combinedReadState = peerData.combinedReadState, combinedReadState.count > 0 {
                         result += "\n\(item.presentationData.strings.VoiceOver_Chat_UnreadMessages(combinedReadState.count))"
+                    }
+                    if peerData.hasUnseenMentions {
+                        result += "\n\(item.presentationData.strings.VoiceOver_ChatList_UnreadMentions)"
+                    }
+                    if peerData.hasUnseenReactions {
+                        result += "\n\(item.presentationData.strings.VoiceOver_ChatList_UnreadReactions)"
+                    }
+                    if self.accessibilityIsPinned {
+                        result += "\n\(item.presentationData.strings.VoiceOver_ChatList_Pinned)"
+                    }
+                    if self.accessibilityIsMuted {
+                        result += "\n\(item.presentationData.strings.VoiceOver_ChatList_Muted)"
                     }
                     return result
             }
@@ -1544,6 +1658,27 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
             guard let item = self.item else {
                 return nil
             }
+            if case .loading = item.content {
+                return nil
+            }
+            // The typing line and a draft stand where the last message is shown, so they are read in its place.
+            var result: String?
+            if case .peer = item.content, let accessibilityActivityText = self.accessibilityActivityText {
+                result = accessibilityActivityText
+            } else if case .peer = item.content, let accessibilityDraftText = self.accessibilityDraftText {
+                result = accessibilityDraftText
+            } else {
+                result = self.lastMessageAccessibilityValue(item: item)
+            }
+            if let accessibilityDateText = self.accessibilityDateText {
+                result = result.flatMap { "\($0)\n\(accessibilityDateText)" } ?? accessibilityDateText
+            }
+            return result
+        } set(value) {
+        }
+    }
+    
+    private func lastMessageAccessibilityValue(item: ChatListItem) -> String? {
             switch item.content {
                 case .loading:
                     return nil
@@ -1558,11 +1693,11 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                         } else {
                             result += item.presentationData.strings.VoiceOver_ChatList_OutgoingMessage
                         }
-                        let (_, initialHideAuthor, messageText, _, _, _, _) = chatListItemStrings(strings: item.presentationData.strings, nameDisplayOrder: item.presentationData.nameDisplayOrder, dateTimeFormat: item.presentationData.dateTimeFormat, contentSettings: item.context.currentContentSettings.with { $0 }, messages: messages, chatPeer: peer, accountPeerId: item.context.account.peerId, isPeerGroup: false)
+                        let (_, initialHideAuthor, messageText, _, _, _, richTextPreview) = chatListItemStrings(strings: item.presentationData.strings, nameDisplayOrder: item.presentationData.nameDisplayOrder, dateTimeFormat: item.presentationData.dateTimeFormat, contentSettings: item.context.currentContentSettings.with { $0 }, messages: messages, chatPeer: peer, accountPeerId: item.context.account.peerId, isPeerGroup: false)
                         if message.flags.contains(.Incoming), !initialHideAuthor, let author = message.author, case .user = author {
                             result += "\n\(item.presentationData.strings.VoiceOver_ChatList_MessageFrom(author.displayTitle(strings: item.presentationData.strings, displayOrder: item.presentationData.nameDisplayOrder)).string)"
                         }
-                        result += "\n\(messageText)"
+                        result += "\n\(richTextPreview.map(instantPagePreviewPlainText) ?? messageText)"
                         return result
                     } else if !peers.isEmpty {
                         var result = ""
@@ -1605,8 +1740,6 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                         return item.presentationData.strings.VoiceOver_ChatList_MessageEmpty
                     }
             }
-        } set(value) {
-        }
     }
     
     override public var visibility: ListViewItemNodeVisibility {
@@ -1884,9 +2017,6 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                 }
                 peerLinkedCommunityId = peerData.peer.peer?.containerPeerId
             }
-            if peerData.peer.peerId.namespace == Namespaces.Peer.SecretChat {
-                enablePreview = false
-            }
         case let .groupReference(groupReferenceData):
             if let previousItem = previousItem, case let .groupReference(previousGroupReferenceData) = previousItem.content, groupReferenceData.hiddenByDefault != previousGroupReferenceData.hiddenByDefault {
                 UIView.transition(with: self.avatarNode.view, duration: 0.3, options: [.transitionCrossDissolve], animations: {
@@ -2007,6 +2137,11 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
             }
             var overrideImage: AvatarNodeImageOverride?
             if case let .peer(peerData) = item.content, peerData.customMessageListData != nil {
+            } else if case let .peer(peerData) = item.content, peerData.isSideListAllThreadsItem {
+                // Saved Messages' bookmark; a channel's direct messages keep the channel's avatar.
+                if peer.id == item.context.account.peerId {
+                    overrideImage = .savedMessagesIcon
+                }
             } else if peer.id.isReplies {
                 overrideImage = .repliesIcon
             } else if peer.id.isAnonymousSavedMessages {
@@ -2040,6 +2175,9 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
             
             if case let .peer(peerData) = item.content, let customMessageListData = peerData.customMessageListData, customMessageListData.commandPrefix != nil {
                 avatarDiameter = 40.0
+            }
+            if item.isSideListCompactPeerRow {
+                avatarDiameter = ChatListItem.sideListInlineAvatarDiameter
             }
                 
             if avatarDiameter != 60.0 {
@@ -2152,9 +2290,9 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
         self.contextContainer.isGestureEnabled = enablePreview && !item.editing
     }
     
-    override public func layoutForParams(_ params: ListViewItemLayoutParams, item: ListViewItem, previousItem: ListViewItem?, nextItem: ListViewItem?) {
+    override public func layoutForParams(_ params: ListViewItemLayoutParams, item: ListViewItem, neighbors: ListViewItemNeighbors) {
         let layout = self.asyncLayout()
-        let (first, last, firstWithHeader, nextIsPinned, nextHasActiveRevealControls) = ChatListItem.mergeType(item: item as! ChatListItem, previousItem: previousItem, nextItem: nextItem)
+        let (first, last, firstWithHeader, nextIsPinned, nextHasActiveRevealControls) = ChatListItem.mergeType(item: item as! ChatListItem, neighbors: neighbors)
         let (nodeLayout, apply) = layout(item as! ChatListItem, params, first, last, firstWithHeader, nextIsPinned, nextHasActiveRevealControls)
         apply(false, false)
         self.contentSize = nodeLayout.contentSize
@@ -2174,12 +2312,19 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
     }
     
     var reallyHighlighted: Bool {
-        var reallyHighlighted = self.isHighlighted || self.isRevealOptionsActive
+        var reallyHighlighted = self.isHighlighted
         if let item = self.item {
+            // The parent's own chat is open when the side list highlights no thread.
+            if case let .peer(peerData) = item.content, peerData.isSideListAllThreadsItem, item.interaction.isSideListMode, item.interaction.highlightedChatLocation == nil {
+                reallyHighlighted = true
+            }
             if let itemChatLocation = item.content.chatLocation {
                 if itemChatLocation == item.interaction.highlightedChatLocation?.location {
                     reallyHighlighted = true
                 }
+            }
+            if item.sideListHighlightKey?.matchesThread(item.interaction.highlightedChatLocation?.location) == true {
+                reallyHighlighted = true
             }
             if case let .peer(peerData) = item.content, let customMessageListData = peerData.customMessageListData {
                 if customMessageListData.isInTransparentContainer {
@@ -2190,38 +2335,56 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
         return reallyHighlighted
     }
     
+    var nextSideListHighlightKey: ChatListSideListHighlightKey?
+    private var separatorBaseIsHidden = false
+    
+    /// In the chat side list the separators above and below the highlighted plate are hidden; this row's separator is
+    /// the one between it and the next row.
+    func updateSideListSeparatorVisibility() {
+        guard let item = self.item, item.interaction.isSideListMode else {
+            return
+        }
+        var nextIsHighlighted = false
+        switch self.nextSideListHighlightKey {
+        case .allThreads:
+            nextIsHighlighted = item.interaction.highlightedChatLocation == nil
+        case let .location(location):
+            nextIsHighlighted = item.interaction.highlightedChatLocation?.location == location
+        case let .thread(peerId, threadId):
+            nextIsHighlighted = ChatListSideListHighlightKey.thread(peerId: peerId, threadId: threadId).matchesThread(item.interaction.highlightedChatLocation?.location)
+        case .none:
+            break
+        }
+        self.separatorNode.isHidden = self.separatorBaseIsHidden || self.reallyHighlighted || nextIsHighlighted
+    }
+    
     func updateIsHighlighted(transition: ContainedViewLayoutTransition) {
+        defer {
+            self.updateSideListSeparatorVisibility()
+        }
         let highlightProgress: CGFloat = self.item?.interaction.highlightedChatLocation?.progress ?? 1.0
-        transition.updateCornerRadius(node: self.highlightedBackgroundNode, cornerRadius: self.isRevealOptionsActive ? 26.0 : 0.0)
         self.updateSeparatorAlpha(transition: transition)
         
-        if self.reallyHighlighted {
-            if self.highlightedBackgroundNode.supernode == nil {
-                self.insertSubnode(self.highlightedBackgroundNode, aboveSubnode: self.separatorNode)
-                self.highlightedBackgroundNode.alpha = 0.0
-            }
-            self.highlightedBackgroundNode.layer.removeAllAnimations()
-            transition.updateAlpha(layer: self.highlightedBackgroundNode.layer, alpha: highlightProgress)
-            
+        var allowsRevealHighlight = true
+        if let item = self.item, case let .peer(peerData) = item.content, peerData.customMessageListData?.isInTransparentContainer == true {
+            allowsRevealHighlight = false
+        }
+        // Only a pre-existing selection participates in deselection progress.
+        // An unrelated row (or its swipe surface) must not acquire that highlight.
+        let baseAlpha = self.reallyHighlighted ? highlightProgress : (self.highlightedBackgroundNode.supernode != nil && !self.isRevealOptionsActive ? 1.0 - highlightProgress : 0.0)
+        self.updateRevealOptionsHighlightedBackgroundNode(self.highlightedBackgroundNode, isHighlighted: baseAlpha > 0, transition: transition, aboveNodes: [self.separatorNode, self.backgroundNode], highlightAlpha: baseAlpha, allowsRevealHighlight: allowsRevealHighlight)
+        if self.highlightedBackgroundNode.alpha > 0 && self.highlightedBackgroundNode.supernode != nil {
             if let compoundHighlightingNode = self.compoundHighlightingNode {
-                transition.updateAlpha(layer: compoundHighlightingNode.layer, alpha: 0.0)
+                transition.updateAlpha(layer: compoundHighlightingNode.layer, alpha: self.authorNode.alpha * (1.0 - self.highlightedBackgroundNode.alpha))
             }
             
             if let item = self.item, case .chatList = item.index {
                 self.onlineNode.setImage(PresentationResourcesChatList.recentStatusOnlineIcon(item.presentationData.theme, state: .highlighted, voiceChat: self.onlineIsVoiceChat), color: nil, transition: transition)
-                self.starView?.setOutlineColor(item.presentationData.theme.chatList.itemHighlightedBackgroundColor, transition: transition)
+                let baseColor = item.isPinned ? item.presentationData.theme.chatList.pinnedItemBackgroundColor : item.presentationData.theme.chatList.itemBackgroundColor
+                let highlightColor = self.highlightedBackgroundNode.backgroundColor ?? item.presentationData.theme.chatList.itemHighlightedBackgroundColor
+                self.starView?.setOutlineColor(highlightColor.mixedWith(baseColor, alpha: 1.0 - self.highlightedBackgroundNode.alpha), transition: transition)
             }
         } else {
-            if self.highlightedBackgroundNode.supernode != nil {
-                transition.updateAlpha(layer: self.highlightedBackgroundNode.layer, alpha: 1.0 - highlightProgress, completion: { [weak self] completed in
-                    if let strongSelf = self {
-                        if completed {
-                            strongSelf.highlightedBackgroundNode.removeFromSupernode()
-                        }
-                    }
-                })
-            }
-            
             if let compoundHighlightingNode = self.compoundHighlightingNode {
                 transition.updateAlpha(layer: compoundHighlightingNode.layer, alpha: self.authorNode.alpha)
             }
@@ -2258,7 +2421,8 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
     }
 
     private func updateSeparatorAlpha(transition: ContainedViewLayoutTransition, inlineNavigationProgress: CGFloat? = nil) {
-        let revealSeparatorAlpha: CGFloat = (self.isRevealOptionsActive || self.isNextRevealOptionsActive || self.nextHasActiveRevealControls) ? 0.0 : 1.0
+        let nextSeparatorAlpha: CGFloat = self.isNextRevealOptionsActive ? self.nextRevealOptionsSeparatorAlpha : (self.nextHasActiveRevealControls ? 0.0 : 1.0)
+        let revealSeparatorAlpha = min(self.revealOptionsSeparatorAlpha, nextSeparatorAlpha)
         if let inlineNavigationProgress = inlineNavigationProgress ?? self.item?.interaction.inlineNavigationLocation?.progress {
             transition.updateAlpha(node: self.separatorNode, alpha: (1.0 - inlineNavigationProgress) * revealSeparatorAlpha)
         } else {
@@ -2304,7 +2468,7 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
         let currentChatListQuoteSearchResult = self.cachedChatListQuoteSearchResult
         let currentCustomTextEntities = self.cachedCustomTextEntities
         
-        return { item, params, first, last, firstWithHeader, nextIsPinned, nextHasActiveRevealControls in
+        return { [weak self] item, params, first, last, firstWithHeader, nextIsPinned, nextHasActiveRevealControls in
             let titleFont = Font.semibold(floor(item.presentationData.fontSize.itemListBaseFontSize * 16.0 / 17.0))
             let textFont = Font.regular(floor(item.presentationData.fontSize.itemListBaseFontSize * 15.0 / 17.0))
             let italicTextFont = Font.italic(floor(item.presentationData.fontSize.itemListBaseFontSize * 15.0 / 17.0))
@@ -2582,11 +2746,14 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
             if case let .peer(peerData) = item.content, let customMessageListData = peerData.customMessageListData, customMessageListData.commandPrefix != nil {
                 avatarDiameter = 40.0
                 avatarLeftInset = 17.0 + avatarDiameter
+            } else if item.isSideListCompactPeerRow {
+                avatarDiameter = ChatListItem.sideListInlineAvatarDiameter
+                avatarLeftInset = ChatListItem.sideListContentInset
             } else if item.useCommunityViewLayout {
                 avatarLeftInset = avatarLeftEdgeInset + 8.0 + avatarDiameter
             } else {
                 if item.interaction.isInlineMode {
-                    avatarLeftInset = 12.0
+                    avatarLeftInset = item.interaction.isSideListMode ? ChatListItem.sideListContentInset : 12.0
                 } else if !useChatListLayout {
                     avatarLeftInset = 50.0
                 } else {
@@ -2651,6 +2818,8 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
             
             var attributedText: NSAttributedString
             var hasDraft = false
+            /// What VoiceOver reads in place of the last message while the row shows a draft.
+            var accessibilityDraftText: String?
             
             var inlineAuthorPrefix: String?
             var useInlineAuthorPrefix = false
@@ -2677,13 +2846,36 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                 }
             }
             
-            if useInlineAuthorPrefix {
+            // The side list's topic rows name the author before the preview, as in the design, not on a line above.
+            var sideListInlineAuthor = false
+            if item.interaction.isSideListMode, case let .chat(_, threadInfo, _, _, _, _, _, _, _) = contentData, threadInfo != nil {
+                sideListInlineAuthor = true
+                useInlineAuthorPrefix = true
+            }
+            
+            // The side list's "All Messages" row names the sub-chat its latest message is in, inline.
+            if case let .peer(peerData) = item.content, peerData.isSideListAllThreadsItem, let message = messages.last, let threadId = message.threadId {
+                let threadPeerId = EnginePeer.Id(threadId)
+                if threadPeerId == item.context.account.peerId {
+                    inlineAuthorPrefix = item.presentationData.strings.DialogList_MyNotes
+                } else if let threadPeer = message.peers[threadPeerId] {
+                    inlineAuthorPrefix = EnginePeer(threadPeer).compactDisplayTitle
+                }
+            } else if useInlineAuthorPrefix {
                 if case let .user(author) = messages.last?.author {
                     if author.id == item.context.account.peerId {
                         inlineAuthorPrefix = item.presentationData.strings.DialogList_You
                     } else if messages.last?.id.peerId.namespace != Namespaces.Peer.CloudUser && messages.last?.id.peerId.namespace != Namespaces.Peer.SecretChat {
                         inlineAuthorPrefix = EnginePeer.user(author).compactDisplayTitle
                     }
+                }
+            }
+            
+            var communitySource: (peer: EnginePeer, title: String, placement: ChatListCommunitySourcePlacement)?
+            if case let .peer(peerData) = item.content, let message = messages.last, let source = chatListCommunitySource(chatPeer: peerData.peer, message: message, hasTags: !itemTags.isEmpty) {
+                let sourceTitle = source.peer.displayTitle(strings: item.presentationData.strings, displayOrder: item.presentationData.nameDisplayOrder)
+                if !sourceTitle.isEmpty {
+                    communitySource = (source.peer, sourceTitle, source.placement)
                 }
             }
             
@@ -2738,7 +2930,8 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
 
                     var peerText: String?
                     if case .savedMessagesChats = item.chatListLocation {
-                        if let message = messages.last, let forwardInfo = message.forwardInfo, let author = forwardInfo.author {
+                        // Compact side-list rows show no author line, as in the design.
+                        if !item.isSideListCompactPeerRow, let message = messages.last, let forwardInfo = message.forwardInfo, let author = forwardInfo.author {
                             if author.id != itemPeer.chatMainPeer?.id {
                                 peerText = EnginePeer(author).displayTitle(strings: item.presentationData.strings, displayOrder: item.presentationData.nameDisplayOrder)
                             }
@@ -2801,7 +2994,10 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                     
                     let messageText: String
                     let foldedRichTextPreview: NSAttributedString?
-                    if let currentChatListText = currentChatListText, currentChatListText.0 == text {
+                    if let richTextPreview {
+                        messageText = richTextPreview.string
+                        chatListText = nil
+                    } else if let currentChatListText = currentChatListText, currentChatListText.0 == text {
                         messageText = currentChatListText.1
                         chatListText = currentChatListText
                     } else {
@@ -2815,8 +3011,7 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                         chatListText = (text, messageText)
                     }
                     if let richTextPreview {
-                        let foldedPreview = foldLineBreaks(richTextPreview)
-                        foldedRichTextPreview = foldedPreview.string == messageText ? foldedPreview : nil
+                        foldedRichTextPreview = richTextPreview
                     } else {
                         foldedRichTextPreview = nil
                     }
@@ -2831,8 +3026,10 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                         case .video:
                             attributedText = NSAttributedString(string: item.presentationData.strings.Message_VideoMessage, font: textFont, textColor: theme.messageTextColor)
                         }
+                        accessibilityDraftText = "\(item.presentationData.strings.DialogList_Draft)\n\(attributedText.string)"
                     } else if inlineAuthorPrefix == nil, let draftState = draftState {
                         hasDraft = true
+                        accessibilityDraftText = "\(item.presentationData.strings.DialogList_Draft)\n\(draftState.text)"
                         let draftText = stringWithAppliedEntities(draftState.text, entities: draftState.entities, baseColor: theme.messageTextColor, linkColor: theme.messageTextColor, baseFont: textFont, linkFont: textFont, boldFont: textFont, italicFont: textFont, boldItalicFont: textFont, fixedFont: textFont, blockQuoteFont: textFont, message: nil)
                         
                         if !itemTags.isEmpty {
@@ -2853,16 +3050,7 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                             authorAttributedString = NSAttributedString(string: peerText, font: textFont, textColor: theme.authorNameColor)
                         }
                                        
-                        var entities = entities.filter { entity in
-                            switch entity.type {
-                            case .Spoiler, .CustomEmoji, .FormattedDate:
-                                return true
-                            case .Strikethrough, .Underline, .Italic, .Bold:
-                                return true
-                            default:
-                                return false
-                            }
-                        }
+                        var entities = chatListPreviewTextEntities(entities)
                         if let _ = message.media.first(where: { $0 is TelegramMediaPoll }) {
                             entities = []
                         }
@@ -2890,8 +3078,14 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                         }
                         
                         let messageString: NSAttributedString
-                        if !messageText.isEmpty && entities.count > 0 {
-                            let appliedString = stringWithAppliedEntities(messageText, entities: entities, strings: item.presentationData.strings, dateTimeFormat: item.presentationData.dateTimeFormat, baseColor: theme.messageTextColor, linkColor: theme.messageTextColor, baseFont: textFont, linkFont: textFont, boldFont: textFont, italicFont: italicTextFont, boldItalicFont: textFont, fixedFont: textFont, blockQuoteFont: textFont, underlineLinks: false, message: message._asMessage())
+                        if let foldedRichTextPreview {
+                            let spoilerRanges = (customTextEntities?.textEntities ?? []).compactMap { entity -> NSRange? in
+                                guard case .Spoiler = entity.type else { return nil }
+                                return NSRange(location: entity.range.lowerBound, length: entity.range.count)
+                            }
+                            messageString = chatListRichTextPreview(foldedRichTextPreview, font: textFont, italicFont: italicTextFont, textColor: theme.messageTextColor, additionalSpoilers: spoilerRanges)
+                        } else if !messageText.isEmpty && entities.count > 0 {
+                            let appliedString = chatListPreviewAttributedString(messageText, entities: entities, strings: item.presentationData.strings, dateTimeFormat: item.presentationData.dateTimeFormat, font: textFont, italicFont: italicTextFont, textColor: theme.messageTextColor, message: message._asMessage())
                             messageString = foldLineBreaks(appliedString)
                         } else if spoilers != nil || customEmojiRanges != nil {
                             let mutableString = NSMutableAttributedString(string: messageText, font: textFont, textColor: theme.messageTextColor)
@@ -2918,19 +3112,29 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                                 }
                             }
                             messageString = mutableString
-                        } else if let foldedRichTextPreview {
-                            let mutableString = NSMutableAttributedString(attributedString: foldedRichTextPreview)
-                            mutableString.addAttributes([
-                                .font: textFont,
-                                .foregroundColor: theme.messageTextColor
-                            ], range: NSRange(location: 0, length: mutableString.length))
-                            messageString = mutableString
                         } else {
                             messageString = NSAttributedString(string: messageText, font: textFont, textColor: theme.messageTextColor)
                         }
-                        if let inlineAuthorPrefix = inlineAuthorPrefix {
-                            composedString = NSMutableAttributedString()
-                            composedString.append(NSAttributedString(string: "\(inlineAuthorPrefix): ", font: textFont, textColor: theme.titleColor))
+                        var previewPrefix: NSAttributedString?
+                        if let inlineAuthorPrefix {
+                            previewPrefix = NSAttributedString(string: "\(inlineAuthorPrefix): ", font: textFont, textColor: theme.titleColor)
+                        } else if sideListInlineAuthor, !hideAuthor, !authorIsCurrentChat, let peerText {
+                            // An author that is not a user (a channel posting in the group) keeps its name too.
+                            previewPrefix = NSAttributedString(string: "\(peerText): ", font: textFont, textColor: theme.titleColor)
+                        }
+                        if let communitySource, case .previewPrefix = communitySource.placement {
+                            let communityPrefix = NSMutableAttributedString()
+                            let authorTitle = (hideAuthor || authorIsCurrentChat) ? nil : peerText
+                            if let author = chatListCommunityPreviewAuthor(authorTitle: authorTitle, authorId: message.author?.id, sourcePeerId: communitySource.peer.id) {
+                                communityPrefix.append(NSAttributedString(string: author, font: textFont, textColor: theme.titleColor))
+                                // The author line draws this arrow as an image, tinted like this.
+                                communityPrefix.append(NSAttributedString(string: " \u{203A} ", font: textFont, textColor: theme.messageTextColor))
+                            }
+                            communityPrefix.append(NSAttributedString(string: "\(communitySource.title): ", font: textFont, textColor: theme.titleColor))
+                            previewPrefix = communityPrefix
+                        }
+                        if let previewPrefix {
+                            composedString = NSMutableAttributedString(attributedString: previewPrefix)
                             composedString.append(messageString)
                         } else {
                             composedString = NSMutableAttributedString(attributedString: messageString)
@@ -3305,7 +3509,9 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
             
             switch contentData {
                 case let .chat(itemPeer, threadInfo, _, _, _, _, _, _, _):
-                    if case let .peer(peerData) = item.content, let customMessageListData = peerData.customMessageListData {
+                    if case let .peer(peerData) = item.content, peerData.isSideListAllThreadsItem {
+                        titleAttributedString = NSAttributedString(string: item.presentationData.strings.Chat_SideList_AllMessages, font: titleFont, textColor: theme.titleColor)
+                    } else if case let .peer(peerData) = item.content, let customMessageListData = peerData.customMessageListData {
                         if customMessageListData.commandPrefix != nil {
                             titleAttributedString = nil
                         } else {
@@ -3468,7 +3674,26 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
             }
 
             if !isPeerGroup {
-                if hasUnseenMentions {
+                let hasUnreadIncomingGramTransfer = messages.last.map { message in
+                    guard let combinedReadState, combinedReadState.count > 0, !combinedReadState.isIncomingMessageIndexRead(message.index) else {
+                        return false
+                    }
+                    return message.effectivelyIncoming(account.peerId) && message.media.contains(where: { media in
+                        if let media = media as? TelegramMediaAction, case .gramTransfer = media.action {
+                            return true
+                        }
+                        return false
+                    })
+                } ?? false
+                if hasUnreadIncomingGramTransfer {
+                    currentMentionBadgeImage = PresentationResourcesChatList.badgeBackgroundGram(item.presentationData.theme, diameter: badgeDiameter, inactive: isRemovedFromTotalUnreadCount)
+                    mentionBadgeContent = .mention
+                    if unreadCount.count == 1 {
+                        badgeContent = .none
+                        currentBadgeBackgroundImage = nil
+                        currentAvatarBadgeBackgroundImage = nil
+                    }
+                } else if hasUnseenMentions {
                     if case .chatList(.archive) = item.chatListLocation {
                         currentMentionBadgeImage = PresentationResourcesChatList.badgeBackgroundInactiveMention(item.presentationData.theme, diameter: badgeDiameter)
                     } else {
@@ -3625,28 +3850,34 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                     }
                 }
             }
+            if case let .peer(peerData) = item.content, peerData.isSideListAllThreadsItem {
+                // "All Messages" is not the peer's own title: no status or verification marks.
+                currentCredibilityIconContent = nil
+                currentVerifiedIconContent = nil
+                currentStatusIconContent = nil
+            }
             if let currentSecretIconImage = currentSecretIconImage {
                 titleIconsWidth += currentSecretIconImage.size.width + 2.0
             }
             
             var titleLeftOffset: CGFloat = 0.0
             if let currentVerifiedIconContent {
-                if titleLeftOffset.isZero, case .animation = currentVerifiedIconContent {
+                if case .animation = currentVerifiedIconContent {
                     titleLeftOffset += 19.0
-                }
-                
-                if titleIconsWidth.isZero {
-                    titleIconsWidth += 4.0
                 } else {
-                    titleIconsWidth += 2.0
-                }
-                switch currentVerifiedIconContent {
-                case let .text(_, string):
-                    let textString = NSAttributedString(string: string, font: Font.bold(10.0), textColor: .black, paragraphAlignment: .center)
-                    let stringRect = textString.boundingRect(with: CGSize(width: 100.0, height: 16.0), options: .usesLineFragmentOrigin, context: nil)
-                    titleIconsWidth += floor(stringRect.width) + 11.0
-                default:
-                    titleIconsWidth += 8.0
+                    if titleIconsWidth.isZero {
+                        titleIconsWidth += 4.0
+                    } else {
+                        titleIconsWidth += 2.0
+                    }
+                    switch currentVerifiedIconContent {
+                    case let .text(_, string):
+                        let textString = NSAttributedString(string: string, font: Font.bold(10.0), textColor: .black, paragraphAlignment: .center)
+                        let stringRect = textString.boundingRect(with: CGSize(width: 100.0, height: 16.0), options: .usesLineFragmentOrigin, context: nil)
+                        titleIconsWidth += floor(stringRect.width) + 11.0
+                    default:
+                        titleIconsWidth += 8.0
+                    }
                 }
             }
             
@@ -3678,13 +3909,13 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                     let stringRect = textString.boundingRect(with: CGSize(width: 100.0, height: 16.0), options: .usesLineFragmentOrigin, context: nil)
                     titleIconsWidth += floor(stringRect.width) + 11.0
                 default:
-                    titleIconsWidth += 8.0
+                    titleIconsWidth += 16.0
                 }
             }
             
             let layoutOffset: CGFloat = 0.0
             
-            let rawContentWidth = params.width - leftInset - params.rightInset - 18.0 - editingOffset
+            let rawContentWidth = params.width - leftInset - params.rightInset - 18.0 - editingOffset - (item.interaction.isSideListMode ? ChatListItem.sideListContentInset - 12.0 : 0.0)
             
             let (dateLayout, dateApply) = dateLayout(TextNodeLayoutArguments(attributedString: dateAttributedString, backgroundColor: nil, maximumNumberOfLines: 1, truncationType: .end, constrainedSize: CGSize(width: rawContentWidth, height: CGFloat.greatestFiniteMagnitude), alignment: .natural, cutout: nil, insets: UIEdgeInsets()))
             
@@ -3693,7 +3924,8 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
             let (mentionBadgeLayout, mentionBadgeApply) = mentionBadgeLayout(CGSize(width: rawContentWidth, height: CGFloat.greatestFiniteMagnitude), badgeDiameter, badgeFont, currentMentionBadgeImage, mentionBadgeContent)
             
             var actionButtonTitleNodeLayoutAndApply: (TextNodeLayout, () -> TextNode)?
-            if !item.editing, case .none = badgeContent, case .none = mentionBadgeContent, case let .chat(itemPeer) = contentPeer, case let .user(user) = itemPeer.chatMainPeer, let botInfo = user.botInfo, botInfo.flags.contains(.hasWebApp) {
+            // The side list switches the open chat to a row; a bot's mini app button has no place there.
+            if !item.editing, !item.interaction.isSideListMode, case .none = badgeContent, case .none = mentionBadgeContent, case let .chat(itemPeer) = contentPeer, case let .user(user) = itemPeer.chatMainPeer, let botInfo = user.botInfo, botInfo.flags.contains(.hasWebApp) {
                 actionButtonTitleNodeLayoutAndApply = makeActionButtonTitleNodeLayout(TextNodeLayoutArguments(attributedString: NSAttributedString(string: item.presentationData.strings.ChatList_InlineButtonOpenApp, font: Font.semibold(floor(item.presentationData.fontSize.itemListBaseFontSize * 15.0 / 17.0)), textColor: theme.unreadBadgeActiveTextColor), backgroundColor: nil, maximumNumberOfLines: 1, truncationType: .end, constrainedSize: CGSize(width: rawContentWidth, height: CGFloat.greatestFiniteMagnitude), alignment: .natural, cutout: nil, insets: UIEdgeInsets()))
             }
             
@@ -3727,7 +3959,7 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
             }
             badgeSize = max(badgeSize, reorderInset)
             
-            if !itemTags.isEmpty {
+            if !itemTags.isEmpty || (sideListInlineAuthor && !hasDraft) {
                 authorAttributedString = nil
             }
             
@@ -3794,12 +4026,9 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                 effectiveAuthorTitle = nil
             }
             
-            if case let .peer(peerData) = item.content, case .community = peerData.peer.peer, let message = messages.last, let sourcePeer = communitySourcePeer(peerData: peerData, message: message) {
-                let sourceTitle = sourcePeer.displayTitle(strings: item.presentationData.strings, displayOrder: item.presentationData.nameDisplayOrder)
-                if !sourceTitle.isEmpty {
-                    forumThreads.append((id: sourcePeer.id.toInt64(), threadPeer: nil, title: NSAttributedString(string: sourceTitle, font: textFont, textColor: theme.titleColor), iconId: nil, iconColor: nil))
-                    authorTopicArrowColor = theme.messageTextColor
-                }
+            if let communitySource, case .authorLine = communitySource.placement {
+                forumThreads.append((id: communitySource.peer.id.toInt64(), threadPeer: nil, title: NSAttributedString(string: communitySource.title, font: textFont, textColor: theme.titleColor), iconId: nil, iconColor: nil))
+                authorTopicArrowColor = theme.messageTextColor
             }
 
             let (authorLayout, authorApply) = authorLayout(item.context, rawContentWidth - badgeSize, item.presentationData.theme, effectiveAuthorTitle, forumThreads, authorTopicArrowColor)
@@ -3860,7 +4089,7 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                 titleAttributedString = NSAttributedString(string: " ", font: titleFont, textColor: theme.titleColor)
             }
                         
-            var titleRectWidth = rawContentWidth - dateLayout.size.width - 10.0 - statusWidth - titleIconsWidth
+            var titleRectWidth = rawContentWidth - dateLayout.size.width - 10.0 - statusWidth - titleIconsWidth - titleLeftOffset
             var titleCutout: TextNodeCutout?
             if !titleLeftCutout.isZero {
                 titleCutout = TextNodeCutout(topLeft: CGSize(width: titleLeftCutout, height: 10.0), topRight: nil, bottomRight: nil)
@@ -3898,7 +4127,8 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
             var onlineIsVoiceChat = false
             
             var isPinned = false
-            if case let .chatList(index) = item.index {
+            if case let .peer(peerData) = item.content, peerData.isSideListAllThreadsItem {
+            } else if case let .chatList(index) = item.index {
                 isPinned = index.pinningIndex != nil
             } else if case let .forum(pinnedIndex, _, _, _, _) = item.index {
                 if case .index = pinnedIndex {
@@ -3979,7 +4209,7 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                                 if customMessageListData.commandPrefix != nil {
                                     peerRevealOptions = [
                                         ItemListRevealOption(key: RevealOptionKey.edit.rawValue, title: item.presentationData.strings.ChatList_ItemMenuEdit, icon: .none, color: item.presentationData.theme.list.itemDisclosureActions.neutral2.fillColor, iconColor: item.presentationData.theme.list.itemDisclosureActions.neutral2.foregroundColor, textColor: item.presentationData.theme.chatList.dateTextColor),
-                                        ItemListRevealOption(key: RevealOptionKey.delete.rawValue, title: item.presentationData.strings.ChatList_ItemMenuDelete, icon: .none, color: item.presentationData.theme.list.itemDisclosureActions.destructive.fillColor, iconColor: item.presentationData.theme.list.itemDisclosureActions.destructive.foregroundColor, textColor: item.presentationData.theme.chatList.dateTextColor)
+                                        ItemListRevealOption(key: RevealOptionKey.delete.rawValue, title: item.presentationData.strings.ChatList_ItemMenuDelete, icon: .none, color: item.presentationData.theme.list.itemDisclosureActions.destructive.fillColor, iconColor: item.presentationData.theme.list.itemDisclosureActions.destructive.foregroundColor, textColor: item.presentationData.theme.chatList.dateTextColor, isDestructive: true)
                                     ]
                                 } else {
                                     peerRevealOptions = []
@@ -3988,7 +4218,7 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                                 if case let .peer(peerData) = item.content, case .community = peerData.peer.peer {
                                     peerRevealOptions = [
                                         ItemListRevealOption(key: isMuted ? RevealOptionKey.unmute.rawValue : RevealOptionKey.mute.rawValue, title: isMuted ? item.presentationData.strings.ChatList_Unmute : item.presentationData.strings.ChatList_Mute, icon: isMuted ? unmuteIcon : muteIcon, color: item.presentationData.theme.list.itemDisclosureActions.neutral2.fillColor, iconColor: item.presentationData.theme.list.itemDisclosureActions.neutral2.foregroundColor, textColor: item.presentationData.theme.chatList.dateTextColor),
-                                        ItemListRevealOption(key: RevealOptionKey.ungroup.rawValue, title: item.presentationData.strings.ChatList_Context_Ungroup, icon: ungroupCommunityIcon, color: item.presentationData.theme.list.itemDisclosureActions.destructive.fillColor, iconColor: item.presentationData.theme.list.itemDisclosureActions.destructive.foregroundColor, textColor: item.presentationData.theme.chatList.dateTextColor)
+                                        ItemListRevealOption(key: RevealOptionKey.ungroup.rawValue, title: item.presentationData.strings.ChatList_Context_Ungroup, icon: ungroupCommunityIcon, color: item.presentationData.theme.list.itemDisclosureActions.destructive.fillColor, iconColor: item.presentationData.theme.list.itemDisclosureActions.destructive.foregroundColor, textColor: item.presentationData.theme.chatList.dateTextColor, isDestructive: true)
                                     ]
                                 } else {
                                     peerRevealOptions = revealOptions(strings: item.presentationData.strings, theme: item.presentationData.theme, isPinned: isPinned, isMuted: !isAccountPeer ? isMuted : nil, location: item.chatListLocation, peerId: renderedPeer.peerId, accountPeerId: item.context.account.peerId, canDelete: true, isEditing: item.editing, filterData: item.filterData)
@@ -4024,9 +4254,9 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                                 peerRevealOptions.append(ItemListRevealOption(key: isMuted ? RevealOptionKey.unmute.rawValue : RevealOptionKey.mute.rawValue, title: isMuted ? item.presentationData.strings.ChatList_Unmute : item.presentationData.strings.ChatList_Mute, icon: isMuted ? unmuteIcon : muteIcon, color: item.presentationData.theme.list.itemDisclosureActions.neutral2.fillColor, iconColor: item.presentationData.theme.list.itemDisclosureActions.neutral2.foregroundColor, textColor: item.presentationData.theme.chatList.dateTextColor))
                             }
                             if actions.contains(.delete) {
-                                peerRevealOptions.append(ItemListRevealOption(key: RevealOptionKey.delete.rawValue, title: item.presentationData.strings.Common_Delete, icon: deleteIcon, color: item.presentationData.theme.list.itemDisclosureActions.destructive.fillColor, iconColor: item.presentationData.theme.list.itemDisclosureActions.destructive.foregroundColor, textColor: item.presentationData.theme.chatList.dateTextColor))
+                                peerRevealOptions.append(ItemListRevealOption(key: RevealOptionKey.delete.rawValue, title: item.presentationData.strings.Common_Delete, icon: deleteIcon, color: item.presentationData.theme.list.itemDisclosureActions.destructive.fillColor, iconColor: item.presentationData.theme.list.itemDisclosureActions.destructive.foregroundColor, textColor: item.presentationData.theme.chatList.dateTextColor, isDestructive: true))
                             } else if actions.contains(.remove) {
-                                peerRevealOptions.append(ItemListRevealOption(key: RevealOptionKey.delete.rawValue, title: item.presentationData.strings.ChatList_Remove, icon: deleteIcon, color: item.presentationData.theme.list.itemDisclosureActions.destructive.fillColor, iconColor: item.presentationData.theme.list.itemDisclosureActions.destructive.foregroundColor, textColor: item.presentationData.theme.chatList.dateTextColor))
+                                peerRevealOptions.append(ItemListRevealOption(key: RevealOptionKey.delete.rawValue, title: item.presentationData.strings.ChatList_Remove, icon: deleteIcon, color: item.presentationData.theme.list.itemDisclosureActions.destructive.fillColor, iconColor: item.presentationData.theme.list.itemDisclosureActions.destructive.foregroundColor, textColor: item.presentationData.theme.chatList.dateTextColor, isDestructive: true))
                             }
                         }
                     } else {
@@ -4058,6 +4288,10 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
             if case let .peer(peerData) = item.content, let customMessageListData = peerData.customMessageListData, customMessageListData.commandPrefix != nil {
                 itemHeight += measureLayout.size.height * 2.0
                 itemHeight += 20.0
+            } else if item.isSideListCompactPeerRow || (item.interaction.isSideListMode && item.interaction.isInlineMode) {
+                // The side list's rows fit their preview (one or two lines), as in the design.
+                let textLineCount = CGFloat(max(1, min(2, textLayout.numberOfLines)))
+                itemHeight = titleLayout.size.height + measureLayout.size.height * textLineCount + 24.0
             } else {
                 itemHeight += titleLayout.size.height
                 itemHeight += measureLayout.size.height * 3.0
@@ -4065,7 +4299,9 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                 itemHeight += authorSpacing
             }
                         
-            let rawContentRect = CGRect(origin: CGPoint(x: 2.0, y: layoutOffset + floor(item.presentationData.fontSize.itemListBaseFontSize * 8.0 / 17.0)), size: CGSize(width: rawContentWidth, height: itemHeight - 12.0 - 9.0))
+            // A side-list row centers its title and preview between the paddings.
+            let sideListContentOffset: CGFloat = (item.isSideListCompactPeerRow || (item.interaction.isSideListMode && item.interaction.isInlineMode)) ? 4.0 : 0.0
+            let rawContentRect = CGRect(origin: CGPoint(x: 2.0, y: layoutOffset + floor(item.presentationData.fontSize.itemListBaseFontSize * 8.0 / 17.0) + sideListContentOffset), size: CGSize(width: rawContentWidth, height: itemHeight - 12.0 - 9.0))
             
             let insets = ChatListItemNode.insets(first: first, last: last, firstWithHeader: firstWithHeader)
             var heightOffset: CGFloat = 0.0
@@ -4074,12 +4310,14 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
             }
             let layout = ListViewItemNodeLayout(contentSize: CGSize(width: params.width, height: max(0.0, itemHeight + heightOffset)), insets: insets)
             
-            var customActions: [ChatListItemAccessibilityCustomAction] = []
+            // The swipe options VoiceOver offers as custom actions; the action objects are made in apply, only when
+            // these change.
+            var customActionOptions: [(name: String, key: Int32)] = []
             for option in peerLeftRevealOptions {
-                customActions.append(ChatListItemAccessibilityCustomAction(name: option.title, target: nil, selector: #selector(ChatListItemNode.performLocalAccessibilityCustomAction(_:)), key: option.key))
+                customActionOptions.append((option.title, option.key))
             }
             for option in peerRevealOptions {
-                customActions.append(ChatListItemAccessibilityCustomAction(name: option.title, target: nil, selector: #selector(ChatListItemNode.performLocalAccessibilityCustomAction(_:)), key: option.key))
+                customActionOptions.append((option.title, option.key))
             }
             
             return (layout, { [weak self] synchronousLoads, animated in
@@ -4219,7 +4457,11 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                     
                     let contentRect = rawContentRect.offsetBy(dx: editingOffset + leftInset + revealOffset, dy: 0.0)
                     
-                    let avatarFrame = CGRect(origin: CGPoint(x: leftInset - avatarLeftInset + editingOffset + avatarLeftEdgeInset + revealOffset, y: floor((itemHeight - avatarDiameter) / 2.0)), size: CGSize(width: avatarDiameter, height: avatarDiameter))
+                    var avatarFrame = CGRect(origin: CGPoint(x: leftInset - avatarLeftInset + editingOffset + avatarLeftEdgeInset + revealOffset, y: floor((itemHeight - avatarDiameter) / 2.0)), size: CGSize(width: avatarDiameter, height: avatarDiameter))
+                    if item.isSideListCompactPeerRow {
+                        // Inline before the title, where a topic's icon sits in the inline list.
+                        avatarFrame = CGRect(origin: CGPoint(x: contentRect.origin.x, y: contentRect.origin.y + 1.0), size: CGSize(width: avatarDiameter, height: avatarDiameter))
+                    }
                     var avatarScaleOffset: CGFloat = 0.0
                     var avatarScale: CGFloat = 1.0
                     if let inlineNavigationLocation = item.interaction.inlineNavigationLocation {
@@ -4232,7 +4474,7 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                     
                     transition.updateFrame(node: strongSelf.avatarContainerNode, frame: avatarFrame)
 
-                    if useChatListLayout && isCommunity && avatarContentImageSpec == nil, let shadowImage = UIImage(bundleImageName: "Components/CommunityShadow") {
+                    if useChatListLayout && isCommunity && avatarContentImageSpec == nil && !item.isSideListCompactPeerRow, let shadowImage = UIImage(bundleImageName: "Components/CommunityShadow") {
                         strongSelf.communityAvatarShadowNode.isHidden = false
                         strongSelf.communityAvatarShadowNode.image = generateTintedImage(image: shadowImage, color: theme.titleColor.withAlphaComponent(0.9))
 
@@ -4245,7 +4487,7 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                         strongSelf.communityAvatarShadowNode.isHidden = true
                     }
 
-                    if useChatListLayout && displayCommunityAvatarBadge && avatarContentImageSpec == nil && !item.useCommunityViewLayout {
+                    if useChatListLayout && displayCommunityAvatarBadge && avatarContentImageSpec == nil && !item.useCommunityViewLayout && !item.isSideListCompactPeerRow {
                         let communityAvatarBadgeBackgroundView: GlassBackgroundView
                         let communityAvatarBadgeIconView: GlassBackgroundView.ContentImageView
                         if let currentBackgroundView = strongSelf.communityAvatarBadgeBackgroundView, let currentIconView = strongSelf.communityAvatarBadgeIconView {
@@ -5322,7 +5564,8 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                         
                         let iconOrigin: CGFloat
                         if case .animation = currentVerifiedIconContent {
-                            iconOrigin = contentRect.origin.x
+                            // In a compact side-list row the inline avatar holds the title's left cutout.
+                            iconOrigin = contentRect.origin.x + (item.isSideListCompactPeerRow ? 22.0 : 0.0)
                         } else {
                             iconOrigin = nextTitleIconOrigin
                         }
@@ -5399,18 +5642,23 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                     let leftSeparatorInset: CGFloat
                     let rightSeparatorInset: CGFloat
                     let hideCommunitySeparator = item.useCommunityViewLayout && last
+                    // Separators stay out of the side safe areas. The content-aligned ones end 16pt
+                    // before the right inset; the full-width ones run to the edge unless there is a
+                    // right inset, in which case they end where the content-aligned ones do.
+                    let contentRightSeparatorInset: CGFloat = params.rightInset + 16.0
+                    let fullWidthRightSeparatorInset: CGFloat = params.rightInset.isZero ? 0.0 : contentRightSeparatorInset
                     if case let .groupReference(groupReferenceData) = item.content, groupReferenceData.hiddenByDefault {
-                        leftSeparatorInset = 0.0
-                        rightSeparatorInset = 0.0
+                        leftSeparatorInset = params.leftInset
+                        rightSeparatorInset = fullWidthRightSeparatorInset
                     } else if item.useCommunityViewLayout {
                         leftSeparatorInset = editingOffset + leftInset + rawContentRect.origin.x
-                        rightSeparatorInset = 16.0
+                        rightSeparatorInset = contentRightSeparatorInset
                     } else if (!nextIsPinned && isPinned) || last {
-                        leftSeparatorInset = 0.0
-                        rightSeparatorInset = 0.0
+                        leftSeparatorInset = params.leftInset
+                        rightSeparatorInset = fullWidthRightSeparatorInset
                     } else {
                         leftSeparatorInset = editingOffset + leftInset + rawContentRect.origin.x
-                        rightSeparatorInset = 16.0
+                        rightSeparatorInset = contentRightSeparatorInset
                     }
                     
                     transition.updateFrame(node: strongSelf.separatorNode, frame: CGRect(origin: CGPoint(x: leftSeparatorInset, y: layoutOffset + itemHeight - separatorHeight), size: CGSize(width: params.width - leftSeparatorInset - rightSeparatorInset, height: separatorHeight)))
@@ -5426,6 +5674,12 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                             strongSelf.separatorNode.isHidden = true
                         }
                     }
+                    if last && item.interaction.isSideListMode {
+                        // The side list ends without a closing separator.
+                        strongSelf.separatorNode.isHidden = true
+                    }
+                    strongSelf.separatorBaseIsHidden = strongSelf.separatorNode.isHidden
+                    strongSelf.updateSideListSeparatorVisibility()
                     
                     transition.updateFrame(node: strongSelf.backgroundNode, frame: CGRect(origin: CGPoint(x: 0.0, y: 0.0), size: CGSize(width: layout.contentSize.width, height: itemHeight)))
                     let backgroundColor: UIColor
@@ -5463,10 +5717,20 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                         transition.updateAlpha(node: strongSelf.backgroundNode, alpha: 1.0)
                     }
                     
-                    strongSelf.highlightedBackgroundNode.backgroundColor = highlightedBackgroundColor
+                    // The side list's plate matches its search field.
+                    strongSelf.highlightedBackgroundNode.backgroundColor = item.interaction.isSideListMode ? item.presentationData.theme.rootController.navigationSearchBar.inputFillColor : highlightedBackgroundColor
                     let topNegativeInset: CGFloat = 0.0
-                    strongSelf.highlightedBackgroundNode.frame = CGRect(origin: CGPoint(x: strongSelf.revealOffset, y: layoutOffset - separatorHeight - topNegativeInset), size: CGSize(width: layout.contentSize.width, height: layout.contentSize.height + separatorHeight + topNegativeInset))
-                    transition.updateCornerRadius(node: strongSelf.highlightedBackgroundNode, cornerRadius: strongSelf.isRevealOptionsActive ? 26.0 : 0.0)
+                    var highlightedBackgroundFrame = CGRect(origin: CGPoint(x: params.leftInset, y: layoutOffset - separatorHeight - topNegativeInset), size: CGSize(width: layout.contentSize.width - params.leftInset - params.rightInset, height: layout.contentSize.height + separatorHeight + topNegativeInset))
+                    if item.interaction.isSideListMode {
+                        // The side list highlights a row as an inset rounded plate. Its search's list is inset itself.
+                        if !item.interaction.isSearchMode {
+                            highlightedBackgroundFrame = highlightedBackgroundFrame.insetBy(dx: 8.0, dy: 0.0)
+                        }
+                        strongSelf.revealOptionsHighlightedBackgroundRestingCornerRadius = 24.0
+                    } else {
+                        strongSelf.revealOptionsHighlightedBackgroundRestingCornerRadius = 0.0
+                    }
+                    strongSelf.updateRevealOptionsHighlightedBackgroundFrame(strongSelf.highlightedBackgroundNode, frame: highlightedBackgroundFrame, aboveNodes: [strongSelf.separatorNode, strongSelf.backgroundNode])
                     
                     if let peerPresence = peerPresence {
                         strongSelf.peerPresenceManager?.reset(presence: EnginePeer.Presence(status: peerPresence.status, lastActivity: 0), isOnline: online)
@@ -5483,15 +5747,64 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                         strongSelf.setRevealOptionsOpened(item.hasActiveRevealControls, animated: true)
                     }
                     
+                    strongSelf.accessibilityIsPinned = item.isPinned && promoInfo == nil
+                    strongSelf.accessibilityIsMuted = isMuted
+                    // The text the date slot draws: no date on archive rows, the Ad/PSA label on promo rows.
+                    let displayedDateText = dateAttributedString?.string ?? ""
+                    strongSelf.accessibilityDateText = displayedDateText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : displayedDateText
+                    strongSelf.accessibilityDraftText = accessibilityDraftText
+                    strongSelf.accessibilityActivityText = strongSelf.inputActivitiesNode.alpha.isZero ? nil : strongSelf.inputActivitiesNode.displayedText
+                    switch currentCredibilityIconContent {
+                    case .verified:
+                        strongSelf.accessibilityCredibilityText = item.presentationData.strings.VoiceOver_Common_Verified
+                    case .premium:
+                        strongSelf.accessibilityCredibilityText = item.presentationData.strings.Premium_Premium
+                    case let .text(_, string):
+                        strongSelf.accessibilityCredibilityText = string == item.presentationData.strings.Message_FakeAccount.uppercased() ? item.presentationData.strings.Message_FakeAccount : item.presentationData.strings.Message_ScamAccount
+                    default:
+                        strongSelf.accessibilityCredibilityText = nil
+                    }
                     strongSelf.view.accessibilityLabel = strongSelf.accessibilityLabel
                     strongSelf.view.accessibilityValue = strongSelf.accessibilityValue
-                    
-                    if !customActions.isEmpty {
-                        strongSelf.view.accessibilityCustomActions = customActions.map({ action -> UIAccessibilityCustomAction in
-                            return ChatListItemAccessibilityCustomAction(name: action.name, target: strongSelf, selector: #selector(strongSelf.performLocalAccessibilityCustomAction(_:)), key: action.key)
-                        })
+                    if item.editing {
+                        strongSelf.view.accessibilityTraits = item.selected ? [.button, .selected] : [.button]
                     } else {
-                        strongSelf.view.accessibilityCustomActions = nil
+                        strongSelf.view.accessibilityTraits = [.button]
+                    }
+                    
+                    let hasOpenAppAction = actionButtonTitleNodeLayoutAndApply != nil
+                    let hasMoreAction = strongSelf.contextContainer.isGestureEnabled
+                    var accessibilityCustomActionsKey: [String] = customActionOptions.map { "\($0.key):\($0.name)" }
+                    if hasOpenAppAction {
+                        accessibilityCustomActionsKey.append("open:\(item.presentationData.strings.ChatList_InlineButtonOpenApp)")
+                    }
+                    if hasMoreAction {
+                        accessibilityCustomActionsKey.append("more:\(item.presentationData.strings.Common_More)")
+                    }
+                    if strongSelf.accessibilityCustomActionsKey != accessibilityCustomActionsKey {
+                        strongSelf.accessibilityCustomActionsKey = accessibilityCustomActionsKey
+                        var accessibilityCustomActions: [UIAccessibilityCustomAction] = customActionOptions.map({ option -> UIAccessibilityCustomAction in
+                            return ChatListItemAccessibilityCustomAction(name: option.name, target: strongSelf, selector: #selector(strongSelf.performLocalAccessibilityCustomAction(_:)), key: option.key)
+                        })
+                        if hasOpenAppAction {
+                            // The inline OPEN button of a bot with a web app: the same path as its tap.
+                            accessibilityCustomActions.insert(UIAccessibilityCustomAction(name: item.presentationData.strings.ChatList_InlineButtonOpenApp, actionHandler: { [weak strongSelf] _ in
+                                strongSelf?.actionButtonPressed()
+                                return true
+                            }), at: 0)
+                        }
+                        if hasMoreAction {
+                            // The long-press menu (pin, mute, ...), as `secondaryAction` opens it: no gesture, so the menu
+                            // shows without peeking into the chat. Off in edit mode, as the gesture is (`setupItem`).
+                            accessibilityCustomActions.append(UIAccessibilityCustomAction(name: item.presentationData.strings.Common_More, actionHandler: { [weak strongSelf] _ in
+                                guard let strongSelf, let item = strongSelf.item, let activateChatPreview = item.interaction.activateChatPreview else {
+                                    return false
+                                }
+                                activateChatPreview(item, nil, strongSelf.contextContainer, nil, nil)
+                                return true
+                            }))
+                        }
+                        strongSelf.view.accessibilityCustomActions = accessibilityCustomActions.isEmpty ? nil : accessibilityCustomActions
                     }
                     
                     strongSelf.avatarTapRecognizer?.isEnabled = item.interaction.inlineNavigationLocation == nil
@@ -5613,8 +5926,15 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
 
         transition.updateBounds(node: self.contextContainer, bounds: self.contextContainer.frame.offsetBy(dx: -offset, dy: 0.0))
 
-        let highlightedBackgroundFrame = self.highlightedBackgroundNode.frame
-        transition.updateFrame(node: self.highlightedBackgroundNode, frame: CGRect(origin: CGPoint(x: offset, y: highlightedBackgroundFrame.minY), size: highlightedBackgroundFrame.size))
+    }
+
+    override public func revealOptionsSurfaceUpdated(progress: CGFloat) {
+        self.updateIsHighlighted(transition: .immediate)
+    }
+
+    override public func revealOptionsSeparatorAlphaUpdated() {
+        super.revealOptionsSeparatorAlphaUpdated()
+        self.updateSeparatorAlpha(transition: .immediate)
     }
 
     override public func revealOptionsActiveStateUpdated(isActive: Bool, transition: ContainedViewLayoutTransition) {
@@ -5658,6 +5978,23 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
         }
     }
     
+    override public func revealOptionAnimationKey(_ key: Int32) -> Int32 {
+        switch key {
+        case RevealOptionKey.unpin.rawValue:
+            return RevealOptionKey.pin.rawValue
+        case RevealOptionKey.unmute.rawValue:
+            return RevealOptionKey.mute.rawValue
+        case RevealOptionKey.unarchive.rawValue:
+            return RevealOptionKey.archive.rawValue
+        case RevealOptionKey.unhide.rawValue:
+            return RevealOptionKey.hide.rawValue
+        case RevealOptionKey.close.rawValue:
+            return RevealOptionKey.open.rawValue
+        default:
+            return key
+        }
+    }
+
     override public func revealOptionSelected(_ option: ItemListRevealOption, animated: Bool) {
         guard let item = self.item else {
             return
@@ -5733,10 +6070,11 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                 self.animateRevealOptionsFill {
                     self.revealOptionsInteractivelyClosed()
                     self.customAnimationInProgress = false
+                    self.resetRevealOptionsAfterFill()
                 }
             case RevealOptionKey.unhide.rawValue:
+                self.closeRevealOptionsHoldingOptions()
                 item.interaction.toggleArchivedFolderHiddenByDefault()
-                close = false
             case RevealOptionKey.hidePsa.rawValue:
                 if let item = self.item, case let .peer(peerData) = item.content {
                     item.interaction.hidePsa(peerData.peer.peerId)
@@ -5780,8 +6118,10 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                 self.animateRevealOptionsFill {
                     self.revealOptionsInteractivelyClosed()
                     self.customAnimationInProgress = false
+                    self.resetRevealOptionsAfterFill()
                 }
             case RevealOptionKey.unhide.rawValue:
+                self.closeRevealOptionsHoldingOptions()
                 item.interaction.setPeerThreadHidden(peerId, threadId, false)
             default:
                 break

@@ -15,6 +15,7 @@ swift_library(
         "//submodules/AnimatedCountLabelNode",
         "//submodules/Components/ComponentDisplayAdapters",
         "//submodules/AppBundle",
+        "//submodules/TelegramUI/Components/GlassBackgroundComponent",
     ],
     visibility = [
         "//visibility:public",

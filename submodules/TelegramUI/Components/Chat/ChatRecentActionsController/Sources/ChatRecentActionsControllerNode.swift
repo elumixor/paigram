@@ -31,6 +31,8 @@ import ChatMessageItemView
 import ChatLoadingNode
 import GlassBackgroundComponent
 import ComponentFlow
+import UrlWhitelist
+import OpenUserGeneratedUrl
 
 private final class ChatRecentActionsListOpaqueState {
     let entries: [ChatRecentActionsEntry]
@@ -490,17 +492,30 @@ final class ChatRecentActionsControllerNode: ViewControllerTracingNode {
                 self.expandedDeletedMessages.insert(message.id)
             }
         }, requestMessageActionUrlAuth: { _, _ in }, activateSwitchInline: { _, _, _ in }, openUrl: { [weak self] url in
-            self?.openUrl(url.url, progress: url.progress)
+            guard let self else {
+                return
+            }
+            if url.forceConcealed {
+                // A link that must be confirmed (a message widget's, which the bubble lays out here when a pass runs
+                // on main): "Open link?" first, then the log's own opener.
+                let _ = OpenUserGeneratedUrl.openUserGeneratedUrl(context: self.context, peerId: nil, url: url.url, webpage: nil, concealed: true, forceConcealed: true, skipUrlAuth: true, skipConcealedAlert: false, forceDark: false, present: { [weak self] c in
+                    self?.presentController(c, .window(.root), nil)
+                }, openResolved: { [weak self] _ in
+                    self?.openUrl(url.url, progress: url.progress)
+                }, progress: url.progress, alertDisplayUpdated: url.alertDisplayUpdated, concealedAlertOption: nil, fullUrl: url.fullUrl)
+                return
+            }
+            self.openUrl(url.url, progress: url.progress)
         }, openExternalInstantPage: { _ in
         }, shareCurrentLocation: { _ in }, shareAccountContact: { _ in }, sendBotCommand: { _, _ in }, openInstantPage: { [weak self] message, associatedData in
             if let strongSelf = self, let navigationController = strongSelf.getNavigationController() {
-                if let controller = strongSelf.context.sharedContext.makeInstantPageController(context: strongSelf.context, message: message, sourcePeerType: associatedData?.automaticDownloadPeerType) {
+                if let controller = strongSelf.context.sharedContext.makeInstantPageController(context: strongSelf.context, message: EngineMessage(message), sourcePeerType: associatedData?.automaticDownloadPeerType) {
                     navigationController.pushViewController(controller)
                 }
             }
         }, openWallpaper: { [weak self] message in
             if let strongSelf = self{
-                strongSelf.context.sharedContext.openChatWallpaper(context: strongSelf.context, message: message, present: { [weak self] c, a in
+                strongSelf.context.sharedContext.openChatWallpaper(context: strongSelf.context, message: EngineMessage(message), present: { [weak self] c, a in
                     self?.pushController(c)
                 })
             }
@@ -578,7 +593,7 @@ final class ChatRecentActionsControllerNode: ViewControllerTracingNode {
                         let actionSheet = ActionSheetController(presentationData: strongSelf.presentationData)
                         
                         var items: [ActionSheetItem] = []
-                        items.append(ActionSheetTextItem(title: cleanUrl))
+                        items.append(ActionSheetTextItem(title: displayUrlRevealingLoginPart(url) ?? cleanUrl))
                         items.append(ActionSheetButtonItem(title: openText, color: .accent, action: { [weak actionSheet] in
                             actionSheet?.dismissAnimated()
                             if let strongSelf = self {
@@ -740,7 +755,7 @@ final class ChatRecentActionsControllerNode: ViewControllerTracingNode {
                                 })
                             ])])
                         strongSelf.presentController(actionSheet, .window(.root), nil)
-                    case .bankCard:
+                    case .bankCard, .tonAddress:
                         break
                     case .date:
                         break
@@ -799,7 +814,7 @@ final class ChatRecentActionsControllerNode: ViewControllerTracingNode {
         }, commitEmojiInteraction: { _, _, _, _ in
         }, openLargeEmojiInfo: { _, _, _ in
         }, openJoinLink: { _ in
-        }, openWebView: { _, _, _, _ in
+        }, openWebView: { _, _, _, _, _ in
         }, activateAdAction: { _, _, _, _ in
         }, adContextAction: { _, _, _ in
         }, removeAd: { _ in
@@ -1042,8 +1057,10 @@ final class ChatRecentActionsControllerNode: ViewControllerTracingNode {
             width -= layout.additionalInsets.right
         }
 
-        var leftInset = layout.safeInsets.left + 8.0
-        var rightInset = layout.safeInsets.right + 8.0
+        // The bottom panel's buttons span iPhone Duo's side strip; they keep clear only of a corner block at the bottom.
+        let bottomInsets = layout.bottomEdgeSideInsets()
+        var leftInset = bottomInsets.left + 8.0
+        var rightInset = bottomInsets.right + 8.0
         if cleanInsets.bottom <= 32.0 && layout.deviceMetrics.screenCornerRadius > 0.0 {
             leftInset += 18.0
             rightInset += 18.0
@@ -1448,6 +1465,8 @@ final class ChatRecentActionsControllerNode: ViewControllerTracingNode {
                         }
                     case .inaccessiblePeer:
                         strongSelf.controllerInteraction.presentController(textAlertController(context: strongSelf.context, updatedPresentationData: strongSelf.controller?.updatedPresentationData, title: nil, text: strongSelf.presentationData.strings.Conversation_ErrorInaccessibleMessage, actions: [TextAlertAction(type: .defaultAction, title: strongSelf.presentationData.strings.Common_OK, action: {})]), nil)
+                    case let .noPaidMessagesToken(peer, _):
+                        strongSelf.openPeer(peer: EnginePeer(peer))
                     case .botStart:
                         break
                     case .groupBotStart:
@@ -1663,7 +1682,7 @@ final class ChatRecentActionsControllerNode: ViewControllerTracingNode {
                         })
                     case let .localization(identifier):
                         strongSelf.presentController(LanguageLinkPreviewController(context: strongSelf.context, identifier: identifier), .window(.root), nil)
-                    case .proxy, .confirmationCode, .cancelAccountReset, .share:
+                    case .proxy, .confirmationCode, .cancelAccountReset, .share, .sendGrams:
                         strongSelf.context.sharedContext.openResolvedUrl(result, context: strongSelf.context, urlContext: .generic, navigationController: strongSelf.getNavigationController(), forceExternal: false, forceUpdate: false, openPeer: { peer, _ in
                             if let strongSelf = self {
                                 strongSelf.openPeer(peer: peer)
@@ -1718,7 +1737,7 @@ final class ChatRecentActionsControllerNode: ViewControllerTracingNode {
                         break
                     case .sendGift:
                         break
-                    case .chats, .contacts, .compose, .postStory, .settings, .unknownDeepLink, .oauth, .createBot, .textStyle:
+                    case .chats, .contacts, .compose, .postStory, .settings, .unknownDeepLink, .oauth, .createBot, .textStyle, .webProxy:
                         break
                 }
             }
@@ -1847,7 +1866,7 @@ final class ChatMessageContextLocationContentSource: ContextLocationContentSourc
     }
     
     func transitionInfo() -> ContextControllerLocationViewInfo? {
-        return ContextControllerLocationViewInfo(location: self.location, contentAreaInScreenSpace: UIScreen.main.bounds)
+        return ContextControllerLocationViewInfo(location: self.location, contentAreaInScreenSpace: mainWindowScreenBounds)
     }
 }
 

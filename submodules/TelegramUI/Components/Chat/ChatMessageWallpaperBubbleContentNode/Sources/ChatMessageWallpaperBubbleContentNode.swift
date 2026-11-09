@@ -237,10 +237,10 @@ public class ChatMessageWallpaperBubbleContentNode: ChatMessageBubbleContentNode
         
         let currentItem = self.item
 
-        return { item, layoutConstants, _, _, _, _ in
+        return { [weak self] item, layoutConstants, _, _, _, _ in
             let contentProperties = ChatMessageBubbleContentProperties(hidesSimpleAuthorHeader: true, headerSpacing: 0.0, hidesBackground: .always, forceFullCorners: false, forceAlignment: .center)
                         
-            return (contentProperties, nil, CGFloat.greatestFiniteMagnitude, { constrainedSize, position in
+            return (contentProperties, nil, CGFloat.greatestFiniteMagnitude, { [weak self] constrainedSize, position in
                 let width: CGFloat = 220.0
                 let imageSize = CGSize(width: 100.0, height: 100.0)
                             
@@ -325,7 +325,7 @@ public class ChatMessageWallpaperBubbleContentNode: ChatMessageBubbleContentNode
                 }
                 let backgroundSize = CGSize(width: width, height: textHeight + 140.0 + (fromYou || isGroupOrChannel ? 0.0 : 42.0))
                 
-                return (backgroundSize.width, { boundingWidth in
+                return (backgroundSize.width, { [weak self] boundingWidth in
                     return (backgroundSize, { [weak self] animation, synchronousLoads, _ in
                         if let strongSelf = self {
                             strongSelf.item = item
@@ -517,12 +517,6 @@ public class ChatMessageWallpaperBubbleContentNode: ChatMessageBubbleContentNode
     override public func updateAbsoluteRect(_ rect: CGRect, within containerSize: CGSize) {
         self.absoluteRect = (rect, containerSize)
         
-        if let mediaBackgroundContent = self.mediaBackgroundContent {
-            var backgroundFrame = mediaBackgroundContent.frame
-            backgroundFrame.origin.x += rect.minX
-            backgroundFrame.origin.y += rect.minY
-            mediaBackgroundContent.update(rect: backgroundFrame, within: containerSize, transition: .immediate)
-        }
     }
     
     override public func tapActionAtPoint(_ point: CGPoint, gesture: TapLongTapOrDoubleTapGesture, isEstimating: Bool) -> ChatMessageBubbleContentTapAction {

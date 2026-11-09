@@ -264,6 +264,8 @@ public final class TextSelectionNode: ASDisplayNode {
     public var canBeginSelection: (CGPoint) -> Bool = { _ in true }
     public var updateRange: ((NSRange?) -> Void)?
     public var presentMenu: ((UIView, CGPoint, [ContextMenuAction]) -> Void)?
+    /// Set by an editable host: the menu then offers Delete, which ends the selection and passes its range here.
+    public var performDelete: ((NSRange) -> Void)?
     private let present: (ViewController, Any?) -> Void
     private let rootView: () -> UIView?
     private let performAction: (NSAttributedString, TextSelectionAction) -> Void
@@ -282,8 +284,12 @@ public final class TextSelectionNode: ASDisplayNode {
     public var enableCopy: Bool = true
     public var enableLookup: Bool = true
     public var enableQuote: Bool = false
+    public var selectAllAfterCopy: Bool = false
     public var enableTranslate: Bool = true
+    public var enableSpeak: Bool = false
     public var enableShare: Bool = true
+    public var enableAutomaticScrolling: Bool = true
+    public var cancelSelectionOnOutsideTap: Bool = false
     
     public var menuSkipCoordnateConversion: Bool = false
     
@@ -363,7 +369,7 @@ public final class TextSelectionNode: ASDisplayNode {
                     strongSelf.updateSelection(range: updatedRange, animateIn: false)
                 }
                 
-                if let scrollView = findScrollView(view: strongSelf.view) {
+                if strongSelf.enableAutomaticScrolling, let scrollView = findScrollView(view: strongSelf.view) {
                     let scrollPoint = strongSelf.view.convert(point, to: scrollView)
                     scrollView.scrollRectToVisible(CGRect(origin: CGPoint(x: scrollPoint.x, y: scrollPoint.y - 50.0), size: CGSize(width: 1.0, height: 100.0)), animated: false)
                 }
@@ -794,16 +800,35 @@ public final class TextSelectionNode: ASDisplayNode {
                 }))
             }
         }
+        if self.enableSpeak {
+            actions.append(ContextMenuAction(content: .text(title: self.strings.Conversation_ContextMenuSpeak, accessibilityLabel: self.strings.Conversation_ContextMenuSpeak), action: { [weak self] in
+                self?.performAction(string, .speak)
+                self?.cancelSelection()
+            }))
+        }
+        if let performDelete = self.performDelete {
+            actions.append(ContextMenuAction(content: .text(title: self.strings.Common_Delete, accessibilityLabel: self.strings.Common_Delete), action: { [weak self] in
+                self?.cancelSelection()
+                performDelete(adjustedRange)
+            }))
+        }
         
         let realFullRange = NSRange(location: 0, length: attributedString.length)
         if range != realFullRange {
-            actions.append(ContextMenuAction(content: .text(title: self.strings.TextSelection_SelectAll, accessibilityLabel: self.strings.TextSelection_SelectAll), action: { [weak self] in
+            let selectAllAction = ContextMenuAction(content: .text(title: self.strings.TextSelection_SelectAll, accessibilityLabel: self.strings.TextSelection_SelectAll), action: { [weak self] in
                 guard let self else {
                     return
                 }
                 self.contextMenu?.dismiss()
-                self.setSelection(range: realFullRange, displayMenu: true)
-            }))
+                // The text as it is now: a host whose text changes under an open menu (a message widget keeps running)
+                // would otherwise get the length it had when the menu appeared.
+                self.setSelection(range: NSRange(location: 0, length: self.textNodeOrView.currentText?.length ?? realFullRange.length), displayMenu: true)
+            })
+            if self.selectAllAfterCopy {
+                actions.insert(selectAllAction, at: self.enableCopy ? 1 : 0)
+            } else {
+                actions.append(selectAllAction)
+            }
         } else if self.enableShare {
             actions.append(ContextMenuAction(content: .text(title: self.strings.Conversation_ContextMenuShare, accessibilityLabel: self.strings.Conversation_ContextMenuShare), action: { [weak self] in
                 self?.performAction(string, .share)
@@ -818,9 +843,10 @@ public final class TextSelectionNode: ASDisplayNode {
             guard let self else {
                 return true
             }
-            if self.knobAtPoint(view.convert(point, to: self.view)) == nil {
-                //self.cancelSelection()
-                return true
+            if self.cancelSelectionOnOutsideTap, self.knobAtPoint(view.convert(point, to: self.view)) == nil {
+                // The menu dismisses itself after this callback.
+                self.contextMenu = nil
+                self.cancelSelection()
             }
             return true
         }

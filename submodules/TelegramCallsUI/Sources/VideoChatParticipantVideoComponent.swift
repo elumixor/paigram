@@ -307,8 +307,6 @@ final class VideoChatParticipantVideoComponent: Component {
             transition.setBounds(view: self.extractedContainerView.contentView, bounds: CGRect(origin: CGPoint(), size: availableSize))
             self.extractedContainerView.contentRect = CGRect(origin: CGPoint(), size: availableSize)
             
-            transition.setFrame(view: self.pinchContainerNode.contentNode.view, frame: CGRect(origin: CGPoint(), size: availableSize))
-            
             transition.setFrame(view: self.backgroundGradientView, frame: CGRect(origin: CGPoint(), size: availableSize))
             
             let alphaTransition: ComponentTransition
@@ -579,7 +577,7 @@ final class VideoChatParticipantVideoComponent: Component {
                         videoAlphaTransition.setAlpha(layer: videoLayer.blurredLayer, alpha: 0.25)
                     }
                     
-                    let rotationAngle = resolveCallVideoRotationAngle(angle: videoSpec.rotationAngle, followsDeviceOrientation: videoSpec.followsDeviceOrientation, interfaceOrientation: component.interfaceOrientation)
+                    let rotationAngle = resolveCallVideoRotationAngle(angle: videoSpec.rotationAngle, followsDeviceOrientation: videoSpec.followsDeviceOrientation, interfaceOrientation: component.interfaceOrientation, deviceOrientation: deviceOrientationMatching(component.interfaceOrientation))
                     
                     var rotatedResolution = videoSpec.resolution
                     var videoIsRotated = false
