@@ -53,7 +53,7 @@ Day to day the app goes on the phone with `bun run device`, not TestFlight: the 
 
 The icon is `Telegram/Telegram-iOS/Telegram.icon` (Icon Composer: a P in a dashed chat bubble, black on white, white on black in dark mode; source `docs/brand/paigram.svg`). Its layer is outlined to filled paths: Icon Composer fills a stroked path's whole shape. The watch app takes a flat PNG instead, `Telegram/Telegram-iOS/WatchAppIcon.png`, which replaces the snapshot's Telegram icon at build time; after changing the icon, `bun run watch-icon` renders it again from the `.icon` (needs ImageMagick).
 
-Upstream pins Xcode 26.2; `--overrideXcodeVersion` lets the installed Xcode build it. Bazel is downloaded to `build-input/` on first run; the disk cache lives in `~/telegram-bazel-cache`.
+`versions.json` pins upstream's Xcode and Bazel (27.1 and 9.2.0 since the 13.2 merge); `--overrideXcodeVersion` lets the installed Xcode build it. Bazel is downloaded to `build-input/` on first run; the disk cache lives in `~/telegram-bazel-cache`.
 
 ### Releasing from CI
 
@@ -85,3 +85,28 @@ The secrets it sets, for setting them by hand under Settings → Secrets and var
 | `PAI_BOT_USERNAME` | the box's bot username, without the `@` (set so the build does not have to reach the box) |
 
 `.github/workflows/build.yml` is upstream Telegram's CI — a full Bazel build with fake codesigning, producing an unsigned ipa on a GitHub release. It no longer runs on pushes to master: macOS runners bill at ten times the Linux rate and that ipa is of no use here, so it is `workflow_dispatch` only and the TestFlight workflow is the only build a push can start.
+
+## Upstream
+
+Paigram is a fork of [Telegram-iOS](https://github.com/TelegramMessenger/Telegram-iOS), remote `upstream`. Upstream tags every release `release-X.Y` on master; Paigram follows those tags, not upstream's day-to-day master.
+
+`bun run upstream-check` fetches upstream's tags, prints the newest release merged into `HEAD` and the newest one upstream has, and exits 1 when they differ. `.github/workflows/upstream-check.yml` runs it every Monday and opens a "Merge upstream release-X.Y" issue when a release is waiting.
+
+To catch up, merge the tag; never rebase. Our commits are shared history on origin and there are over a hundred of them, so a rebase would replay each one against a moving upstream and rewrite everything already pushed, while a merge resolves each conflict once. `rerere` is on (`git config rerere.enabled true`), so a resolution repeated in a later merge applies itself.
+
+```sh
+git worktree add -b upstream-13.3 ../paigram-upstream master
+cd ../paigram-upstream && git merge release-13.3
+# resolve, commit, build on the Mac, try it on the phone, then merge the branch into master
+```
+
+Keep `app` in `versions.json` ours and take upstream's `xcode`, `bazel` and `macos`. 13.2 was the first catch-up: 2060 upstream commits since the July 2026 fork point.
+
+Conflicts stay small because our code lives in our own modules, with only hooks in upstream's files:
+
+- `submodules/PaiUI` holds the pai bot's screens, compose and settings; `ChatMessagePaiToolsBubbleContentNode` draws the bot's tool calls.
+- `submodules/TelegramCore/Sources/Box`, `Email` and `WhatsApp` hold the bridged chats: their peers, sync and storage.
+- Hooks in upstream code are one or two lines keyed on `PaiChat.isBot(peer)` or `PeerId.isBridged` (`isEmail`, `isWhatsApp`), each with a comment saying why. A new feature adds a hook, not a rewrite of upstream's function. When upstream reworks a function, take theirs and put the hook back.
+- `Telegram/BUILD`: the Paigram display names, `families = ["iphone"]`, the `mailto` scheme, the location purpose string, and the watch app's `display_name` and `app_icon`. Upstream builds the watch app in two actions (`prebuilt_watchos_compile.sh`, then `prebuilt_watchos_patch.sh`); the icon is a compile input and the name is patched into the Info.plist with the version, so a rename does not rerun xcodebuild.
+
+Our Postbox namespaces and preference keys sit at 100 and above (`Namespaces.Message.Box`, `PreferencesKeys` `emailState`/`whatsAppState`) so upstream's next ones never land on them. 0.3.x had them at 8, 51 and 52, which 13.2 took; `migrateLegacyBoxStorage` moves an existing install's data across once at launch. Peer namespaces 4 to 6 and `PeerGroup.email = 2` are ours too: check a new upstream release does not claim them.

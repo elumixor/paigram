@@ -9,6 +9,7 @@
     "tag": "bun scripts/tag.ts",
     "ci-secrets": "bun scripts/ci-secrets.ts",
     "watch-icon": "bun scripts/watch-icon.ts",
+    "upstream-check": "bun scripts/upstream-check.ts",
     "typecheck": "tsc"
   },
   "dependencies": {
