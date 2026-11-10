@@ -806,8 +806,6 @@ def add_remote_watch_arguments(current_parser):
         help='Local absolute path to the watchkitapp .mobileprovision file; uploaded to the remote build environment.',
         metavar='path'
     )
-    if arguments.bazelArguments is not None:
-        bazel_command_line.extra_arguments = shlex.split(arguments.bazelArguments)
 
 
 def prepare_remote_watch_inputs(arguments, remote_input_path):
