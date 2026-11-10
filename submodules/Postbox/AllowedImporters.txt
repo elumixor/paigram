@@ -8,7 +8,6 @@
 #
 # Not checked: test sources (directories named `Tests` or ending in `Tests`), and Postbox and
 # TelegramCore themselves. Keep the entries sorted (byte order, as `LC_ALL=C sort`).
-
 Telegram/NotificationService/Sources/NotificationService.swift
 Telegram/SiriIntents/IntentContacts.swift
 Telegram/SiriIntents/IntentHandler.swift
@@ -40,6 +39,9 @@ submodules/MediaPlayer/Sources/MediaPlayer.swift
 submodules/MediaPlayer/Sources/MediaPlayerFramePreview.swift
 submodules/MediaPlayer/Sources/TimeBasedVideoPreload.swift
 submodules/MediaPlayer/Sources/UniversalSoftwareVideoSource.swift
+submodules/PaiUI/Sources/PaiChat.swift
+submodules/PaiUI/Sources/PaiEvents.swift
+submodules/PaiUI/Sources/PaiRich.swift
 submodules/PassportUI/Sources/LegacySecureIdAttachmentMenu.swift
 submodules/PassportUI/Sources/SecureIdLocalResource.swift
 submodules/PhotoResources/Sources/PassResources.swift
@@ -57,6 +59,8 @@ submodules/TelegramPresentationData/Sources/ChatControllerBackgroundNode.swift
 submodules/TelegramPresentationData/Sources/MakePresentationTheme.swift
 submodules/TelegramPresentationData/Sources/PresentationData.swift
 submodules/TelegramUI/Components/Chat/ChatMessageBubbleItemNode/Sources/ChatMessageBubbleItemNode.swift
+submodules/TelegramUI/Components/Chat/ChatMessagePaiToolsBubbleContentNode/Sources/ChatMessagePaiEventBubbleContentNode.swift
+submodules/TelegramUI/Components/Chat/ChatNewThreadInfoItem/Sources/ChatNewThreadInfoItem.swift
 submodules/TelegramUI/Components/Chat/ChatRecentActionsController/Sources/ChatRecentActionsHistoryTransition.swift
 submodules/TelegramUI/Components/ChatEntityKeyboardInputNode/Sources/ChatEntityKeyboardInputNode.swift
 submodules/TelegramUI/Components/DebugCompanionScreen/Sources/CompanionCatalog.swift
@@ -75,6 +79,8 @@ submodules/TelegramUI/Components/StickerPickerScreen/Sources/StickerPickerScreen
 submodules/TelegramUI/Components/Stories/StoryContainerScreen/Sources/StoryChatContent.swift
 submodules/TelegramUI/Components/TelegramAccountAuxiliaryMethods/Sources/TelegramAccountAuxiliaryMethods.swift
 submodules/TelegramUI/Sources/AppDelegate.swift
+submodules/TelegramUI/Sources/Chat/ChatControllerPai.swift
+submodules/TelegramUI/Sources/Chat/ChatControllerPaiCompose.swift
 submodules/TelegramUI/Sources/ChatController.swift
 submodules/TelegramUI/Sources/ChatControllerContentData.swift
 submodules/TelegramUI/Sources/ChatControllerNode.swift
