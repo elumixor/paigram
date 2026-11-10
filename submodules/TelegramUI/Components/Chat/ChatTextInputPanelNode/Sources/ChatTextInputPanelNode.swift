@@ -1974,8 +1974,7 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         self.richTextInputNode?.inputIsUserInteractionEnabled = !sendingTextDisabled
         self.updateTextInputTapRecognizer()
         
-        // The pai bot's chat shows nothing but the New Thread card outside a topic; that is not an empty chat.
-        let displayBotStartButton = !PaiChat.isBot(interfaceState.renderedPeer?.peer) && chatDisplaysBotStartButton(interfaceState)
+        let displayBotStartButton = chatDisplaysBotStartButton(interfaceState)
         
         let inputHasText = !isRecording && !(self.richTextInputNode?.inputContentIsEmpty ?? true)
         

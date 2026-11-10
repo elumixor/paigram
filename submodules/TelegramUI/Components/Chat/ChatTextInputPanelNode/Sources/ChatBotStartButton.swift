@@ -1,6 +1,7 @@
 import Foundation
 import TelegramCore
 import ChatPresentationInterfaceState
+import PaiUI
 
 /// Whether the composer shows the bot's Start button in place of its input: in a bot chat with no messages yet (outside
 /// a thread) and in a blocked bot's chat, never among scheduled messages. The input it replaces is hidden while it
@@ -22,7 +23,8 @@ public func chatDisplaysBotStartButton(_ interfaceState: ChatPresentationInterfa
         isScheduledMessages = true
     }
     var isBot = false
-    if let user = interfaceState.renderedPeer?.peer as? TelegramUser, user.botInfo != nil {
+    // The pai bot's chat shows nothing but the New Thread card outside a topic; that is not an empty chat.
+    if let user = interfaceState.renderedPeer?.peer as? TelegramUser, user.botInfo != nil, !PaiChat.isBot(user) {
         isBot = true
     }
     var historyIsEmpty = false
