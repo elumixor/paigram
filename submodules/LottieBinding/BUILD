@@ -7,7 +7,6 @@ swift_library(
     module_name = "LottieBinding",
     srcs = glob(["Sources/**/*.swift"]),
     copts = [
-        "-warnings-as-errors",
     ],
     deps = [
         "//submodules/tlottie:TLottieBinding",

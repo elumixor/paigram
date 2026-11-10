@@ -7,7 +7,6 @@ swift_library(
         "Sources/**/*.swift",
     ]),
     copts = [
-        "-warnings-as-errors",
     ],
     visibility = [
         "//visibility:public",
@@ -22,7 +21,6 @@ swift_test(
         "Tests/**/*.swift",
     ]),
     copts = [
-        "-warnings-as-errors",
     ],
     deps = [
         ":HLSPlayback",

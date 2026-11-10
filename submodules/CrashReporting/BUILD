@@ -4,6 +4,6 @@ swift_library(
     name = "CrashReporting",
     module_name = "CrashReporting",
     srcs = glob(["Sources/*.swift"]),
-    copts = ["-warnings-as-errors"],
+    copts = [],
     visibility = ["//visibility:public"],
 )

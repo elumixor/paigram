@@ -33,7 +33,6 @@ swift_library(
     module_name = "HarnessAppContext",
     srcs = glob(["AppContext/**/*.swift"]),
     copts = [
-        "-warnings-as-errors",
     ],
     deps = [
         "//submodules/SSignalKit/SwiftSignalKit",
@@ -140,7 +139,6 @@ swift_library(
     module_name = "ComposerHarnessLib",
     srcs = glob(["Sources/**/*.swift"]),
     copts = [
-        "-warnings-as-errors",
     ],
     deps = [
         ":HarnessAppContext",

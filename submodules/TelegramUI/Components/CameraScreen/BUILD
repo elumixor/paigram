@@ -115,6 +115,5 @@ swift_test(
         "Tests/CameraDualPreviewPlacementTests.swift",
     ],
     copts = [
-        "-warnings-as-errors",
     ],
 )

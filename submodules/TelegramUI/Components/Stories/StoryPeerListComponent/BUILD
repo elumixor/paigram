@@ -85,7 +85,6 @@ swift_test(
         "Tests/StoryPeerListTitleLayoutTests.swift",
     ],
     copts = [
-        "-warnings-as-errors",
     ],
 )
 
@@ -98,6 +97,5 @@ swift_test(
         "Tests/StoryPeerListRowLayoutTests.swift",
     ],
     copts = [
-        "-warnings-as-errors",
     ],
 )

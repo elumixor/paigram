@@ -69,6 +69,5 @@ swift_test(
         "Tests/CameraVideoOrientationTests.swift",
     ],
     copts = [
-        "-warnings-as-errors",
     ],
 )

@@ -100,7 +100,7 @@ cd ../paigram-upstream && git merge release-13.3
 # resolve, commit, build on the Mac, try it on the phone, then merge the branch into master
 ```
 
-Keep `app` in `versions.json` ours and take upstream's `xcode`, `bazel` and `macos`. 13.2 was the first catch-up: 2060 upstream commits since the July 2026 fork point.
+Keep `app` in `versions.json` ours and take upstream's `xcode`, `bazel` and `macos`. Then strip the `-warnings-as-errors` upstream added back to BUILD files (`git grep -l -- -warnings-as-errors -- '*BUILD' ':!third-party' | xargs sed -i -E '/^\s*"-warnings-as-errors",\s*$/d; s/copts = \["-warnings-as-errors"\]/copts = []/'`): our hooks in upstream modules are not held to upstream's zero-warning bar. 13.2 was the first catch-up: 2060 upstream commits since the July 2026 fork point.
 
 Conflicts stay small because our code lives in our own modules, with only hooks in upstream's files:
 

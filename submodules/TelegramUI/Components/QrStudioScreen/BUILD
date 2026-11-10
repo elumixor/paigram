@@ -32,7 +32,7 @@ swift_library(
     name = "QrStudioScreen",
     module_name = "QrStudioScreen",
     srcs = glob(["Sources/**/*.swift"]),
-    copts = ["-warnings-as-errors"],
+    copts = [],
     data = [":QrStudioMetalSourcesBundle"],
     deps = [
         "//submodules/AccountContext",

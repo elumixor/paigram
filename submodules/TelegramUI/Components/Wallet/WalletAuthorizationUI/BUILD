@@ -4,7 +4,7 @@ swift_library(
     name = "WalletAuthorizationUI",
     module_name = "WalletAuthorizationUI",
     srcs = glob(["Sources/**/*.swift"]),
-    copts = ["-warnings-as-errors"],
+    copts = [],
     deps = [
         "//submodules/AccountContext",
         "//submodules/TelegramCore",

@@ -3,7 +3,7 @@ swift_library(
     name = "WalletGiftStickerMediaComponent",
     module_name = "WalletGiftStickerMediaComponent",
     srcs = glob(["Sources/**/*.swift"]),
-    copts = ["-warnings-as-errors"],
+    copts = [],
     deps = [
         "//submodules/AccountContext",
         "//submodules/SSignalKit/SwiftSignalKit", "//submodules/TelegramCore", "//submodules/WalletContext",

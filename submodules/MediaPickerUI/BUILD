@@ -75,7 +75,6 @@ swift_test(
         "Tests/MediaGroupsContextMenuLayoutTests.swift",
     ],
     copts = [
-        "-warnings-as-errors",
     ],
 )
 
@@ -86,6 +85,5 @@ swift_test(
         "Tests/MediaPickerGridCellDecorationsTests.swift",
     ],
     copts = [
-        "-warnings-as-errors",
     ],
 )

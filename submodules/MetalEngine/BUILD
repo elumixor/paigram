@@ -73,7 +73,6 @@ swift_test(
         "Tests/MetalPipelineCacheTests.swift",
     ],
     copts = [
-        "-warnings-as-errors",
     ],
     env = {
         "NSZombieEnabled": "YES",

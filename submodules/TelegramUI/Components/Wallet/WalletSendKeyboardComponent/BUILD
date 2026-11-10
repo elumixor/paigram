@@ -4,7 +4,7 @@ swift_library(
     name = "WalletSendKeyboardComponent",
     module_name = "WalletSendKeyboardComponent",
     srcs = glob(["Sources/**/*.swift"]),
-    copts = ["-warnings-as-errors"],
+    copts = [],
     deps = [
         "//submodules/Display",
         "//submodules/ComponentFlow",

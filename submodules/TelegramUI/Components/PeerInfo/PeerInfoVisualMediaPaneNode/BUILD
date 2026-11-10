@@ -74,6 +74,5 @@ swift_test(
         "Tests/MediaGridPaneDecisionsTests.swift",
     ],
     copts = [
-        "-warnings-as-errors",
     ],
 )

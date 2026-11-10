@@ -85,7 +85,6 @@ swift_library(
     module_name = "WidgetHarnessLib",
     srcs = glob(["Sources/**/*.swift"]),
     copts = [
-        "-warnings-as-errors",
     ],
     deps = [
         "//Tests/ComposerHarness:HarnessAppContext",

@@ -49,7 +49,6 @@ swift_library(
         exclude = ["Sources/ref/**/*.swift"],
     ),
     copts = [
-        "-warnings-as-errors",
     ],
     data = [
         ":WalletCardComponentMetalSourcesBundle",

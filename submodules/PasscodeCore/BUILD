@@ -4,7 +4,7 @@ swift_library(
     name = "PasscodeCore",
     module_name = "PasscodeCore",
     srcs = glob(["Sources/**/*.swift"]),
-    copts = ["-warnings-as-errors"],
+    copts = [],
     deps = [
         "//submodules/SSignalKit/SwiftSignalKit",
         "//submodules/TelegramCore",

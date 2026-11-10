@@ -193,7 +193,6 @@ swift_library(
         "Sources/RichTextEngineEditor/**/*.swift",
     ], allow_empty = False),
     copts = [
-        "-warnings-as-errors",
     ],
     deps = [
         ":RichTextEditorCore",

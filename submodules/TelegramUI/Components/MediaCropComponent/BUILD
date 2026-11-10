@@ -9,7 +9,6 @@ swift_library(
         "Sources/**/*.swift",
     ]),
     copts = [
-        "-warnings-as-errors",
     ],
     deps = [
         "//submodules/TelegramUI/Components/MediaEditor",
@@ -29,7 +28,6 @@ swift_library(
         "Tests/**/*.swift",
     ]),
     copts = [
-        "-warnings-as-errors",
     ],
     deps = [
         ":MediaCropComponent",

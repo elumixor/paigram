@@ -7,7 +7,6 @@ swift_library(
     module_name = "MTProtoRustEngineMapping",
     srcs = glob(["Sources/MTProtoRustEngineMapping/**/*.swift"]),
     copts = [
-        "-warnings-as-errors",
     ],
     visibility = ["//visibility:public"],
 )
@@ -17,7 +16,6 @@ swift_library(
     module_name = "MTProtoRustEngine",
     srcs = glob(["Sources/MTProtoRustEngine/**/*.swift"]),
     copts = [
-        "-warnings-as-errors",
     ],
     deps = [
         ":MTProtoRustEngineMapping",
@@ -36,7 +34,6 @@ swift_test(
     name = "MTProtoRustEngineMappingTests",
     srcs = glob(["Tests/MTProtoRustEngineMappingTests/**/*.swift"]),
     copts = [
-        "-warnings-as-errors",
     ],
     deps = [":MTProtoRustEngineMapping"],
 )

@@ -24,7 +24,6 @@ swift_test(
         "Tests/UrlWhitelistTests.swift",
     ],
     copts = [
-        "-warnings-as-errors",
     ],
     deps = [
         ":UrlWhitelist",

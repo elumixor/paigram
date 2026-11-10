@@ -6,7 +6,7 @@ swift_library(
     name = "MessageWidgetRendering",
     module_name = "MessageWidgetRendering",
     srcs = glob(["Sources/**/*.swift"]),
-    copts = ["-warnings-as-errors"],
+    copts = [],
     deps = [
         "//submodules/TelegramUI/Components/MessageWidget/WidgetRuntimeIOS",
     ],

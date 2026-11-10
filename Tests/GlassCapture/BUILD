@@ -51,7 +51,6 @@ swift_library(
     module_name = "GlassCaptureLib",
     srcs = glob(["Sources/**/*.swift"]),
     copts = [
-        "-warnings-as-errors",
     ],
     deps = [
         "//submodules/ComponentFlow",

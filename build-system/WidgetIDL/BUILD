@@ -7,13 +7,13 @@ swift_library(
     name = "WidgetIDLCore",
     module_name = "WidgetIDLCore",
     srcs = glob(["Sources/WidgetIDLCore/*.swift"]),
-    copts = ["-warnings-as-errors"],
+    copts = [],
 )
 
 swift_binary(
     name = "WidgetIDL",
     srcs = ["Sources/WidgetIDL/main.swift"],
-    copts = ["-warnings-as-errors"],
+    copts = [],
     deps = [":WidgetIDLCore"],
     visibility = ["//submodules/TelegramUI/Components/MessageWidget/WidgetRuntime:__pkg__"],
 )

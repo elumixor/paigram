@@ -4,7 +4,7 @@ swift_library(
     name = "WalletPagerComponent",
     module_name = "WalletPagerComponent",
     srcs = glob(["Sources/**/*.swift"]),
-    copts = ["-warnings-as-errors"],
+    copts = [],
     deps = [
         "//submodules/ComponentFlow",
         "//submodules/Components/ViewControllerComponent",

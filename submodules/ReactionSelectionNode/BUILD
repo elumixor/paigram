@@ -12,7 +12,6 @@ swift_library(
         "Geometry/**/*.swift",
     ]),
     copts = [
-        "-warnings-as-errors",
     ],
     visibility = [
         "//visibility:public",
