@@ -19,6 +19,7 @@ package_group(
         "//submodules/GalleryUI",
         "//submodules/LegacyMediaPickerUI",
         "//submodules/MediaPlayer",
+        "//submodules/PaiUI",
         "//submodules/PassportUI",
         "//submodules/PhotoResources",
         "//submodules/PremiumUI",
