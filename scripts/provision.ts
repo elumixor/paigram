@@ -30,6 +30,7 @@ const targets: { suffix: string; file: string; name: string; capabilities: strin
   { suffix: ".Widget", file: "Widget", name: "Paigram Widget", capabilities: ["APP_GROUPS"], group: true },
   { suffix: ".BroadcastUpload", file: "BroadcastUpload", name: "Paigram Broadcast Upload", capabilities: ["APP_GROUPS"], group: true },
   { suffix: ".watchkitapp", file: "WatchApp", name: "Paigram Watch", capabilities: [], group: false, watch: true },
+  { suffix: ".watchkitapp.widget", file: "WatchWidget", name: "Paigram Watch Complications", capabilities: [], group: false, watch: true },
 ];
 
 async function ensureBundleId(identifier: string, name: string): Promise<any> {

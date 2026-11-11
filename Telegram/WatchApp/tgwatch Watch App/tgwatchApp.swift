@@ -4,6 +4,7 @@ import TDShim
 @main
 struct TgwatchApp: App {
     @State private var manager: AccountManager
+    @State private var pai = PaiWatch.shared
     /// True when running inside an XCTest process. Computed once and stored so
     /// both `init()` and `body` can reference the same value without repeating
     /// the `NSClassFromString` lookup.
@@ -30,12 +31,24 @@ struct TgwatchApp: App {
         )
         if !isUnderXCTest {
             mgr.bootstrap()
+            PaiWatch.shared.start()
         }
         _manager = State(initialValue: mgr)
     }
 
     var body: some Scene {
         WindowGroup {
+            accountContent
+                .sheet(isPresented: $pai.presented) {
+                    NavigationStack { PaiGlanceView() }
+                }
+                .onOpenURL { PaiWatch.shared.open($0) }
+        }
+    }
+
+    @ViewBuilder
+    private var accountContent: some View {
+        Group {
             if let client = manager.activeClient {
                 ContentView()
                     .environment(client)

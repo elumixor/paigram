@@ -27,9 +27,17 @@
 #                   $(PRODUCT_BUNDLE_IDENTIFIER:base), so no post-build plist patching.
 #   $11 display_name CFBundleDisplayName to show on the watch; empty => keep the project's.
 #   $12 app_icon     1024x1024 PNG replacing the snapshot's AppIcon; empty => keep the project's.
+#   $13 glance_dir   Directory holding the PaiGlance sources (submodules/PaiGlance/Sources); the model,
+#                   live source and store are copied into PaiShared/, shared by the app and its
+#                   PaiComplications widget extension. Empty => the snapshot must already carry them.
+#
+# The complications extension (PlugIns/PaiComplications.appex, "<watch id>.widget") is signed with
+# WatchWidget.mobileprovision from the watch profile's directory; without it the extension is dropped.
+# Both bundles get the keychain group "<team>.<watch id>" as their only (default) group: the app
+# stores the glance there and the complications read it.
 set -euo pipefail
 
-SRC="$1"; OUT_ZIP="$2"; API_ID="$3"; API_HASH="$4"; IDENTITY="${5:-}"; PROFILE="${6:-}"; INFOPLIST_OUT="${7:-}"; VERSIONS_JSON="${8:-}"; BUILD_NUMBER="${9:-1}"; WATCH_BUNDLE_ID="${10:-}"; DISPLAY_NAME="${11:-}"; APP_ICON="${12:-}"
+SRC="$1"; OUT_ZIP="$2"; API_ID="$3"; API_HASH="$4"; IDENTITY="${5:-}"; PROFILE="${6:-}"; INFOPLIST_OUT="${7:-}"; VERSIONS_JSON="${8:-}"; BUILD_NUMBER="${9:-1}"; WATCH_BUNDLE_ID="${10:-}"; DISPLAY_NAME="${11:-}"; APP_ICON="${12:-}"; GLANCE_DIR="${13:-}"
 
 if [ ! -e "$SRC/tgwatch.xcodeproj" ]; then
   echo "error: no tgwatch.xcodeproj at $SRC (re-sync the Telegram/WatchApp snapshot via tgwatch/tools/export-sources.sh)" >&2
@@ -55,6 +63,11 @@ cp -R "$SRC/." "$WORKSRC/"
 if [ -n "$APP_ICON" ]; then
   cp "$APP_ICON" "$WORKSRC/tgwatch Watch App/Assets.xcassets/AppIcon.appiconset/AppIcon.png"
 fi
+if [ -n "$GLANCE_DIR" ]; then
+  for f in PaiGlance.swift PaiGlanceSource.swift PaiGlanceStore.swift; do
+    cp "$GLANCE_DIR/$f" "$WORKSRC/PaiShared/$f"
+  done
+fi
 
 xcodebuild \
   -project "$WORKSRC/tgwatch.xcodeproj" \
@@ -66,7 +79,7 @@ xcodebuild \
   CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
   TG_API_ID="$API_ID" TG_API_HASH="$API_HASH" \
   MARKETING_VERSION="$MARKETING_VERSION" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
-  ${WATCH_BUNDLE_ID:+PRODUCT_BUNDLE_IDENTIFIER="$WATCH_BUNDLE_ID"} \
+  ${WATCH_BUNDLE_ID:+PAI_WATCH_BUNDLE_ID="$WATCH_BUNDLE_ID"} \
   build 1>&2
 
 APP="$(find "$DD/Build/Products" -maxdepth 2 -name 'tgwatch Watch App.app' -type d | head -1)"
@@ -98,24 +111,32 @@ fi
 # the app is left unsigned (the host does not re-sign it).
 xattr -cr "$APP"
 if [ -n "$PROFILE" ]; then
-  cp "$PROFILE" "$APP/embedded.mobileprovision"
-  ENT="$(mktemp)"
-  trap 'rm -rf "$DD" "$ENT" "$ENT.plist"' EXIT
-  security cms -D -i "$APP/embedded.mobileprovision" > "$ENT.plist"
-  if ! /usr/libexec/PlistBuddy -x -c 'Print :Entitlements' "$ENT.plist" > "$ENT" 2>/dev/null; then
-    echo "error: provisioning profile has no Entitlements key: $PROFILE" >&2
-    exit 1
-  fi
-  # Sign with what Xcode would: the app's identity and get-task-allow. The profile also carries
-  # wildcard keychain groups and beta-reports-active; App Store Connect refuses a bundle whose
-  # signature claims those (ITMS-90034, blamed on the host app).
-  python3 - "$ENT" <<'PY'
+  ENTDIR="$(mktemp -d)"
+  trap 'rm -rf "$DD" "$ENTDIR"' EXIT
+
+  # Entitlements for one bundle from its profile: what Xcode would sign with (identity, team,
+  # get-task-allow) plus the shared keychain group. The profile also carries wildcard keychain groups
+  # and beta-reports-active; App Store Connect refuses a bundle whose signature claims those
+  # (ITMS-90034, blamed on the host app).
+  entitlements() { # profile out
+    security cms -D -i "$1" > "$2.profile.plist"
+    python3 - "$2.profile.plist" "$2" <<'PY'
 import plistlib, sys
-path = sys.argv[1]
-ents = plistlib.load(open(path, "rb"))
+profile = plistlib.load(open(sys.argv[1], "rb"))
+ents = profile.get("Entitlements")
+if ents is None:
+    sys.exit("error: provisioning profile has no Entitlements key")
 keep = {"application-identifier", "com.apple.developer.team-identifier", "get-task-allow"}
-plistlib.dump({k: v for k, v in ents.items() if k in keep}, open(path, "wb"))
+out = {k: v for k, v in ents.items() if k in keep}
+team = ents["com.apple.developer.team-identifier"]
+watch_id = ents["application-identifier"].split(".", 1)[1].removesuffix(".widget")
+out["keychain-access-groups"] = [f"{team}.{watch_id}"]
+plistlib.dump(out, open(sys.argv[2], "wb"))
 PY
+  }
+
+  cp "$PROFILE" "$APP/embedded.mobileprovision"
+  entitlements "$PROFILE" "$ENTDIR/app.entitlements"
 
   if [ -z "$IDENTITY" ]; then
     # The identity is the SHA-1 of the profile's first embedded certificate, which is
@@ -133,14 +154,27 @@ PY
   # whose embedded watch framework carries one (ITMS-90034, blamed on the host app).
   TS_FLAG="--timestamp=none"
 
-  # Sign inside-out: nested frameworks first, then the app bundle.
+  # Sign inside-out: nested frameworks and extensions first, then the app bundle.
   if [ -d "$APP/Frameworks" ]; then
     for fw in "$APP/Frameworks/"*; do
       [ -e "$fw" ] || continue
       codesign --force "$TS_FLAG" --sign "$IDENTITY" "$fw" 1>&2
     done
   fi
-  codesign --force "$TS_FLAG" --sign "$IDENTITY" --entitlements "$ENT" "$APP" 1>&2
+  WIDGET_PROFILE="$(dirname "$PROFILE")/WatchWidget.mobileprovision"
+  for appex in "$APP/PlugIns/"*.appex; do
+    [ -e "$appex" ] || continue
+    if [ -f "$WIDGET_PROFILE" ]; then
+      cp "$WIDGET_PROFILE" "$appex/embedded.mobileprovision"
+      entitlements "$WIDGET_PROFILE" "$ENTDIR/widget.entitlements"
+      codesign --force "$TS_FLAG" --sign "$IDENTITY" --entitlements "$ENTDIR/widget.entitlements" "$appex" 1>&2
+    else
+      echo "warning: no WatchWidget.mobileprovision next to $PROFILE; dropping $(basename "$appex") (no watch complications)" >&2
+      rm -rf "$appex"
+    fi
+  done
+  rmdir "$APP/PlugIns" 2>/dev/null || true
+  codesign --force "$TS_FLAG" --sign "$IDENTITY" --entitlements "$ENTDIR/app.entitlements" "$APP" 1>&2
   codesign --verify --deep --strict "$APP" 1>&2
 else
   echo "warning: no watch provisioning profile supplied; the watch app will be UNSIGNED and will be rejected by the App Store. Pass --watchProvisioningProfile, or build with codesigning material that includes the watchkitapp profile." >&2

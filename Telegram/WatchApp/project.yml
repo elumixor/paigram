@@ -26,6 +26,8 @@ settings:
     SWIFT_STRICT_CONCURRENCY: minimal
     MARKETING_VERSION: "0.1"
     CURRENT_PROJECT_VERSION: "1"
+    # The watch app's id; the complications extension is "<id>.widget". The Bazel build overrides it.
+    PAI_WATCH_BUNDLE_ID: ph.telegra.Telegraph.watchkitapp
 packages:
   TDShim:
     path: Packages/TDShim
@@ -45,6 +47,8 @@ targets:
     deploymentTarget: "26.0"
     sources:
       - path: tgwatch Watch App
+      # PaiGlance.swift, PaiGlanceSource.swift and PaiGlanceStore.swift are copied in by the Bazel build.
+      - path: PaiShared
       - path: Assets/SampleStickers
         buildPhase: resources
         type: folder
@@ -68,7 +72,7 @@ targets:
         NSLocationWhenInUseUsageDescription: Share your current location in chats.
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: ph.telegra.Telegraph.watchkitapp
+        PRODUCT_BUNDLE_IDENTIFIER: $(PAI_WATCH_BUNDLE_ID)
         DEVELOPMENT_TEAM: C67CF9S4VU
         TARGETED_DEVICE_FAMILY: "4"
         GENERATE_INFOPLIST_FILE: "NO"
@@ -91,6 +95,7 @@ targets:
           STRIP_STYLE: "all"
           DEAD_CODE_STRIPPING: "YES"
     dependencies:
+      - target: PaiComplications
       - package: TDShim
         product: TDShim
       - package: QRCodeGenerator
@@ -101,6 +106,32 @@ targets:
         product: WebPKit
       - package: OpusKit
         product: OpusKit
+  PaiComplications:
+    type: app-extension
+    platform: watchOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: PaiComplications
+      - path: PaiShared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(PAI_WATCH_BUNDLE_ID).widget
+        DEVELOPMENT_TEAM: C67CF9S4VU
+        TARGETED_DEVICE_FAMILY: "4"
+        GENERATE_INFOPLIST_FILE: "NO"
+        INFOPLIST_FILE: PaiComplications/Info.plist
+        APPLICATION_EXTENSION_API_ONLY: "YES"
+        LD_RUNPATH_SEARCH_PATHS: $(inherited) @executable_path/Frameworks @executable_path/../../Frameworks
+        SKIP_INSTALL: "YES"
+        CODE_SIGNING_ALLOWED: "NO"
+        CODE_SIGNING_REQUIRED: "NO"
+        CODE_SIGN_IDENTITY: ""
+      configs:
+        Release:
+          DEPLOYMENT_POSTPROCESSING: "YES"
+          STRIP_INSTALLED_PRODUCT: "YES"
+          STRIP_STYLE: "all"
+          DEAD_CODE_STRIPPING: "YES"
 schemes:
   tgwatch Watch App:
     build:

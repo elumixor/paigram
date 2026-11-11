@@ -39,6 +39,16 @@ struct ChatListView: View {
                 // glitches mid-reshape. With the bar present here, the push
                 // only has to morph content, not allocate a new glass surface.
                 .toolbar(.visible, for: .navigationBar)
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            PaiWatch.shared.presented = true
+                        } label: {
+                            Image(systemName: "gauge.with.dots.needle.67percent")
+                        }
+                        .accessibilityLabel("Pai")
+                    }
+                }
                 // Must live INSIDE the NavigationStack so the modifier's
                 // .navigationDestination(isPresented:) attaches to it.
                 .accountSwitcherSheet(presentation: .push, logoutAffordance: .allowed)

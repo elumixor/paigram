@@ -49,7 +49,7 @@ def _apple_prebuilt_watchos_application_impl(ctx):
     infoplist = ctx.actions.declare_file(ctx.label.name + "_Info.plist")
 
     # Track the in-repo snapshot so the watch build re-runs only when it changes.
-    inputs = [ctx.file._worker, ctx.file.versions_json] + ctx.files.srcs + ctx.files.app_icon
+    inputs = [ctx.file._worker, ctx.file.versions_json] + ctx.files.srcs + ctx.files.app_icon + ctx.files.glance_srcs
     exec_requirements = {
         "no-sandbox": "1",
         "no-remote": "1",
@@ -80,6 +80,8 @@ def _apple_prebuilt_watchos_application_impl(ctx):
             ctx.attr.display_name,
             # 1024px PNG replacing the snapshot's AppIcon; empty keeps the snapshot's icon.
             ctx.file.app_icon.path if ctx.file.app_icon else "",
+            # PaiGlance sources, copied into the snapshot's PaiShared/ (app + complications).
+            ctx.files.glance_srcs[0].dirname if ctx.files.glance_srcs else "",
         ],
         inputs = inputs,
         outputs = [archive, infoplist],
@@ -135,6 +137,11 @@ apple_prebuilt_watchos_application = rule(
             default = "//Telegram/WatchApp:sources",
             allow_files = True,
             doc = "Committed in-repo watch source snapshot (tracked inputs).",
+        ),
+        "glance_srcs": attr.label(
+            default = "//submodules/PaiGlance:sources",
+            allow_files = True,
+            doc = "PaiGlance sources shared with the phone app, copied into the watch build.",
         ),
         "in_repo_source_dir": attr.string(
             default = "Telegram/WatchApp",
