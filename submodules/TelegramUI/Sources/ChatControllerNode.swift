@@ -1444,7 +1444,16 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
                 footerPanels.append(panel)
             }
         }
-        if !hideTopPanels, self.chatPresentationInterfaceState.search == nil, let mediaPlayback = self.controller?.globalControlPanelsContextState?.mediaPlayback {
+        if self.chatPresentationInterfaceState.search == nil, PaiChat.isBot(self.chatPresentationInterfaceState.renderedPeer?.peer), let rail = PaiRail.state(thread: self.chatPresentationInterfaceState.chatLocation.threadId) {
+            footerPanels.append(HeaderPanelContainerComponent.Panel(
+                key: "pai-rail",
+                orderIndex: 1,
+                component: AnyComponent(PaiRailPanelComponent(rail: rail, theme: self.chatPresentationInterfaceState.theme, open: { [weak self] slug in
+                    self?.controller?.openPaiAgent(slug: slug, thread: nil)
+                }))
+            ))
+        }
+        if !hideTopPanels, self.chatPresentationInterfaceState.search == nil, let mediaPlayback =self.controller?.globalControlPanelsContextState?.mediaPlayback {
             if let playlistLocation = mediaPlayback.playlistLocation as? PeerMessagesPlaylistLocation, case let .custom(_, _, _, _, hidePanel) = playlistLocation, hidePanel {
                 
             } else {

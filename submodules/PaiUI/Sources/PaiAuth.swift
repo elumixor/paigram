@@ -22,7 +22,14 @@ public enum PaiAuth {
         lock.lock()
         defer { lock.unlock() }
         if let cached { return cached }
-        let value = readKeychain()
+        var value = readKeychain()
+        #if targetEnvironment(simulator)
+        // A simulator can be signed in from the command line: `SIMCTL_CHILD_PAI_DEVICE_TOKEN=pd_… xcrun simctl launch`.
+        if value == nil, let injected = ProcessInfo.processInfo.environment["PAI_DEVICE_TOKEN"], injected.hasPrefix("pd_") {
+            writeKeychain(injected)
+            value = injected
+        }
+        #endif
         cached = .some(value)
         return value
     }
