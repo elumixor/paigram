@@ -1291,7 +1291,7 @@ public final class ChatListNode: ListViewImpl {
                     return nil
                 case let .PeerId(value):
                     return EnginePeer.Id(value)
-                case .ThreadId, .GroupId, .ContactId, .ArchiveIntro, .EmptyIntro, .SectionHeader, .Notice, .additionalCategory, .TopPeer:
+                case .ThreadId, .GroupId, .ContactId, .ArchiveIntro, .EmptyIntro, .SectionHeader, .Notice, .additionalCategory, .TopPeer, .PaiAgent:
                     return nil
                 }
             }
@@ -3542,7 +3542,7 @@ public final class ChatListNode: ListViewImpl {
                                 } else {
                                     break loop
                                 }
-                            case .ArchiveIntro, .EmptyIntro, .SectionHeader, .HeaderEntry, .AdditionalCategory, .TopPeer:
+                            case .ArchiveIntro, .EmptyIntro, .SectionHeader, .HeaderEntry, .AdditionalCategory, .TopPeer, .PaiAgentEntry:
                                 break
                             }
                         }
