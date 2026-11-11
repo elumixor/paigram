@@ -10,6 +10,7 @@ import TelegramUIPreferences
 import TelegramBaseController
 import OverlayStatusController
 import AccountContext
+import PaiUI
 import AlertUI
 import PresentationDataUtils
 import UndoUI
@@ -1564,6 +1565,13 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                 return
             }
             self.ungroupCommunity(communityId: communityId)
+        }
+
+        self.chatListDisplayNode.mainContainerNode.paiAgentSelected = { [weak self] slug in
+            guard let self, let navigationController = self.navigationController as? NavigationController else {
+                return
+            }
+            PaiAgentList.open(slug: slug, context: self.context, navigationController: navigationController)
         }
 
         self.chatListDisplayNode.mainContainerNode.groupSelected = { [weak self] groupId in

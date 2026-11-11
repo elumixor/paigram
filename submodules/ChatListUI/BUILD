@@ -58,6 +58,7 @@ swift_library(
         "//submodules/ShareController:ShareController",
         "//submodules/GridMessageSelectionNode:GridMessageSelectionNode",
         "//submodules/ChatListFilterSettingsHeaderItem:ChatListFilterSettingsHeaderItem",
+        "//submodules/PaiUI:PaiUI",
         "//submodules/TelegramStringFormatting:TelegramStringFormatting",
         "//submodules/TelegramCallsUI:TelegramCallsUI",
         "//submodules/StickerResources:StickerResources",

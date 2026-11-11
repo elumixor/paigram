@@ -335,6 +335,16 @@ public struct PaiAgent: Codable, Identifiable, Equatable {
     public var threads: [PaiAgentThread]? = nil
     /// Its session now, when it has one: pai's tells whether pai itself is mid-turn.
     public var session: SessionState? = nil
+    /// Portrait, public (`/avatars/` needs no token); nil draws initials.
+    public var avatar: String? = nil
+    /// The short job title its pill shows, e.g. "Tech".
+    public var role: String? = nil
+    /// One line on what it is responsible for.
+    public var owns: String? = nil
+    /// The title of its Keep page, when it works on one.
+    public var taskTitle: String? = nil
+    /// `keep:page/<id>` it works on.
+    public var keepPage: String? = nil
 
     public struct SessionState: Codable, Equatable {
         public let state: String
@@ -345,6 +355,12 @@ public struct PaiAgent: Codable, Identifiable, Equatable {
     public var isPai: Bool { slug == PaiChat.paiSlug }
     public var isClosed: Bool { status == "closed" }
     public var briefLine: String { (brief ?? "").split(separator: "\n").first.map(String.init)?.paiPlain ?? "" }
+    /// What it is for, in a line: what it owns, else the page it works on, else the brief's first line.
+    public var job: String {
+        if let owns, !owns.isEmpty { return owns }
+        if let taskTitle, !taskTitle.isEmpty { return taskTitle }
+        return briefLine
+    }
 }
 
 /// One row of the message log (`GET /messages`): every word between the user, pai, its agents, routines and watchers.

@@ -163,6 +163,7 @@ public final class ChatListContainerNode: ASDisplayNode, ASGestureRecognizerDele
             previousItemNode.listNode.peerSelected = nil
             previousItemNode.listNode.disabledPeerSelected = nil
             previousItemNode.listNode.groupSelected = nil
+            previousItemNode.listNode.paiAgentSelected = nil
             previousItemNode.listNode.updatePeerGrouping = nil
             previousItemNode.listNode.contentOffsetChanged = nil
             previousItemNode.listNode.contentScrollingEnded = nil
@@ -224,6 +225,9 @@ public final class ChatListContainerNode: ASDisplayNode, ASGestureRecognizerDele
         }
         itemNode.listNode.groupSelected = { [weak self] groupId in
             self?.groupSelected?(groupId)
+        }
+        itemNode.listNode.paiAgentSelected = { [weak self] slug in
+            self?.paiAgentSelected?(slug)
         }
         itemNode.listNode.openCommunity = { [weak self] communityId in
             self?.openCommunity?(communityId)
@@ -434,6 +438,7 @@ public final class ChatListContainerNode: ASDisplayNode, ASGestureRecognizerDele
     public var peerSelected: ((EnginePeer, Int64?, Bool, Bool, ChatListNodeEntryPromoInfo?) -> Void)?
     public var disabledPeerSelected: ((EnginePeer, Int64?, ChatListDisabledPeerReason) -> Void)?
     var groupSelected: ((EngineChatList.Group) -> Void)?
+    var paiAgentSelected: ((String) -> Void)?
     var openCommunity: ((EnginePeer.Id) -> Void)?
     var ungroupCommunity: ((EnginePeer.Id) -> Void)?
     var updatePeerGrouping: ((EnginePeer.Id, Bool) -> Void)?

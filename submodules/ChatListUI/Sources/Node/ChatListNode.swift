@@ -7,6 +7,7 @@ import TelegramCore
 import TelegramPresentationData
 import TelegramUIPreferences
 import AccountContext
+import PaiUI
 import TelegramNotices
 import ContactsPeerItem
 import ContextUI
@@ -134,6 +135,7 @@ public final class ChatListNodeInteraction {
     var isSearchMode: Bool = false
     
     var isInlineMode: Bool = false
+    var paiAgentSelected: (String) -> Void = { _ in }
     var inlineNavigationLocation: ChatListHighlightedLocation?
     
     let animationCache: AnimationCache
@@ -414,6 +416,10 @@ private func mappedInsertEntries(context: AccountContext, nodeInteraction: ChatL
                     nodeInteraction.additionalCategorySelected(id)
                 }
             ), directionHint: entry.directionHint)
+        case let .PaiAgentEntry(_, row, presentationData):
+            return ListViewInsertItem(index: entry.index, previousIndex: entry.previousIndex, item: ChatListPaiAgentItem(presentationData: presentationData, row: row, action: { slug in
+                nodeInteraction.paiAgentSelected(slug)
+            }), directionHint: entry.directionHint)
         case let .TopPeer(_, peer):
             return ListViewInsertItem(index: entry.index, previousIndex: entry.previousIndex, item: ContactsPeerItem(
                 presentationData: ItemListPresentationData(theme: presentationData.theme, fontSize: presentationData.fontSize, strings: presentationData.strings, nameDisplayOrder: presentationData.nameDisplayOrder, dateTimeFormat: presentationData.dateTimeFormat),
@@ -1114,6 +1120,10 @@ private func mappedUpdateEntries(context: AccountContext, nodeInteraction: ChatL
                 } : nil), directionHint: entry.directionHint)
             case .HeaderEntry:
                 return ListViewUpdateItem(index: entry.index, previousIndex: entry.previousIndex, item: ChatListEmptyHeaderItem(), directionHint: entry.directionHint)
+            case let .PaiAgentEntry(_, row, presentationData):
+                return ListViewUpdateItem(index: entry.index, previousIndex: entry.previousIndex, item: ChatListPaiAgentItem(presentationData: presentationData, row: row, action: { slug in
+                    nodeInteraction.paiAgentSelected(slug)
+                }), directionHint: entry.directionHint)
             case let .TopPeer(_, peer):
                 return ListViewUpdateItem(index: entry.index, previousIndex: entry.previousIndex, item: ContactsPeerItem(
                     presentationData: ItemListPresentationData(theme: presentationData.theme, fontSize: presentationData.fontSize, strings: presentationData.strings, nameDisplayOrder: presentationData.nameDisplayOrder, dateTimeFormat: presentationData.dateTimeFormat),
@@ -1236,6 +1246,8 @@ public final class ChatListNode: ListViewImpl {
     public var additionalCategorySelected: ((Int) -> Void)?
     public var groupSelected: ((EngineChatList.Group) -> Void)?
     public var addContact: ((String) -> Void)?
+    /// Opens one of pai's agents from its chat-list row.
+    public var paiAgentSelected: ((String) -> Void)?
     public var activateSearch: (() -> Void)?
     public var deletePeerChat: ((EnginePeer.Id, Bool) -> Void)?
     public var deletePeerThread: ((EnginePeer.Id, Int64) -> Void)?
@@ -1918,6 +1930,9 @@ public final class ChatListNode: ListViewImpl {
             context.sharedContext.openExternalUrl(context: self.context, urlContext: .generic, url: url, forceExternal: false, presentationData: presentationData, navigationController: self.context.sharedContext.mainWindow?.viewController as? NavigationController, dismissInput: {})
         })
         nodeInteraction.isInlineMode = isInlineMode
+        nodeInteraction.paiAgentSelected = { [weak self] slug in
+            self?.paiAgentSelected?(slug)
+        }
         
         let viewProcessingQueue = self.viewProcessingQueue
         
@@ -2181,6 +2196,13 @@ public final class ChatListNode: ListViewImpl {
         }
         |> distinctUntilChanged
         
+        let paiAgents: Signal<[PaiAgentRow], NoError>
+        if case .chatList = mode, location == .chatList(groupId: .root), chatListFilter == nil {
+            paiAgents = PaiAgentList.signal()
+        } else {
+            paiAgents = .single([])
+        }
+
         let chatListNodeViewTransition = combineLatest(queue: viewProcessingQueue,
             hideArchivedFolderByDefault,
             displayArchiveIntro,
@@ -2190,16 +2212,17 @@ public final class ChatListNode: ListViewImpl {
             self.statePromise.get(),
             contacts,
             chatListFilters,
-            accountIsPremium
+            accountIsPremium,
+            paiAgents
         )
-        |> mapToQueue { (hideArchivedFolderByDefault, displayArchiveIntro, storageInfo, savedMessagesPeer, updateAndFilter, state, contacts, chatListFilters, accountIsPremium) -> Signal<ChatListNodeListViewTransition, NoError> in
+        |> mapToQueue { (hideArchivedFolderByDefault, displayArchiveIntro, storageInfo, savedMessagesPeer, updateAndFilter, state, contacts, chatListFilters, accountIsPremium, paiAgents) -> Signal<ChatListNodeListViewTransition, NoError> in
             let (update, filter) = updateAndFilter
             
             let previousHideArchivedFolderByDefaultValue = previousHideArchivedFolderByDefault.swap(hideArchivedFolderByDefault)
             
             let innerIsMainTab = location == .chatList(groupId: .root) && chatListFilter == nil
             
-            let (rawEntries, isLoading) = chatListNodeEntriesForView(view: update.list, state: state, savedMessagesPeer: savedMessagesPeer, foundPeers: state.foundPeers, hideArchivedFolderByDefault: hideArchivedFolderByDefault, displayArchiveIntro: displayArchiveIntro, mode: mode, chatListLocation: location, contacts: contacts, accountPeerId: accountPeerId, isMainTab: innerIsMainTab)
+            let (rawEntries, isLoading) = chatListNodeEntriesForView(view: update.list, state: state, savedMessagesPeer: savedMessagesPeer, foundPeers: state.foundPeers, hideArchivedFolderByDefault: hideArchivedFolderByDefault, displayArchiveIntro: displayArchiveIntro, mode: mode, chatListLocation: location, contacts: contacts, accountPeerId: accountPeerId, isMainTab: innerIsMainTab, paiAgents: paiAgents)
             var isEmpty = true
             var entries = rawEntries.filter { entry in
                 switch entry {
