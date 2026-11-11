@@ -1,5 +1,5 @@
 /**
- * `bun run testflight [--no-build] [--no-upload] [--no-bump] [--once] [--minor]`: a patch (or minor) version bump committed to versions.json, fresh App Store provisioning profiles for the
+ * `bun run testflight [--no-build] [--no-upload] [--no-bump] [--once] [--minor]`: a patch (or minor) version bump committed to versions.json, the swiftc precheck (scripts/precheck.ts), fresh App Store provisioning profiles for the
  * app, its extensions and the watch app (scripts/provision.ts), a release build for devices with
  * every extension and the watch app embedded, the ipa uploaded to App Store Connect, then a wait until
  * TestFlight has processed it. Needs `.env` (ASC_KEY_ID, ASC_ISSUER_ID, TEAM_ID) and
@@ -7,6 +7,7 @@
  */
 import { $ } from "bun";
 import { asc, ascGet } from "./asc.ts";
+import { precheck } from "./precheck.ts";
 import { provision } from "./provision.ts";
 import { releaseBuild } from "./release-build.ts";
 import { bumpVersion, codesigningPath as codesigning, configPath as config, readVersions, root } from "./repo.ts";
@@ -53,6 +54,7 @@ if (process.argv.includes("--once") && (await buildNumber(version)) > 1) {
 }
 const number = skipBuild ? Number(await $`unzip -p ${root}bazel-bin/Telegram/Telegram.ipa Payload/Telegram.app/Info.plist | plutil -extract CFBundleVersion raw -o - -`.text()) : await buildNumber(version);
 if (!skipBuild) {
+  await precheck();
   await provision();
   await releaseBuild(codesigning, number, true);
 }

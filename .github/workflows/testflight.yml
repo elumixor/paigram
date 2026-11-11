@@ -2,14 +2,16 @@ name: TestFlight
 
 # Push a tag (`bun run tag`, from this Mac, the box or pai's chat) and the build lands on the phone. It runs
 # on the developer's Mac as a self-hosted runner (label `paigram-mac`): free, and fast from its warm Bazel
-# cache. While the Mac sleeps the job waits in the queue, and the same tag's GitHub runner build
-# (`testflight-hosted.yml`) ships it instead; whichever finishes second does nothing.
+# cache. While the Mac sleeps the job waits in the queue and the same tag's GitHub runner build
+# (`testflight-hosted.yml`) ships it instead; whichever finishes second does nothing (`--once`). When the
+# Mac's job fails, stalls or times out, `fallback` starts the GitHub runner's build of the same tag.
 on:
   push:
     tags: ['ios-v*']
   workflow_dispatch:
 
-# Lets mac-release.ts cancel the GitHub runner's build of the same tag: the runner service has no gh login.
+# Lets mac-release.ts cancel the GitHub runner's build of the same tag and `fallback` start one: the
+# runner service has no gh login of its own.
 permissions:
   actions: write
   contents: read
@@ -21,9 +23,26 @@ concurrency:
 jobs:
   testflight:
     runs-on: [self-hosted, paigram-mac]
-    timeout-minutes: 180
+    # A warm build takes 15–40 minutes; a cold cache about 90. Longer than this is a stalled Mac.
+    timeout-minutes: 150
     steps:
       - name: Build and upload from ~/dev/@desk/native/paigram-ios
         env:
           GH_TOKEN: ${{ github.token }}
         run: cd "$HOME/dev/@desk/native/paigram-ios" && bun scripts/mac-release.ts "$GITHUB_REF_NAME"
+
+  # Anything but success on the Mac (a failed check, a build error, a lost runner, the timeout) hands the
+  # tag to the GitHub runner. That run finds the version already uploaded and stops if the Mac did get
+  # that far.
+  fallback:
+    needs: testflight
+    if: always() && needs.testflight.result != 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Start the GitHub runner's build of ${{ github.ref_name }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run testflight-hosted.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME"
+          echo "::warning::The Mac's build of $GITHUB_REF_NAME ended with '${{ needs.testflight.result }}'; the GitHub runner builds it instead: https://github.com/$GITHUB_REPOSITORY/actions/workflows/testflight-hosted.yml"

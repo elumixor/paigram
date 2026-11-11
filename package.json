@@ -7,6 +7,7 @@
     "testflight": "bun scripts/testflight.ts",
     "device": "bun scripts/device.ts",
     "tag": "bun scripts/tag.ts",
+    "precheck": "bun scripts/precheck.ts",
     "ci-secrets": "bun scripts/ci-secrets.ts",
     "watch-icon": "bun scripts/watch-icon.ts",
     "typecheck": "tsc"

@@ -10,6 +10,7 @@ import { $ } from "bun";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { ascGet, ascPost } from "./asc.ts";
+import { precheck } from "./precheck.ts";
 import { provision, readProfile } from "./provision.ts";
 import { releaseBuild } from "./release-build.ts";
 import { adHocCodesigningPath, configPath as config, root } from "./repo.ts";
@@ -97,6 +98,7 @@ async function install(device: Device) {
 
 const device = await pickDevice();
 if (!skipBuild) {
+  await precheck();
   const registered = await ensureRegistered(device);
   if (registered || !(await covers(`${adHocCodesigningPath}/profiles/Telegram.mobileprovision`, device))) await provision("adHoc");
   await releaseBuild(adHocCodesigningPath, buildNumber, false);
