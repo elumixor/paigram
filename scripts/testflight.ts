@@ -5,10 +5,11 @@
  * TestFlight has processed it. Needs `.env` (ASC_KEY_ID, ASC_ISSUER_ID, TEAM_ID) and
  * `build-system/paigram.json`. CI builds a version that is already tagged, so they pass `--no-bump`.
  */
+import { tmpdir } from "node:os";
 import { $ } from "bun";
 import { asc, ascGet } from "./asc.ts";
 import { precheck } from "./precheck.ts";
-import { provision } from "./provision.ts";
+import { provision, readProfile } from "./provision.ts";
 import { releaseBuild } from "./release-build.ts";
 import { bumpVersion, codesigningPath as codesigning, configPath as config, readVersions, root } from "./repo.ts";
 
@@ -17,6 +18,7 @@ const skipUpload = process.argv.includes("--no-upload");
 const skipBump = skipBuild || process.argv.includes("--no-bump");
 
 const { bundle_id: bundleId } = (await Bun.file(config).json()) as { bundle_id: string };
+const ipa = `${root}bazel-bin/Telegram/Telegram.ipa`;
 
 /** Build numbers only have to go up within a version: one past the highest App Store Connect has for it, so a new version starts at 1. */
 async function buildNumber(version: string): Promise<number> {
@@ -27,7 +29,19 @@ async function buildNumber(version: string): Promise<number> {
 }
 
 async function upload() {
-  await $`xcrun altool --upload-app -f ${root}bazel-bin/Telegram/Telegram.ipa -t ios --apiKey ${asc.keyId} --apiIssuer ${asc.issuerId}`;
+  await $`xcrun altool --upload-app -f ${ipa} -t ios --apiKey ${asc.keyId} --apiIssuer ${asc.issuerId}`;
+}
+
+/**
+ * The watch app has to carry its own profile. A file sync that mirrors this tree puts older profiles back
+ * while the build runs, and App Store Connect then rejects the upload with an unrelated-looking error 90046.
+ */
+async function checkWatchProfile() {
+  const path = `${tmpdir()}/paigram-watch.mobileprovision`;
+  await $`unzip -p ${ipa} ${"Payload/Telegram.app/Watch/tgwatch Watch App.app/embedded.mobileprovision"} > ${path}`;
+  const signed = (await readProfile(path)).Entitlements["application-identifier"];
+  const expected = `${asc.teamId}.${bundleId}.watchkitapp`;
+  if (signed !== expected) throw new Error(`the watch app is signed for ${signed}, not ${expected}: something replaced the profiles under build-input/ during the build`);
 }
 
 /** Build numbers restart at 1 for every version, so the build is looked up by both. */
@@ -52,11 +66,12 @@ if (process.argv.includes("--once") && (await buildNumber(version)) > 1) {
   console.log(`v${version} is already on TestFlight; nothing to do`);
   process.exit(0);
 }
-const number = skipBuild ? Number(await $`unzip -p ${root}bazel-bin/Telegram/Telegram.ipa Payload/Telegram.app/Info.plist | plutil -extract CFBundleVersion raw -o - -`.text()) : await buildNumber(version);
+const number = skipBuild ? Number(await $`unzip -p ${ipa} Payload/Telegram.app/Info.plist | plutil -extract CFBundleVersion raw -o - -`.text()) : await buildNumber(version);
 if (!skipBuild) {
   await precheck();
   await provision();
   await releaseBuild(codesigning, number, true);
+  await checkWatchProfile();
 }
 if (!skipUpload) {
   await upload();

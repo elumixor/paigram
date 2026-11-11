@@ -2,8 +2,8 @@
  * Everything a signed build needs from App Store Connect: the bundle ids of the app, its extensions
  * and the watch app registered with their capabilities, and a fresh provisioning profile for each,
  * written under the names Telegram's build expects. App Store profiles go to
- * `build-system/paigram-codesigning/profiles/` for TestFlight; Ad Hoc ones, which install on the
- * registered iPhones directly, go to `build-system/paigram-codesigning-adhoc/profiles/` and leave the
+ * `build-input/paigram-codesigning/profiles/` for TestFlight; Ad Hoc ones, which install on the
+ * registered iPhones directly, go to `build-input/paigram-codesigning-adhoc/profiles/` and leave the
  * watch app out. Both are signed with the Distribution certificate, so push stays on production APNs.
  * App groups cannot be attached through the API, so each extension's profile is checked for the group
  * and the portal link is printed when it is missing.

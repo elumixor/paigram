@@ -4,8 +4,9 @@ import { $ } from "bun";
 export const root = new URL("..", import.meta.url).pathname;
 export const configPath = `${root}build-system/paigram.json`;
 export const exampleConfigPath = `${root}build-system/paigram.example.json`;
-export const codesigningPath = `${root}build-system/paigram-codesigning`;
-export const adHocCodesigningPath = `${root}build-system/paigram-codesigning-adhoc`;
+/** Under `build-input/` with everything else a build writes: the box's file sync leaves that directory alone on the Mac. */
+export const codesigningPath = `${root}build-input/paigram-codesigning`;
+export const adHocCodesigningPath = `${root}build-input/paigram-codesigning-adhoc`;
 export const secretsPath = `${root}submodules/PaiUI/Sources/PaiSecrets.swift`;
 const versionsPath = `${root}versions.json`;
 

@@ -75,9 +75,10 @@ jobs:
             echo "retry=false" >> "$GITHUB_OUTPUT"
           fi
 
+  # `always()`: without a status function the condition also asks that `build` succeeded, further up the chain.
   build-retry:
     needs: retry-check
-    if: needs.retry-check.outputs.retry == 'true'
+    if: always() && needs.retry-check.outputs.retry == 'true'
     uses: ./.github/workflows/testflight-hosted-build.yml
     with:
       runner: macos-15
