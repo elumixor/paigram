@@ -938,6 +938,7 @@ struct AllWidgetsEntryPoint {
 @available(iOSApplicationExtension 14.0, iOS 14.0, *)
 struct AllWidgets: WidgetBundle {
    var body: some Widget {
+        PaiUsageWidget()
         Static_Widget()
         Static_AvatarsWidget()
    }

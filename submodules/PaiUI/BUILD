@@ -20,6 +20,7 @@ swift_library(
         "//submodules/ItemListUI:ItemListUI",
         "//submodules/AlertUI:AlertUI",
         "//submodules/PromptUI:PromptUI",
+        "//submodules/PaiGlance:PaiGlance",
     ],
     visibility = [
         "//visibility:public",

@@ -444,6 +444,16 @@ plist_fragment(
                 <string>mailto</string>
             </array>
         </dict>
+        <dict>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>CFBundleURLName</key>
+            <string>{telegram_bundle_id}.paigram</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>paigram</string>
+            </array>
+        </dict>
     </array>
     """.format(
         telegram_bundle_id = telegram_bundle_id,
@@ -1213,6 +1223,7 @@ swift_library(
         "//submodules/Postbox:Postbox",
         "//submodules/TelegramCore:TelegramCore",
         "//submodules/OpenSSLEncryptionProvider:OpenSSLEncryptionProvider",
+        "//submodules/PaiGlance:PaiGlance",
         "//Telegram:GeneratedSources",
     ],
 )

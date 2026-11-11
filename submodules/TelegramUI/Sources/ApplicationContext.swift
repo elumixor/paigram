@@ -28,6 +28,9 @@ import TelegramCallsUI
 import AuthorizationUI
 import ChatListUI
 import StoryContainerScreen
+import PaiGlance
+import PaiUI
+import StatisticsUI
 import ChatMessageNotificationItem
 import PhoneNumberFormat
 import AttachmentUI
@@ -946,6 +949,16 @@ final class AuthorizedApplicationContext {
     
     func openUrl(_ url: URL, external: Bool = false) {
         if self.rootController.rootTabController != nil {
+            // Paigram: the widget's and the usage alerts' links.
+            if let target = PaiGlanceLink.parse(url) {
+                switch target {
+                case let .agent(slug):
+                    PaiAgentList.open(slug: slug, context: self.context, navigationController: self.rootController)
+                case .usage:
+                    self.rootController.pushViewController(paiStatsController(context: self.context))
+                }
+                return
+            }
             let presentationData = self.context.sharedContext.currentPresentationData.with { $0 }
             self.context.sharedContext.openExternalUrl(context: self.context, urlContext: external ? .external : .generic, url: url.absoluteString, forceExternal: false, presentationData: presentationData, navigationController: self.rootController, dismissInput: { [weak self] in
                 self?.rootController.view.endEditing(true)

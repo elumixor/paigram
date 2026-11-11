@@ -54,6 +54,7 @@ swift_library(
         "//submodules/AsyncDisplayKit:AsyncDisplayKit",
         "//submodules/Display:Display",
         "//submodules/PaiUI:PaiUI",
+        "//submodules/PaiGlance:PaiGlance",
         "//submodules/Postbox:Postbox",
         "//submodules/TelegramCore:TelegramCore",
         "//submodules/MtProtoKit:MtProtoKit",

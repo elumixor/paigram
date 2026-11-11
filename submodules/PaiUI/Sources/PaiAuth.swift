@@ -44,6 +44,7 @@ public enum PaiAuth {
             PaiBox.clear()
         }
         PaiNotificationAnswer.refreshConfig()
+        PaiGlanceSync.shared.start()
     }
 
     @MainActor
