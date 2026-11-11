@@ -37,6 +37,9 @@ def _apple_prebuilt_watchos_application_impl(ctx):
     # a target. The local action reads it directly. Empty => unsigned build; when set but
     # the identity is empty, the worker derives the signing identity from the profile.
     profile = ctx.var.get("watchProvisioningProfile", "")
+    # The profile is not an input, so its content (and the complications profile's next to it) arrives
+    # as a digest: a new profile under the same path re-runs the action instead of hitting the cache.
+    profile_digest = ctx.var.get("watchProvisioningProfileDigest", "")
     # The embedded watch app's CFBundleShortVersionString / CFBundleVersion must match
     # the host app, or rules_apple's child-version verification fails. Source the
     # marketing version from versions.json (same as the host's VersionInfoPlist) and the
@@ -82,6 +85,8 @@ def _apple_prebuilt_watchos_application_impl(ctx):
             ctx.file.app_icon.path if ctx.file.app_icon else "",
             # PaiGlance sources, copied into the snapshot's PaiShared/ (app + complications).
             ctx.files.glance_srcs[0].dirname if ctx.files.glance_srcs else "",
+            # Unused by the worker: only keys the action on the profiles' content.
+            profile_digest,
         ],
         inputs = inputs,
         outputs = [archive, infoplist],

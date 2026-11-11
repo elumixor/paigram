@@ -33,15 +33,15 @@ async function upload() {
 }
 
 /**
- * The watch app has to carry its own profile. A file sync that mirrors this tree puts older profiles back
- * while the build runs, and App Store Connect then rejects the upload with an unrelated-looking error 90046.
+ * The watch app has to carry its own profile. A file sync that puts older profiles back while the build runs,
+ * or a watch app Bazel kept from an earlier build, gets the upload rejected with an unrelated-looking error 90046.
  */
 async function checkWatchProfile() {
   const path = `${tmpdir()}/paigram-watch.mobileprovision`;
   await $`unzip -p ${ipa} ${"Payload/Telegram.app/Watch/tgwatch Watch App.app/embedded.mobileprovision"} > ${path}`;
   const signed = (await readProfile(path)).Entitlements["application-identifier"];
   const expected = `${asc.teamId}.${bundleId}.watchkitapp`;
-  if (signed !== expected) throw new Error(`the watch app is signed for ${signed}, not ${expected}: something replaced the profiles under build-input/ during the build`);
+  if (signed !== expected) throw new Error(`the watch app is signed for ${signed}, not ${expected}: the profiles under build-input/ were replaced during the build, or Bazel reused an older watch app`);
 }
 
 /** Build numbers restart at 1 for every version, so the build is looked up by both. */

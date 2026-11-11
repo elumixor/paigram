@@ -1,6 +1,7 @@
 #!/bin/python3
 
 import argparse
+import hashlib
 import os
 import shlex
 import sys
@@ -203,6 +204,19 @@ class BazelCommandLine:
         self.watch_signing_identity = signing_identity
         self.watch_provisioning_profile = provisioning_profile
 
+    def watch_profiles_digest(self):
+        # The watch profiles reach the watch action as a path, not as inputs. Their content has to be
+        # part of the action's key, or Bazel serves a watch app signed with an earlier profile.
+        if not self.watch_provisioning_profile:
+            return ''
+        digest = hashlib.sha256()
+        widget_profile = os.path.join(os.path.dirname(self.watch_provisioning_profile), 'WatchWidget.mobileprovision')
+        for path in [self.watch_provisioning_profile, widget_profile]:
+            if os.path.isfile(path):
+                with open(path, 'rb') as file:
+                    digest.update(file.read())
+        return digest.hexdigest()
+
     def get_startup_bazel_arguments(self):
         combined_arguments = []
         if self.bazel_user_root is not None:
@@ -235,6 +249,7 @@ class BazelCommandLine:
                 '--define=watchApiHash={}'.format(self.watch_api_hash),
                 '--define=watchSigningIdentity={}'.format(self.watch_signing_identity or ''),
                 '--define=watchProvisioningProfile={}'.format(self.watch_provisioning_profile or ''),
+                '--define=watchProvisioningProfileDigest={}'.format(self.watch_profiles_digest()),
             ]
         return args
 
