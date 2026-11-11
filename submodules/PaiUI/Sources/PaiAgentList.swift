@@ -168,6 +168,19 @@ public enum PaiAvatars {
         return String(letters).uppercased()
     }
 
+    /// The initials on their colour as a round image, for screens drawing a face before its portrait arrives.
+    public static func placeholder(name: String, slug: String, size: CGFloat) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = UIScreen.main.scale
+        return UIGraphicsImageRenderer(size: CGSize(width: size, height: size), format: format).image { _ in
+            UIColor(hue: hue(slug), saturation: 0.45, brightness: 0.72, alpha: 1.0).setFill()
+            UIBezierPath(ovalIn: CGRect(x: 0, y: 0, width: size, height: size)).fill()
+            let text = NSAttributedString(string: initials(name), attributes: [.font: UIFont.systemFont(ofSize: size * 0.38, weight: .semibold), .foregroundColor: UIColor.white])
+            let textSize = text.size()
+            text.draw(at: CGPoint(x: (size - textSize.width) / 2.0, y: (size - textSize.height) / 2.0))
+        }
+    }
+
     public static func hue(_ slug: String) -> CGFloat {
         var hash: UInt32 = 0
         for scalar in slug.unicodeScalars {

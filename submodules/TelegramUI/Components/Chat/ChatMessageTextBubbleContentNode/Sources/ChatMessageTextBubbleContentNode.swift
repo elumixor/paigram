@@ -472,6 +472,12 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
                             return MessageTextEntity(range: (entity.range.lowerBound - cut)..<(entity.range.upperBound - cut), type: entity.type)
                         }
                     }
+                    // Keep pages and dev sessions show as titled links, never as raw URNs.
+                    let (linkedText, linkedEntities) = PaiURN.rewrite(text: rawText, entities: messageEntities ?? [])
+                    if linkedText != rawText {
+                        rawText = linkedText
+                        messageEntities = linkedEntities
+                    }
                 }
                 
                 var formattedDateUpdatePeriod: Int32?

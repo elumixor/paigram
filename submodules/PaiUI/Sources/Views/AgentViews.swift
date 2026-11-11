@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftSignalKit
 
 extension Color {
     /// An agent's status in colour: running in the accent, waiting on you in amber, the rest quiet.
@@ -195,6 +196,9 @@ struct AgentChatView: View {
                         ForEach(rows) { row in
                             AgentMessageRow(row: row, slug: slug, open: open, answer: answer).id(row.id)
                         }
+                        ForEach(store.drafts(of: slug)) { draft in
+                            DraftCard(draft: draft, face: agent) { send in resolve(draft.id, send: send) }.id("draft-\(draft.id)")
+                        }
                     }
                     .padding(.horizontal, 12).padding(.vertical, 10)
                 }
@@ -234,6 +238,7 @@ struct AgentChatView: View {
         }
         .task {
             store.start()
+            store.refreshDrafts()
             await store.loadChat(slug)
         }
     }
@@ -277,6 +282,17 @@ struct AgentChatView: View {
                 try await store.send(text, to: slug)
             } catch {
                 draft = text
+                self.error = error.localizedDescription
+            }
+        }
+    }
+
+    private func resolve(_ draftId: Int, send: Bool) {
+        error = nil
+        Task {
+            do {
+                try await store.resolve(draft: draftId, send: send)
+            } catch {
                 self.error = error.localizedDescription
             }
         }
@@ -330,6 +346,12 @@ private struct AgentMessageRow: View {
         return party
     }
 
+    /// Who wrote a row, drawn as a face; routines and watchers get a generic one.
+    private func face(_ party: String) -> AgentFace.Who {
+        if let agent = store.agent(party) { return AgentFace.Who(slug: agent.slug, name: agent.name, avatar: agent.avatar) }
+        return AgentFace.Who(slug: party, name: name(party), avatar: nil)
+    }
+
     var body: some View {
         switch row.kind {
         case "event":
@@ -338,22 +360,22 @@ private struct AgentMessageRow: View {
             NoticeCard(row: row)
         case "delegate", "request":
             if row.from == slug {
-                AgentCard(symbol: PaiEventIcon.symbol(event: row.kind), name: name(row.to), line: row.firstLine, status: store.agent(row.to)?.status) { open(row.to) }
+                AgentCard(symbol: PaiEventIcon.symbol(event: row.kind), name: name(row.to), line: row.firstLine, status: store.agent(row.to)?.status, face: face(row.to)) { open(row.to) }
             } else {
-                Bubble(text: row.body, mine: false, caption: "from \(name(row.from))")
+                Bubble(text: row.body, mine: false, caption: "from \(name(row.from))", face: face(row.from))
             }
         case "report", "response":
             if row.to == slug {
-                AgentCard(symbol: PaiEventIcon.symbol(event: row.kind), name: name(row.from), line: row.firstLine, status: nil) { open(row.from) }
+                AgentCard(symbol: PaiEventIcon.symbol(event: row.kind), name: name(row.from), line: row.firstLine, status: nil, face: face(row.from)) { open(row.from) }
             } else {
-                Bubble(text: row.body, mine: false, caption: "to \(name(row.to))")
+                Bubble(text: row.body, mine: false, caption: "to \(name(row.to))", face: face(row.from))
             }
         case "ask":
-            AskCard(row: row, answer: answer)
+            AskCard(row: row, face: face(row.from), answer: answer)
         case "answer":
             Bubble(text: row.body, mine: true, caption: nil, symbol: "checkmark.bubble")
         default:
-            Bubble(text: row.body, mine: row.from == "user", caption: row.from == "user" || row.from == slug ? nil : name(row.from))
+            Bubble(text: row.body, mine: row.from == "user", caption: row.from == "user" || row.from == slug ? nil : name(row.from), face: row.from == "user" ? nil : face(row.from))
         }
     }
 }
@@ -403,12 +425,17 @@ struct AgentCard: View {
     let name: String
     let line: String
     let status: String?
+    var face: AgentFace.Who? = nil
     let open: () -> Void
 
     var body: some View {
         Button(action: open) {
             HStack(spacing: 10) {
-                Image(systemName: symbol).font(.footnote.weight(.semibold)).foregroundStyle(Color.accentColor).frame(width: 20)
+                if let face {
+                    AgentFace(who: face, size: 30)
+                } else {
+                    Image(systemName: symbol).font(.footnote.weight(.semibold)).foregroundStyle(Color.accentColor).frame(width: 20)
+                }
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(name).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
@@ -440,30 +467,146 @@ struct AgentCard: View {
 @available(iOS 16.0, *)
 private struct AskCard: View {
     let row: PaiLogMessage
+    let face: AgentFace.Who
     let answer: (Int, String) -> Void
+    @State private var typed = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(row.meta.breadcrumb ?? "Question", systemImage: "questionmark.bubble")
-                .font(.caption.weight(.semibold)).foregroundStyle(Color.paiWaiting)
-            MarkdownText(text: row.body).font(.callout)
-            if let given = row.meta.answer {
-                Label(given, systemImage: "checkmark.bubble").font(.footnote).foregroundStyle(.secondary)
-            } else if let askId = row.meta.askId, let options = row.meta.options, !options.isEmpty {
-                ForEach(options, id: \.self) { option in
-                    Button { answer(askId, option) } label: {
-                        Text(option).font(.footnote.weight(.medium)).frame(maxWidth: .infinity).padding(.vertical, 7)
-                            .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        HStack(alignment: .top, spacing: 8) {
+            AgentFace(who: face, size: 28)
+            VStack(alignment: .leading, spacing: 8) {
+                Label(row.meta.breadcrumb ?? "Question", systemImage: "questionmark.bubble")
+                    .font(.caption.weight(.semibold)).foregroundStyle(Color.paiWaiting)
+                MarkdownText(text: row.body).font(.callout)
+                if let given = row.meta.answer {
+                    Label(given, systemImage: "checkmark.bubble").font(.footnote).foregroundStyle(.secondary)
+                } else if let askId = row.meta.askId {
+                    ForEach(row.meta.options ?? [], id: \.self) { option in
+                        Button { answer(askId, option) } label: {
+                            Text(option).font(.footnote.weight(.medium)).frame(maxWidth: .infinity).padding(.vertical, 8)
+                                .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Color.accentColor)
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(Color.accentColor)
+                    HStack(spacing: 6) {
+                        TextField("Your answer", text: $typed, axis: .vertical)
+                            .font(.footnote)
+                            .lineLimit(1...4)
+                            .padding(.horizontal, 10).padding(.vertical, 7)
+                            .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        Button {
+                            let text = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+                            guard !text.isEmpty else { return }
+                            typed = ""
+                            answer(askId, text)
+                        } label: {
+                            Image(systemName: "arrow.up.circle.fill").font(.title3)
+                        }
+                        .disabled(typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
                 }
             }
+            .padding(12)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
-        .padding(12)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .frame(maxWidth: 420, alignment: .leading)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// A message an agent wrote for the user to send: where it goes, what it says, Send or Discard.
+@available(iOS 16.0, *)
+private struct DraftCard: View {
+    let draft: PaiDraft
+    let face: PaiAgent?
+    let resolve: (Bool) -> Void
+
+    private var channel: (String, String) {
+        switch draft.channel {
+        case "email": return ("Email", "envelope")
+        case "telegram": return ("Telegram", "paperplane")
+        case "linkedin": return ("LinkedIn message", "person.2")
+        case "post": return ("LinkedIn post", "megaphone")
+        default: return ("WhatsApp", "message")
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            if let face {
+                AgentFace(who: AgentFace.Who(slug: face.slug, name: face.name, avatar: face.avatar), size: 28)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                Label("\(channel.0) draft", systemImage: channel.1)
+                    .font(.caption.weight(.semibold)).foregroundStyle(Color.paiWaiting)
+                if let to = draft.fields.to, !to.isEmpty {
+                    Text("To \(to)").font(.footnote.weight(.semibold))
+                }
+                if let subject = draft.fields.subject, !subject.isEmpty {
+                    Text(subject).font(.footnote.weight(.medium))
+                }
+                if let body = draft.fields.body, !body.isEmpty {
+                    MarkdownText(text: body).font(.callout)
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+                if let note = draft.note, !note.isEmpty {
+                    Text(note).font(.caption).foregroundStyle(.secondary)
+                }
+                HStack(spacing: 8) {
+                    Button { resolve(false) } label: {
+                        Text("Discard").font(.footnote.weight(.medium)).frame(maxWidth: .infinity).padding(.vertical, 8)
+                            .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.red)
+                    Button { resolve(true) } label: {
+                        Label("Send", systemImage: "paperplane.fill").font(.footnote.weight(.semibold)).frame(maxWidth: .infinity).padding(.vertical, 8)
+                            .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.white)
+                }
+            }
+            .padding(12)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .frame(maxWidth: 420, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// An agent's portrait in a circle, its initials on its colour until the portrait loads.
+@available(iOS 16.0, *)
+struct AgentFace: View {
+    struct Who: Equatable {
+        let slug: String
+        let name: String
+        let avatar: String?
+    }
+
+    let who: Who
+    let size: CGFloat
+    @State private var image: UIImage?
+
+    var body: some View {
+        ZStack {
+            if let image = image ?? who.avatar.flatMap(PaiAvatars.cached) {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                Image(uiImage: PaiAvatars.placeholder(name: who.name, slug: who.slug, size: size)).resizable()
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .task(id: who.avatar) {
+            guard let url = who.avatar, PaiAvatars.cached(url) == nil else { return }
+            image = await withCheckedContinuation { continuation in
+                let _ = PaiAvatars.image(url).start(next: { continuation.resume(returning: $0) })
+            }
+        }
     }
 }
 
@@ -474,8 +617,19 @@ private struct Bubble: View {
     let mine: Bool
     let caption: String?
     var symbol: String? = nil
+    var face: AgentFace.Who? = nil
 
     var body: some View {
+        HStack(alignment: .bottom, spacing: 6) {
+            if let face, !mine {
+                AgentFace(who: face, size: 28)
+            }
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
+    }
+
+    private var content: some View {
         VStack(alignment: mine ? .trailing : .leading, spacing: 2) {
             if let caption {
                 Text(caption).font(.caption2.weight(.semibold)).foregroundStyle(.secondary).padding(.horizontal, 6)
@@ -490,6 +644,5 @@ private struct Bubble: View {
             .textSelection(.enabled)
         }
         .frame(maxWidth: 320, alignment: mine ? .trailing : .leading)
-        .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
     }
 }

@@ -306,6 +306,7 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
     var paiProjectObserver: NSObjectProtocol?
     var paiUsageObserver: NSObjectProtocol?
     var paiNeedsObserver: NSObjectProtocol?
+    var paiURNObserver: NSObjectProtocol?
     let paiUsageNode = PaiUsageRingNode()
     var paiUsageNavigationButton: ChatNavigationButton?
 
@@ -7030,6 +7031,9 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
         if let paiNeedsObserver = self.paiNeedsObserver {
             NotificationCenter.default.removeObserver(paiNeedsObserver)
         }
+        if let paiURNObserver = self.paiURNObserver {
+            NotificationCenter.default.removeObserver(paiURNObserver)
+        }
         if let paiAgentsObserver = self.paiAgentsObserver {
             NotificationCenter.default.removeObserver(paiAgentsObserver)
         }
@@ -7758,6 +7762,19 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
             self.paiProjectObserver = NotificationCenter.default.addObserver(forName: PaiChat.projectChanged, object: nil, queue: .main, using: redrawTitle)
             self.paiUsageObserver = NotificationCenter.default.addObserver(forName: PaiChat.usageChanged, object: nil, queue: .main, using: redrawTitle)
             self.paiNeedsObserver = NotificationCenter.default.addObserver(forName: PaiChat.needsChanged, object: nil, queue: .main, using: redrawTitle)
+            // A Keep page's or dev session's title arrived: the messages naming one redraw their link with it.
+            self.paiURNObserver = NotificationCenter.default.addObserver(forName: PaiURN.resolved, object: nil, queue: .main, using: { [weak self] _ in
+                guard let self else { return }
+                var ids: [MessageId] = []
+                self.chatDisplayNode.historyNode.forEachVisibleMessageItemNode { itemNode in
+                    if let message = itemNode.item?.message, !PaiURN.matches(in: message.text).isEmpty {
+                        ids.append(message.id)
+                    }
+                }
+                for id in ids {
+                    self.chatDisplayNode.historyNode.requestMessageUpdate(id)
+                }
+            })
         }
         
         self.chatDisplayNode.historyNode.experimentalSnapScrollToItem = false

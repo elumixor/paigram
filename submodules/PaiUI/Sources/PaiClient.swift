@@ -142,6 +142,21 @@ public final class PaiClient {
         if result.answered == false { throw PaiClientError(message: result.error ?? "Nothing to answer") }
     }
 
+    // MARK: Drafts
+
+    public func drafts() async throws -> [PaiDraft] {
+        struct Drafts: Decodable { let drafts: [PaiDraft] }
+        return try await call(Drafts.self, "/drafts").drafts
+    }
+
+    public func sendDraft(_ id: Int) async throws {
+        _ = try await call(JSONValue.self, "/drafts/\(id)/send", method: "POST", body: [String: Any]())
+    }
+
+    public func discardDraft(_ id: Int) async throws {
+        _ = try await call(JSONValue.self, "/drafts/\(id)/discard", method: "POST", body: [String: Any]())
+    }
+
     // MARK: Tasks and routines
 
     public func taskItems(includeClosed: Bool = false) async throws -> [PaiTaskItem] {

@@ -5,6 +5,7 @@ import ChatMessageItemCommon
 import Display
 import Foundation
 import PaiUI
+import SwiftSignalKit
 import TelegramCore
 import TelegramPresentationData
 import UIKit
@@ -12,6 +13,8 @@ import UIKit
 private let rowGap: CGFloat = 3.0
 private let pillGap: CGFloat = 8.0
 private let chevronWidth: CGFloat = 18.0
+private let faceSize: CGFloat = 32.0
+private let faceGap: CGFloat = 10.0
 private let waitingColor = UIColor(red: 0.93, green: 0.62, blue: 0.10, alpha: 1.0)
 
 /// A status as a small capsule: its symbol and its word, tinted.
@@ -34,14 +37,49 @@ public final class ChatMessagePaiCardBubbleContentNode: ChatMessageBubbleContent
     private let pillNode = ASImageNode()
     private let lineNode = ASImageNode()
     private let chevronNode = ASImageNode()
+    /// The agent's face: its portrait once fetched, its initials until then.
+    private let faceNode = ASImageNode()
+    private var faceUrl: String?
+    private let faceDisposable = MetaDisposable()
 
     required public init() {
         super.init()
-        for node in [self.titleNode, self.pillNode, self.lineNode, self.chevronNode] {
+        self.faceNode.cornerRadius = faceSize / 2.0
+        self.faceNode.clipsToBounds = true
+        self.faceNode.contentMode = .scaleAspectFill
+        for node in [self.faceNode, self.titleNode, self.pillNode, self.lineNode, self.chevronNode] {
             node.displaysAsynchronously = false
             node.isLayerBacked = true
             self.addSubnode(node)
         }
+    }
+
+    deinit {
+        self.faceDisposable.dispose()
+    }
+
+    private func updateFace(url: String?, placeholder: UIImage) {
+        if let url, url == self.faceUrl, self.faceNode.image != nil {
+            return
+        }
+        self.faceUrl = url
+        guard let url else {
+            self.faceDisposable.set(nil)
+            self.faceNode.image = placeholder
+            return
+        }
+        if let cached = PaiAvatars.cached(url) {
+            self.faceDisposable.set(nil)
+            self.faceNode.image = cached
+            return
+        }
+        self.faceNode.image = placeholder
+        self.faceDisposable.set((PaiAvatars.image(url) |> deliverOnMainQueue).startStrict(next: { [weak self] image in
+            guard let self, self.faceUrl == url, let image else {
+                return
+            }
+            self.faceNode.image = image
+        }))
     }
 
     required public init?(coder aDecoder: NSCoder) {
@@ -72,7 +110,8 @@ public final class ChatMessagePaiCardBubbleContentNode: ChatMessageBubbleContent
                 let lineFont = Font.regular(floor(base * 14.0 / 17.0))
                 let pillFont = Font.medium(floor(base * 12.0 / 17.0))
                 let insets = layoutConstants.text.bubbleInsets
-                let maxWidth = max(1.0, constrainedSize.width - insets.left - insets.right - chevronWidth)
+                let faceInset = faceSize + faceGap
+                let maxWidth = max(1.0, constrainedSize.width - insets.left - insets.right - chevronWidth - faceInset)
 
                 let status = isDelegation ? PaiAgentStatus.effective(agent: meta?.agent, posted: meta?.status) : nil
                 let statusColor: UIColor
@@ -82,7 +121,10 @@ public final class ChatMessagePaiCardBubbleContentNode: ChatMessageBubbleContent
                 default: statusColor = colors.secondaryTextColor
                 }
                 let pill = status.flatMap { pillImage(status: $0, font: pillFont, color: statusColor) }
-                let name = meta?.agentName ?? PaiChat.agent(meta?.agent)?.name ?? meta?.agent ?? "Agent"
+                let agent = PaiChat.agent(meta?.agent)
+                let name = meta?.agentName ?? agent?.name ?? meta?.agent ?? "Agent"
+                let facePlaceholder = PaiAvatars.placeholder(name: name, slug: meta?.agent ?? name, size: faceSize)
+                let faceUrl = agent?.avatar
                 let symbol = PaiEventIcon.symbol(event: isDelegation ? "delegation" : "report")
                 let title = paiLineImage(symbol: symbol, text: name, font: titleFont, color: colors.accentTextColor, maxWidth: maxWidth - (pill.map { $0.size.width + pillGap } ?? 0.0))
                 let line = paiLineImage(symbol: nil, text: Self.firstLine(text), font: lineFont, color: colors.secondaryTextColor, maxWidth: maxWidth)
@@ -91,28 +133,32 @@ public final class ChatMessagePaiCardBubbleContentNode: ChatMessageBubbleContent
                 let titleWidth = (title?.size.width ?? 0.0) + (pill.map { $0.size.width + pillGap } ?? 0.0)
                 let titleHeight = max(title?.size.height ?? 0.0, pill?.size.height ?? 0.0)
                 let lineHeight = line?.size.height ?? 0.0
-                let contentWidth = max(titleWidth, line?.size.width ?? 0.0) + chevronWidth
-                let height = insets.top + titleHeight + (line != nil ? rowGap + lineHeight : 0.0) + insets.bottom + 2.0
+                let contentWidth = faceInset + max(titleWidth, line?.size.width ?? 0.0) + chevronWidth
+                let height = max(insets.top + titleHeight + (line != nil ? rowGap + lineHeight : 0.0) + insets.bottom + 2.0, faceSize + 12.0)
 
                 return (insets.left + contentWidth + insets.right, { boundingWidth in
                     return (CGSize(width: boundingWidth, height: height), { [weak self] _, _, _ in
                         guard let self else { return }
                         self.item = item
 
-                        let top = insets.top + 1.0
+                        let textHeight = titleHeight + (line != nil ? rowGap + lineHeight : 0.0)
+                        let top = floorToScreenPixels((height - textHeight) / 2.0)
+                        let left = insets.left + faceInset
+                        self.faceNode.frame = CGRect(x: insets.left - 2.0, y: floorToScreenPixels((height - faceSize) / 2.0), width: faceSize, height: faceSize)
+                        self.updateFace(url: faceUrl, placeholder: facePlaceholder)
                         self.titleNode.image = title
                         if let title {
-                            self.titleNode.frame = CGRect(origin: CGPoint(x: insets.left, y: top + floorToScreenPixels((titleHeight - title.size.height) / 2.0)), size: title.size)
+                            self.titleNode.frame = CGRect(origin: CGPoint(x: left, y: top + floorToScreenPixels((titleHeight - title.size.height) / 2.0)), size: title.size)
                         }
                         self.pillNode.isHidden = pill == nil
                         self.pillNode.image = pill
                         if let pill {
-                            self.pillNode.frame = CGRect(origin: CGPoint(x: insets.left + (title?.size.width ?? 0.0) + pillGap, y: top + floorToScreenPixels((titleHeight - pill.size.height) / 2.0)), size: pill.size)
+                            self.pillNode.frame = CGRect(origin: CGPoint(x: left + (title?.size.width ?? 0.0) + pillGap, y: top + floorToScreenPixels((titleHeight - pill.size.height) / 2.0)), size: pill.size)
                         }
                         self.lineNode.isHidden = line == nil
                         self.lineNode.image = line
                         if let line {
-                            self.lineNode.frame = CGRect(origin: CGPoint(x: insets.left, y: top + titleHeight + rowGap), size: line.size)
+                            self.lineNode.frame = CGRect(origin: CGPoint(x: left, y: top + titleHeight + rowGap), size: line.size)
                         }
                         self.chevronNode.image = chevron
                         if let chevron {

@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 extension Color {
@@ -83,12 +84,12 @@ extension Date {
 @available(iOS 16.0, *)
 struct MarkdownText: View {
     let text: String
+    /// Bumped when a Keep page's or dev session's title arrives, so its link shows the title.
+    @State private var titles = 0
     var body: some View {
-        if let attributed = try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
-            Text(attributed)
-        } else {
-            Text(text)
-        }
+        let _ = titles
+        Text(PaiURN.markdown(text).paiLinked)
+            .onReceive(NotificationCenter.default.publisher(for: PaiURN.resolved)) { _ in titles += 1 }
     }
 }
 

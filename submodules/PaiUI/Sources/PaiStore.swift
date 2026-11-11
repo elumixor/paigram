@@ -21,6 +21,8 @@ public final class PaiStore: ObservableObject {
     /// Each agent's chat as far as it has been opened, newest last; cached so it opens at once.
     @Published public private(set) var messages: [String: [PaiLogMessage]] = [:]
     @Published public private(set) var connectionError: String?
+    /// Messages agents wrote for the user to send, still waiting on him.
+    @Published public private(set) var drafts: [PaiDraft] = []
     @Published public private(set) var isLoading = false
 
     public let client = PaiClient()
@@ -144,6 +146,7 @@ public final class PaiStore: ObservableObject {
             receive(message)
         }
         if event.kind.hasPrefix("agent.") { refreshAgents() }
+        if event.kind.hasPrefix("draft.") || event.kind == "message.new" { refreshDrafts() }
         // A task waiting on the user is one of the decisions `/needs` serves, so a task that was
         // finished anywhere — by him, by an agent, in conversation — has to take its card away.
         if event.kind == "message.new" || event.kind == "session.question" || event.kind == "session.answer" || event.kind.hasPrefix("ask.") || event.kind.hasPrefix("task.") { refreshNeeds() }
@@ -165,6 +168,38 @@ public final class PaiStore: ObservableObject {
             try? await Task.sleep(nanoseconds: Self.refreshDebounce)
             guard let self, !Task.isCancelled, let fetched = try? await self.client.needs() else { return }
             PaiChat.needs = fetched
+        }
+    }
+
+    // MARK: Drafts
+
+    private var draftsTask: Task<Void, Never>?
+
+    public func drafts(of slug: String) -> [PaiDraft] { drafts.filter { $0.agent == slug } }
+
+    public func refreshDrafts() {
+        draftsTask?.cancel()
+        draftsTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: Self.refreshDebounce)
+            guard let self, !Task.isCancelled, let fetched = try? await self.client.drafts() else { return }
+            let pending = fetched.filter(\.isPending)
+            if pending != self.drafts { self.drafts = pending }
+        }
+    }
+
+    /// Sends or drops a draft; its card goes at once and comes back if the daemon refuses.
+    public func resolve(draft id: Int, send: Bool) async throws {
+        let held = drafts
+        drafts.removeAll { $0.id == id }
+        do {
+            if send {
+                try await client.sendDraft(id)
+            } else {
+                try await client.discardDraft(id)
+            }
+        } catch {
+            drafts = held
+            throw error
         }
     }
 

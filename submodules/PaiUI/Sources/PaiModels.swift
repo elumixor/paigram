@@ -112,6 +112,27 @@ public struct PaiNeed: Codable, Identifiable, Equatable {
     public var url: URL? { link.flatMap(URL.init(string:)) }
 }
 
+/// A message an agent wrote for the user to send (`GET /drafts`): a WhatsApp or an email, held until he sends or drops it.
+public struct PaiDraft: Codable, Identifiable, Equatable {
+    public struct Fields: Codable, Equatable {
+        public let body: String?
+        public let to: String?
+        public let subject: String?
+        public let account: String?
+    }
+
+    public let id: Int
+    public let agent: String?
+    /// "email", "telegram", "whatsapp", "linkedin" or "post".
+    public let channel: String
+    public let fields: Fields
+    /// "pending" until sent or discarded.
+    public let status: String
+    public let note: String?
+
+    public var isPending: Bool { status == "pending" }
+}
+
 /// A routine (`GET /routines`): a schedule or an event, and what it does then.
 public struct PaiRoutine: Codable, Identifiable, Equatable {
     public let id: Int
