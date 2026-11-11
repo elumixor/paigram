@@ -2865,7 +2865,9 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
         let _ = (accountIdFromNotification(response.notification, sharedContext: self.sharedContextPromise.get())
         |> deliverOnMainQueue).start(next: { accountId in
             if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
-                if let dataUrl = response.notification.request.content.userInfo["url"] as? String {
+                // The box's usage push carries `paiUsage` and no url when it skipped the notification service.
+                let userInfo = response.notification.request.content.userInfo
+                if let dataUrl = userInfo["url"] as? String ?? (userInfo["paiUsage"] != nil ? "paigram://usage" : nil) {
                     if let url = URL(string: dataUrl) {
                         self.openUrlWhenReady(accountId: accountId, url: url, external: true)
                     }

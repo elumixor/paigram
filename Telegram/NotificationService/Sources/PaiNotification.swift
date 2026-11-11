@@ -113,6 +113,34 @@ enum PaiNotification {
         attach(need, to: content, completion: completion)
     }
 
+    // MARK: Usage pushed by the box
+
+    /// A usage window crossing 50/80/100%, pushed by the box (`paiUsage`: window, percent, threshold, resetsAt).
+    static func isBoxUsage(_ userInfo: [AnyHashable: Any]) -> Bool {
+        return userInfo["paiUsage"] is [String: Any] && userInfo["from_id"] == nil
+    }
+
+    /// Opens the usage glance when tapped, stacks with the app's own alerts and replaces the app's alert for the
+    /// same crossing if that one came first (same identifier as `PaiGlanceStore.Crossing.identifier`).
+    static func decorateBoxUsage(_ content: UNNotificationContent) -> UNNotificationContent {
+        guard let info = content.userInfo["paiUsage"] as? [String: Any], let mutable = content.mutableCopy() as? UNMutableNotificationContent else {
+            return content
+        }
+        mutable.threadIdentifier = "pai.usage"
+        mutable.userInfo["url"] = "paigram://usage"
+        if let window = info["window"] as? String, let threshold = info["threshold"] as? Int {
+            var reset = 0
+            if let raw = info["resetsAt"] as? String {
+                let formatter = ISO8601DateFormatter()
+                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                let date = formatter.date(from: raw) ?? ISO8601DateFormatter().date(from: raw)
+                reset = Int(date?.timeIntervalSince1970 ?? 0) / 600
+            }
+            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ["pai.usage.\(window).\(threshold).\(reset)"])
+        }
+        return mutable
+    }
+
     // MARK: Mail and WhatsApp
 
     /// A push the box sent itself (mail, WhatsApp), not one of Telegram's: it carries `pai` with who wrote, the chat

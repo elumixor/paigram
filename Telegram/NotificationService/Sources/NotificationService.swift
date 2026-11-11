@@ -2578,6 +2578,13 @@ final class NotificationService: UNNotificationServiceExtension {
             return
         }
 
+        // A usage threshold pushed by pai's box.
+        if PaiNotification.isBoxUsage(request.content.userInfo) {
+            self.contentHandler = nil
+            contentHandler(PaiNotification.decorateBoxUsage(request.content))
+            return
+        }
+
         // Mail and WhatsApp pushed by pai's box have nothing for Telegram's handler to decrypt.
         if PaiNotification.isBoxPush(request.content.userInfo) {
             PaiNotification.decorateBoxPush(request.content, appGroupPath: paiAppGroupPath(), completion: { [weak self] content in

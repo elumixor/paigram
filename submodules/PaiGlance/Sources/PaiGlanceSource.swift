@@ -53,9 +53,23 @@ public final class PaiGlanceLiveSource: PaiGlanceSource {
     }
 
     public func glance(completion: @escaping (Result<PaiGlance, Error>) -> Void) {
-        get("/usage/summary") { [weak self] result in
+        // The summary carries only the oldest need; the full list comes from /needs, read alongside.
+        let group = DispatchGroup()
+        var summary: Data?
+        var needs: Data?
+        group.enter()
+        get("/usage/summary") { result in
+            summary = try? result.get()
+            group.leave()
+        }
+        group.enter()
+        get("/needs") { result in
+            needs = try? result.get()
+            group.leave()
+        }
+        group.notify(queue: .global()) { [weak self] in
             guard let self else { return }
-            if case let .success(data) = result, let glance = Self.decodeSummary(data) {
+            if let summary, let glance = Self.decodeSummary(summary, needs: needs) {
                 completion(.success(glance))
                 return
             }
@@ -161,7 +175,7 @@ public final class PaiGlanceLiveSource: PaiGlanceSource {
         return PaiGlance.Need(
             id: id,
             agent: raw["agent"] as? String,
-            from: raw["from"] as? String ?? "pai",
+            from: raw["from"] as? String ?? (raw["agent"] as? String).map { $0.prefix(1).uppercased() + $0.dropFirst() } ?? "pai",
             question: question,
             options: raw["options"] as? [String] ?? [],
             freeText: raw["freeText"] as? Bool ?? true,
@@ -170,7 +184,7 @@ public final class PaiGlanceLiveSource: PaiGlanceSource {
     }
 
     /// The compact endpoint (see PAIGRAM.md for its shape); nil when it is missing or malformed.
-    static func decodeSummary(_ data: Data) -> PaiGlance? {
+    static func decodeSummary(_ data: Data, needs needsData: Data? = nil) -> PaiGlance? {
         guard let raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let today = raw["todayUsd"] as? Double else { return nil }
         let windows = (raw["windows"] as? [[String: Any]] ?? []).compactMap { window -> PaiGlance.Window? in
             guard let name = window["name"] as? String, let percent = window["percent"] as? Double else { return nil }
@@ -180,7 +194,8 @@ public final class PaiGlanceLiveSource: PaiGlanceSource {
             guard let slug = agent["slug"] as? String, let usd = agent["usd"] as? Double else { return nil }
             return PaiGlance.AgentSpend(slug: slug, name: agent["name"] as? String ?? slug, usd: usd)
         }
-        let needs = (raw["needsList"] as? [[String: Any]] ?? (raw["oldestNeed"] as? [String: Any]).map { [$0] } ?? []).compactMap(need)
+        let listed = needsData.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [[String: Any]] }
+        let needs = (listed ?? raw["needsList"] as? [[String: Any]] ?? (raw["oldestNeed"] as? [String: Any]).map { [$0] } ?? []).compactMap(need)
         return PaiGlance(
             at: date(raw["at"]) ?? Date(),
             todayUsd: today,
@@ -188,8 +203,8 @@ public final class PaiGlanceLiveSource: PaiGlanceSource {
             windows: windows,
             agents: agents,
             running: raw["running"] as? Int ?? 0,
-            needsCount: raw["needs"] as? Int ?? needs.count,
-            needs: needs.sorted { $0.createdAt < $1.createdAt }
+            needsCount: listed?.count ?? raw["needs"] as? Int ?? needs.count,
+            needs: Array(needs.sorted { $0.createdAt < $1.createdAt }.prefix(needsLimit))
         )
     }
 
