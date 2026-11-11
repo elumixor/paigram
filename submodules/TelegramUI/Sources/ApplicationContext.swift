@@ -955,7 +955,10 @@ final class AuthorizedApplicationContext {
                 case let .agent(slug):
                     PaiAgentList.open(slug: slug, context: self.context, navigationController: self.rootController)
                 case .usage:
-                    self.rootController.pushViewController(paiStatsController(context: self.context))
+                    // The stats screen is iOS 16+, like the widget that links here.
+                    if #available(iOS 16.0, *) {
+                        self.rootController.pushViewController(paiStatsController(context: self.context))
+                    }
                 }
                 return
             }
