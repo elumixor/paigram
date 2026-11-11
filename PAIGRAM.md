@@ -34,6 +34,14 @@ Settings › Stats reads the box for a day, a week or a month: AI spend by featu
 
 The ✨ button in the composer rewrites the draft through the box's `/compose` (Sonnet): the message in the chat's language and in his own way of writing to this person, every fact kept and nothing added; when the draft leaves something open it asks first. Long-press keeps Telegram's own AI editor.
 
+## Usage glance, widget and watch
+
+One snapshot, the glance (`submodules/PaiGlance`), feeds every surface outside the app: today's spend, the plan's Session and Weekly windows, spend by agent, how many threads run, and the questions waiting on him. `PaiGlanceLiveSource` reads the box's `/usage/summary` and `/needs` together (falling back to `/usage`, `/tasks` and `/needs` on a box without the summary). `PaiGlanceSync` (`submodules/PaiUI`) refreshes it while the app runs and writes it to the app group, where the home-screen widget (`Telegram/WidgetKitWidget/PaiUsageWidget.swift`, small and medium) reads it; a tap opens `paigram://usage` or `paigram://agent/<slug>`, the agent's chat.
+
+Crossing 50, 80 or 100% of a window posts a local alert (`PaiUsageAlerts`); the box sends the same crossing as a push (`paiUsage` in its data, thread `pai-usage`). Both use the id `pai.usage.<window>.<threshold>.<reset>`: the notification extension removes the local alert when the push lands, and the app skips an alert a delivered push already told. Tapping either opens the usage screen.
+
+The watch gets the box's address, token and latest glance from the phone over WatchConnectivity and keeps them in its keychain group (`PaiVault`), so it reads the box on its own when the phone is away. Its Pai screen shows the glance and lists the questions with their options, answered straight to the box (through the phone when the box is out of reach); the box's ask pushes and their action buttons still mirror to the wrist. The `PaiComplications` widget extension (`<watch id>.widget`) draws the window that runs out first as a gauge, with spend and waiting questions in the larger families, and is signed with `WatchWidget.mobileprovision` (`scripts/provision.ts`); without that profile the build drops the extension.
+
 ## Build
 
 Bazel builds, driven by Telegram's `build-system/Make/Make.py`. First time: `bun install`, then copy `build-system/paigram.example.json` to `build-system/paigram.json` and `build-system/paigram-sim.json` (api id and hash from my.telegram.org; the simulator file keeps the bundle id `ph.telegra.Telegraph`, which the repo's fake codesigning profiles are bound to). Every build writes `submodules/PaiUI/Sources/PaiSecrets.swift` from `~/.config/pai/box.json` and the box's `/m/telegram/info`, so the app ships with its server and bot name (no credential: each phone signs in to pai and keeps its own device token in the keychain, `PaiAuth`); where there is no box file (CI) `PAI_BOX_URL` and `PAI_BOT_USERNAME` stand in for it.
