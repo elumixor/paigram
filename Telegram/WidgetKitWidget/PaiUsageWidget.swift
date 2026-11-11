@@ -6,7 +6,7 @@ import WidgetKit
 import PaiGlance
 
 /// Paigram's glance on the home and lock screens: plan usage, today's spend, running agents and what waits on the user.
-@available(iOSApplicationExtension 14.0, iOS 14.0, *)
+@available(iOS 14.0, *)
 struct PaiUsageWidget: Widget {
     private let kind = "PaiUsage"
 
@@ -20,21 +20,21 @@ struct PaiUsageWidget: Widget {
     }
 
     private static var families: [WidgetFamily] {
-        if #available(iOSApplicationExtension 16.0, *) {
+        if #available(iOS 16.0, *) {
             return [.systemSmall, .systemMedium, .accessoryCircular, .accessoryRectangular, .accessoryInline]
         }
         return [.systemSmall, .systemMedium]
     }
 }
 
-@available(iOSApplicationExtension 14.0, iOS 14.0, *)
+@available(iOS 14.0, *)
 struct PaiGlanceEntry: TimelineEntry {
     let date: Date
     let glance: PaiGlance?
     let signedIn: Bool
 }
 
-@available(iOSApplicationExtension 14.0, iOS 14.0, *)
+@available(iOS 14.0, *)
 struct PaiGlanceProvider: TimelineProvider {
     func placeholder(in context: Context) -> PaiGlanceEntry {
         PaiGlanceEntry(date: Date(), glance: .sample, signedIn: true)
@@ -69,7 +69,7 @@ struct PaiGlanceProvider: TimelineProvider {
 
 // MARK: - Views
 
-@available(iOSApplicationExtension 14.0, iOS 14.0, *)
+@available(iOS 14.0, *)
 struct PaiGlanceWidgetView: View {
     let entry: PaiGlanceEntry
     @Environment(\.widgetFamily) private var family
@@ -96,7 +96,7 @@ struct PaiGlanceWidgetView: View {
             case .systemSmall:
                 PaiSmallView(glance: glance)
             default:
-                if #available(iOSApplicationExtension 16.0, *) {
+                if #available(iOS 16.0, *) {
                     PaiAccessoryView(glance: glance, family: family)
                 } else {
                     PaiSmallView(glance: glance)
@@ -138,7 +138,7 @@ enum PaiGlanceStyle {
     }
 }
 
-@available(iOSApplicationExtension 14.0, iOS 14.0, *)
+@available(iOS 14.0, *)
 private struct PaiRing: View {
     let percent: Double
     let lineWidth: CGFloat
@@ -154,7 +154,7 @@ private struct PaiRing: View {
     }
 }
 
-@available(iOSApplicationExtension 14.0, iOS 14.0, *)
+@available(iOS 14.0, *)
 private struct PaiBar: View {
     let window: PaiGlance.Window
 
@@ -180,7 +180,7 @@ private struct PaiBar: View {
     }
 }
 
-@available(iOSApplicationExtension 14.0, iOS 14.0, *)
+@available(iOS 14.0, *)
 private struct PaiNeedsBadge: View {
     let count: Int
 
@@ -194,7 +194,7 @@ private struct PaiNeedsBadge: View {
     }
 }
 
-@available(iOSApplicationExtension 14.0, iOS 14.0, *)
+@available(iOS 14.0, *)
 private struct PaiRunningBadge: View {
     let count: Int
 
@@ -208,7 +208,7 @@ private struct PaiRunningBadge: View {
     }
 }
 
-@available(iOSApplicationExtension 14.0, iOS 14.0, *)
+@available(iOS 14.0, *)
 private struct PaiSmallView: View {
     let glance: PaiGlance
 
@@ -250,7 +250,7 @@ private struct PaiSmallView: View {
     }
 }
 
-@available(iOSApplicationExtension 14.0, iOS 14.0, *)
+@available(iOS 14.0, *)
 private struct PaiMediumView: View {
     let glance: PaiGlance
 
@@ -299,7 +299,7 @@ private struct PaiMediumView: View {
     }
 }
 
-@available(iOSApplicationExtension 16.0, iOS 16.0, *)
+@available(iOS 16.0, *)
 private struct PaiAccessoryView: View {
     let glance: PaiGlance
     let family: WidgetFamily
@@ -327,11 +327,11 @@ private struct PaiAccessoryView: View {
     }
 }
 
-@available(iOSApplicationExtension 14.0, iOS 14.0, *)
+@available(iOS 14.0, *)
 private extension View {
     @ViewBuilder
     func paiWidgetBackground() -> some View {
-        if #available(iOSApplicationExtension 17.0, *) {
+        if #available(iOS 17.0, *) {
             containerBackground(for: .widget) { Color(UIColor.systemBackground) }
         } else {
             background(Color(UIColor.systemBackground))
@@ -340,7 +340,7 @@ private extension View {
 
     @ViewBuilder
     func monospacedDigitIfAvailable() -> some View {
-        if #available(iOSApplicationExtension 15.0, *) {
+        if #available(iOS 15.0, *) {
             monospacedDigit()
         } else {
             self
