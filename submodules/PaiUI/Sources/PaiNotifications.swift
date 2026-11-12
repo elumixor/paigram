@@ -12,14 +12,17 @@ public enum PaiNotificationAnswer {
     /// Leaves the box's address, this phone's token and the bot's user id in the app group, where the extension
     /// reads them; signed out, the file is removed. The bot's id is known once its chat has been open.
     public static func writeConfig(basePath: String, botUserId: Int64) {
-        write(botUserId: String(botUserId))
+        io.async { write(botUserId: String(botUserId)) }
     }
 
     /// At launch and after a sign-in or out: mail and WhatsApp pushes need the token for their senders' pictures
     /// whether or not the bot's chat was ever opened.
     static func refreshConfig() {
-        write(botUserId: nil)
+        io.async { write(botUserId: nil) }
     }
+
+    /// The app group's file is read and written in order here, off the main thread.
+    private static let io = DispatchQueue(label: "pai.notification-config", qos: .utility)
 
     private static func write(botUserId: String?) {
         guard let path else { return }

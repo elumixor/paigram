@@ -99,6 +99,15 @@ public struct PaiGlance: Codable, Equatable {
     public var limiting: Window? { windows.max { $0.percent < $1.percent } }
 
     public var oldestNeed: Need? { needs.first }
+
+    /// A glance without windows means the box could not read the plan, not that nothing is used: the previous
+    /// glance's windows stay until they reset.
+    public func keepingWindows(of previous: PaiGlance?, now: Date = Date()) -> PaiGlance {
+        guard windows.isEmpty, let previous else { return self }
+        let held = previous.windows.filter { ($0.resetsAt ?? .distantFuture) > now }
+        guard !held.isEmpty else { return self }
+        return PaiGlance(at: at, todayUsd: todayUsd, usdPerHour: usdPerHour, windows: held, agents: agents, running: running, needsCount: needsCount, needs: needs)
+    }
 }
 
 public extension PaiGlance {

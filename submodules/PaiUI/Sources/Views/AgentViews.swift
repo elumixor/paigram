@@ -181,6 +181,8 @@ struct AgentChatView: View {
     @State private var draft = ""
     @State private var sending = false
     @State private var error: String?
+    /// Whether the chat has been put at its last row once; the cached rows can arrive after the first frame.
+    @State private var placed = false
     @FocusState private var focused: Bool
 
     private var agent: PaiAgent? { store.agent(slug) }
@@ -204,10 +206,19 @@ struct AgentChatView: View {
                     .padding(.horizontal, 12).padding(.vertical, 10)
                 }
                 .scrollDismissesKeyboard(.interactively)
-                .onAppear { if let last = rows.last { proxy.scrollTo(last.id, anchor: .bottom) } }
+                .onAppear {
+                    guard let last = rows.last else { return }
+                    proxy.scrollTo(last.id, anchor: .bottom)
+                    placed = true
+                }
                 .onChange(of: rows.last?.id) { id in
                     guard let id else { return }
-                    withAnimation { proxy.scrollTo(id, anchor: .bottom) }
+                    if placed {
+                        withAnimation { proxy.scrollTo(id, anchor: .bottom) }
+                    } else {
+                        proxy.scrollTo(id, anchor: .bottom)
+                        placed = true
+                    }
                 }
             }
             .safeAreaInset(edge: .top, spacing: 0) {

@@ -138,6 +138,7 @@ final class PaiWatch: NSObject, WCSessionDelegate {
 
     private func apply(glance: PaiGlance) {
         if let current = self.glance, current.at > glance.at { return }
+        let glance = glance.keepingWindows(of: self.glance ?? PaiVault.glance)
         self.glance = glance
         PaiVault.glance = glance
         WidgetCenter.shared.reloadAllTimelines()

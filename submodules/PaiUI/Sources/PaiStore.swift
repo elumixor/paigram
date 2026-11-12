@@ -29,20 +29,28 @@ public final class PaiStore: ObservableObject {
     private var followTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
     private var agentsTask: Task<Void, Never>?
+    /// Fetches that have succeeded once: until then a refresh goes at once, after that it waits out a burst of events.
+    private var settled: Set<String> = []
+    /// `/threads/all` from the last load, merged into the next one until its own answer arrives.
+    private var heldSessions: [PaiSession]?
+    /// The agents' chats being read from disk, one read each.
+    private var chatReads: [String: Task<Void, Never>] = [:]
 
     private static let reconnectDelay: UInt64 = 4_000_000_000
     private static let refreshDebounce: UInt64 = 300_000_000
 
-    private static let cacheKey = "pai.cache"
+    private static let cacheName = "store"
 
-    /// The last list seen is shown at once; the daemon's answer replaces it.
+    /// The last list seen is shown as soon as it is read (off the main thread); the daemon's answer replaces it.
     public init() {
-        if let data = UserDefaults.standard.data(forKey: Self.cacheKey), let cached = try? JSONDecoder().decode(Cache.self, from: data) {
-            sessions = cached.sessions
-            projects = cached.projects
+        PaiPerf.first("store.init")
+        Task { [weak self] in
+            guard let cached = await PaiCache.load(Cache.self, Self.cacheName, legacyKey: "pai.cache") else { return }
+            guard let self, !self.settled.contains("refresh") else { return }
+            self.sessions = cached.sessions
+            self.projects = cached.projects
             if !cached.sessions.isEmpty { PaiPerf.first("sessions.cached") }
         }
-        PaiPerf.first("store.init")
     }
 
     private struct Cache: Codable {
@@ -51,9 +59,12 @@ public final class PaiStore: ObservableObject {
     }
 
     private func persist() {
-        if let data = try? JSONEncoder().encode(Cache(sessions: sessions, projects: projects)) {
-            UserDefaults.standard.set(data, forKey: Self.cacheKey)
-        }
+        PaiCache.save(Cache(sessions: sessions, projects: projects), Self.cacheName)
+    }
+
+    /// No wait before a fetch that has not succeeded yet, the debounce after.
+    private func delay(_ fetch: String) -> UInt64 {
+        settled.contains(fetch) ? Self.refreshDebounce : 0
     }
 
     public var running: [PaiSession] { sessions.filter { $0.isRunning && !$0.isWaiting } }
@@ -92,7 +103,7 @@ public final class PaiStore: ObservableObject {
         refreshTask?.cancel()
         refreshTask = Task { [weak self] in
             guard let self else { return }
-            try? await Task.sleep(nanoseconds: Self.refreshDebounce)
+            try? await Task.sleep(nanoseconds: self.delay("refresh"))
             guard !Task.isCancelled else { return }
             await self.load()
         }
@@ -113,20 +124,31 @@ public final class PaiStore: ObservableObject {
             }
         }
         refreshNeeds()
+        // `/threads/all` is the slow one: the list shows from tasks and projects, the held threads join when they come.
+        async let held = Self.timed("load.threads") { try await client.allThreads() }
+        let fetched: PaiTasks
         do {
             async let tasks = Self.timed("load.tasks") { try await client.tasks() }
             async let projects = Self.timed("load.projects") { try await client.projects() }
-            async let held = Self.timed("load.threads") { try await client.allThreads() }
-            let (fetched, fetchedProjects, fetchedHeld) = try await (tasks, projects, held)
-            self.sessions = Self.merge(live: fetched.live, recent: fetched.recent, held: fetchedHeld.map(\.asSession))
+            let (fetchedTasks, fetchedProjects) = try await (tasks, projects)
+            fetched = fetchedTasks
+            sessions = Self.merge(live: fetched.live, recent: fetched.recent, held: heldSessions ?? sessions)
             self.projects = fetchedProjects
             connectionError = nil
+            settled.insert("refresh")
             PaiPerf.first("sessions.network")
             persist()
         } catch is CancellationError {
+            return
         } catch {
             connectionError = error.localizedDescription
+            return
         }
+        guard let fetchedHeld = try? await held, !Task.isCancelled else { return }
+        heldSessions = fetchedHeld.map(\.asSession)
+        sessions = Self.merge(live: fetched.live, recent: fetched.recent, held: heldSessions ?? [])
+        PaiPerf.first("sessions.held")
+        persist()
     }
 
     /// Logs when one of `load`'s requests is done.
@@ -179,9 +201,11 @@ public final class PaiStore: ObservableObject {
     public func refreshNeeds() {
         needsTask?.cancel()
         needsTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: Self.refreshDebounce)
+            guard let delay = self?.delay("needs") else { return }
+            try? await Task.sleep(nanoseconds: delay)
             guard let self, !Task.isCancelled, let fetched = try? await self.client.needs() else { return }
             PaiPerf.mark("load.needs")
+            self.settled.insert("needs")
             PaiChat.needs = fetched
         }
     }
@@ -195,8 +219,10 @@ public final class PaiStore: ObservableObject {
     public func refreshDrafts() {
         draftsTask?.cancel()
         draftsTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: Self.refreshDebounce)
+            guard let delay = self?.delay("drafts") else { return }
+            try? await Task.sleep(nanoseconds: delay)
             guard let self, !Task.isCancelled, let fetched = try? await self.client.drafts() else { return }
+            self.settled.insert("drafts")
             let pending = fetched.filter(\.isPending)
             if pending != self.drafts { self.drafts = pending }
         }
@@ -225,47 +251,59 @@ public final class PaiStore: ObservableObject {
     public func refreshAgents() {
         agentsTask?.cancel()
         agentsTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: Self.refreshDebounce)
+            guard let delay = self?.delay("agents") else { return }
+            try? await Task.sleep(nanoseconds: delay)
             guard let self, !Task.isCancelled, let fetched = try? await self.client.agents() else { return }
             PaiPerf.mark("load.agents")
+            self.settled.insert("agents")
             PaiChat.agents = fetched
             if fetched != self.agents { self.agents = fetched }
         }
     }
 
-    private static func messagesKey(_ slug: String) -> String { "pai.messages.\(slug)" }
+    private static func messagesName(_ slug: String) -> String { "messages.\(slug)" }
     private static let keptMessages = 200
 
-    /// Reads an agent's cached chat before its screen first draws, so it opens at once.
-    public func prime(_ slug: String) { _ = chat(slug) }
+    /// Starts reading an agent's cached chat before its screen first draws, so it opens with its rows.
+    public func prime(_ slug: String) { _ = readChat(slug) }
 
-    /// What a view shows of an agent's chat; `loadChat` fills it.
+    /// What a view shows of an agent's chat; filled from the cache when it is read, then by `loadChat`.
     public func rows(_ slug: String) -> [PaiLogMessage] { messages[slug] ?? [] }
 
-    /// An agent's chat as cached, read from disk the first time.
-    private func chat(_ slug: String) -> [PaiLogMessage] {
-        if let rows = messages[slug] { return rows }
-        let cached = UserDefaults.standard.data(forKey: Self.messagesKey(slug)).flatMap { try? JSONDecoder().decode([PaiLogMessage].self, from: $0) } ?? []
-        messages[slug] = cached
-        if !cached.isEmpty { PaiPerf.first("chat.\(slug).cached") }
-        return cached
+    /// Reads an agent's cached chat from disk the first time, decoded off the main thread.
+    private func readChat(_ slug: String) -> Task<Void, Never> {
+        if let read = chatReads[slug] { return read }
+        let read = Task { [weak self] in
+            let cached = await PaiCache.load([PaiLogMessage].self, Self.messagesName(slug), legacyKey: "pai.messages.\(slug)") ?? []
+            guard let self, self.messages[slug] == nil else { return }
+            self.messages[slug] = cached
+            if !cached.isEmpty { PaiPerf.first("chat.\(slug).cached") }
+        }
+        chatReads[slug] = read
+        return read
+    }
+
+    /// An agent's chat, once its cache has been read.
+    private func chat(_ slug: String) async -> [PaiLogMessage] {
+        await readChat(slug).value
+        return messages[slug] ?? []
     }
 
     private func store(_ rows: [PaiLogMessage], for slug: String) {
         let kept = Array(rows.suffix(Self.keptMessages))
         messages[slug] = kept
-        if let data = try? JSONEncoder().encode(kept.filter { $0.id > 0 }) { UserDefaults.standard.set(data, forKey: Self.messagesKey(slug)) }
+        PaiCache.save(kept.filter { $0.id > 0 }, Self.messagesName(slug))
     }
 
     /// Catches an agent's chat up: what came after the last row held, or the latest page the first time.
     public func loadChat(_ slug: String) async {
-        let held = chat(slug)
+        let held = await chat(slug)
         guard !Task.isCancelled else { return }
         let last = held.last(where: { $0.id > 0 })?.id
         do {
             let fetched = try await client.messages(agent: slug, after: last)
             merge(fetched, into: slug)
-            if !chat(slug).isEmpty { PaiPerf.first("chat.\(slug).network") }
+            if !(messages[slug] ?? []).isEmpty { PaiPerf.first("chat.\(slug).network") }
             connectionError = nil
         } catch is CancellationError {
         } catch {
@@ -276,7 +314,7 @@ public final class PaiStore: ObservableObject {
     private func merge(_ rows: [PaiLogMessage], into slug: String) {
         guard !rows.isEmpty else { return }
         var byId: [Int: PaiLogMessage] = [:]
-        for row in chat(slug) { byId[row.id] = row }
+        for row in messages[slug] ?? [] { byId[row.id] = row }
         for row in rows { byId[row.id] = row }
         // What the user wrote shows at once; the logged row replaces it when it arrives.
         let sent = Set(rows.filter { $0.from == "user" }.map(\.body))
@@ -297,11 +335,11 @@ public final class PaiStore: ObservableObject {
     /// The user writes to an agent; the row shows before the daemon has logged it.
     public func send(_ text: String, to slug: String) async throws {
         let pending = PaiLogMessage(id: -Int(Date().timeIntervalSince1970 * 1000), from: "user", to: slug, kind: "chat", body: text, createdAt: Date().timeIntervalSince1970 * 1000)
-        store(chat(slug) + [pending], for: slug)
+        store(await chat(slug) + [pending], for: slug)
         do {
             try await client.message(agent: slug, text: text)
         } catch {
-            store(chat(slug).filter { $0.id != pending.id }, for: slug)
+            store((messages[slug] ?? []).filter { $0.id != pending.id }, for: slug)
             throw error
         }
     }
@@ -309,7 +347,7 @@ public final class PaiStore: ObservableObject {
     /// Answers an agent's question; the ask shows the answer from then on.
     public func answer(ask id: Int, text: String, in slug: String) async throws {
         try await client.answer(ask: id, text: text)
-        store(chat(slug).map { row in
+        store(await chat(slug).map { row in
             guard row.meta.askId == id, row.kind == "ask" else { return row }
             var row = row
             row.meta.answer = text

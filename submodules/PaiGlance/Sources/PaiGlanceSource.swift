@@ -126,10 +126,11 @@ public final class PaiGlanceLiveSource: PaiGlanceSource {
 
     static func compose(forecast: [String: Any], spend: Data?, needs needsData: Data?, rail: Data?, agents agentsData: Data?) -> PaiGlance {
         let today = forecast["today"] as? [String: Any]
+        // A window without a reading is unknown, not empty: it is left out so the last known value stays.
         let windows = (forecast["windows"] as? [[String: Any]] ?? []).compactMap { raw -> PaiGlance.Window? in
             guard let name = raw["name"] as? String else { return nil }
             let reading = (raw["reading"] as? [String: Any])?["percent"] as? Double
-            let percent = reading ?? raw["percent"] as? Double ?? 0
+            guard let percent = reading ?? raw["percent"] as? Double else { return nil }
             return PaiGlance.Window(name: name, percent: percent, resetsAt: date(raw["resetsAt"]))
         }
 

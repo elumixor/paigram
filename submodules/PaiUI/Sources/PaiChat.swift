@@ -66,9 +66,7 @@ extension PaiChat {
     public static let paiSlug = "pai"
 
     private static let mainThreadKey = "pai.mainThreadId"
-    private static let agentsKey = "pai.agents"
-    private static let agentsLock = NSLock()
-    private static var agentsValue: [PaiAgent]?
+    private static let agentsCache = PaiCachedValue<[PaiAgent]>("agents", legacyKey: "pai.agents", empty: [])
 
     /// The topic pai's chat is in (`/m/telegram/info`), so the bot chat opens there without asking first.
     public static var mainThreadId: Int64? {
@@ -86,22 +84,14 @@ extension PaiChat {
     public static let usageChanged = Notification.Name("pai.usageChanged")
     /// Posted on the main thread when `needs` changes.
     public static let needsChanged = Notification.Name("pai.needsChanged")
-    private static let needsLock = NSLock()
-    private static var needsValue: [PaiNeed] = []
+    private static let needsCache = PaiCachedValue<[PaiNeed]>("needs", empty: [])
 
     /// What waits on the user's decision now: the chat's title counts them, the hub lists them, agents wear a badge.
+    /// The last list seen shows until the daemon answers.
     public static var needs: [PaiNeed] {
-        get {
-            needsLock.lock()
-            defer { needsLock.unlock() }
-            return needsValue
-        }
+        get { needsCache.current }
         set {
-            needsLock.lock()
-            let changed = needsValue != newValue
-            needsValue = newValue
-            needsLock.unlock()
-            if changed { DispatchQueue.main.async { NotificationCenter.default.post(name: needsChanged, object: nil) } }
+            if needsCache.set(newValue) { DispatchQueue.main.async { NotificationCenter.default.post(name: needsChanged, object: nil) } }
         }
     }
 
@@ -110,36 +100,37 @@ extension PaiChat {
 
     /// Posted on the main thread when anything the daemon tracks moved: an agent, a task, an ask, a turn.
     public static let changed = Notification.Name("pai.changed")
-    private static let usageKey = "pai.usage"
+    private static let usageCache = PaiCachedValue<PaiUsage?>("usage", legacyKey: "pai.usage", empty: nil)
 
     /// The subscription's windows and what the sessions cost, last seen; the chat draws them as bars under its title.
+    /// A reading without windows means the box could not read the plan, not that nothing is used: the last
+    /// windows stay until they reset.
     public static var usage: PaiUsage? {
-        get { UserDefaults.standard.data(forKey: usageKey).flatMap { try? JSONDecoder().decode(PaiUsage.self, from: $0) } }
+        get { usageCache.current }
         set {
-            guard newValue != usage else { return }
-            UserDefaults.standard.set(newValue.flatMap { try? JSONEncoder().encode($0) }, forKey: usageKey)
-            DispatchQueue.main.async { NotificationCenter.default.post(name: usageChanged, object: nil) }
+            var value = newValue
+            if let fresh = newValue, fresh.windows.isEmpty, let held = usageCache.current?.windows {
+                let now = Date()
+                value = PaiUsage(windows: held.filter { ($0.resetDate ?? .distantFuture) > now }, costUsd: fresh.costUsd, error: fresh.error, via: fresh.via)
+            }
+            if usageCache.set(value) { DispatchQueue.main.async { NotificationCenter.default.post(name: usageChanged, object: nil) } }
+        }
+    }
+
+    /// Reads the cached agents, needs and usage off the main thread at launch, so the first screens find them in memory.
+    public static func preload() {
+        DispatchQueue.global(qos: .userInitiated).async {
+            _ = agentsCache.current
+            _ = needsCache.current
+            _ = usageCache.current
         }
     }
 
     /// The last agent list seen, readable from any queue: chat nodes lay out off the main thread.
     public static var agents: [PaiAgent] {
-        get {
-            agentsLock.lock()
-            defer { agentsLock.unlock() }
-            if let agentsValue { return agentsValue }
-            let cached = UserDefaults.standard.data(forKey: agentsKey).flatMap { try? JSONDecoder().decode([PaiAgent].self, from: $0) } ?? []
-            agentsValue = cached
-            return cached
-        }
+        get { agentsCache.current }
         set {
-            agentsLock.lock()
-            let changed = agentsValue != newValue
-            agentsValue = newValue
-            agentsLock.unlock()
-            guard changed else { return }
-            if let data = try? JSONEncoder().encode(newValue) { UserDefaults.standard.set(data, forKey: agentsKey) }
-            DispatchQueue.main.async { NotificationCenter.default.post(name: agentsChanged, object: nil) }
+            if agentsCache.set(newValue) { DispatchQueue.main.async { NotificationCenter.default.post(name: agentsChanged, object: nil) } }
         }
     }
 

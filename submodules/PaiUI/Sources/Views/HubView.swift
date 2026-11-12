@@ -27,10 +27,21 @@ final class PaiHubStore: ObservableObject {
             }
         }
         Task {
+            if !loaded, let cached = await PaiCache.load(Board.self, Self.cacheName), !loaded {
+                tasks = cached.tasks
+                routines = cached.routines
+            }
             await load()
             await settings.load()
         }
     }
+
+    /// The board as last seen, shown while the daemon is asked again.
+    private struct Board: Codable {
+        let tasks: [PaiTaskItem]
+        let routines: [PaiRoutine]
+    }
+    private static let cacheName = "hub"
 
     deinit {
         if let observer { NotificationCenter.default.removeObserver(observer) }
@@ -58,6 +69,7 @@ final class PaiHubStore: ObservableObject {
             PaiChat.needs = n
         }
         loaded = true
+        if t != nil || r != nil { PaiCache.save(Board(tasks: self.tasks, routines: self.routines), Self.cacheName) }
     }
 
     func move(_ task: PaiTaskItem, to status: String) {

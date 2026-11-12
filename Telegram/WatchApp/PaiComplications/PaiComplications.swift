@@ -42,7 +42,8 @@ struct PaiComplicationProvider: TimelineProvider {
             return
         }
         PaiGlanceLiveSource(config: config).glance { result in
-            if case let .success(glance) = result {
+            if case let .success(fresh) = result {
+                let glance = fresh.keepingWindows(of: stored)
                 PaiVault.glance = glance
                 finish(glance)
             } else {

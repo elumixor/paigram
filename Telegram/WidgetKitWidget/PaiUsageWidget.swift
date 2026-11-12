@@ -58,9 +58,9 @@ struct PaiGlanceProvider: TimelineProvider {
         source.glance { result in
             var glance = store.glance
             if case let .success(fresh) = result {
-                store.saveGlance(fresh)
-                PaiUsageAlerts.post(store.crossings(in: fresh))
-                glance = fresh
+                let saved = store.saveGlance(fresh)
+                PaiUsageAlerts.post(store.crossings(in: saved))
+                glance = saved
             }
             completion(Timeline(entries: [PaiGlanceEntry(date: Date(), glance: glance, signedIn: true)], policy: .after(refresh)))
         }

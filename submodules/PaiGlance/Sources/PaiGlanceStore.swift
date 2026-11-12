@@ -51,8 +51,12 @@ public struct PaiGlanceStore {
         return try? Self.decoder.decode(PaiGlance.self, from: data)
     }
 
-    public func saveGlance(_ glance: PaiGlance) {
-        write(glance, to: glanceURL)
+    /// Saves a fresh glance, keeping the stored one's windows when the fresh one has none; returns what was saved.
+    @discardableResult
+    public func saveGlance(_ glance: PaiGlance) -> PaiGlance {
+        let kept = glance.keepingWindows(of: self.glance)
+        write(kept, to: glanceURL)
+        return kept
     }
 
     public var source: PaiGlanceSource? {

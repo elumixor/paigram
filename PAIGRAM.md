@@ -34,6 +34,10 @@ Settings › Stats reads the box for a day, a week or a month: AI spend by featu
 
 The ✨ button in the composer rewrites the draft through the box's `/compose` (Sonnet): the message in the chat's language and in his own way of writing to this person, every fact kept and nothing added; when the draft leaves something open it asks first. Long-press keeps Telegram's own AI editor.
 
+## Launch
+
+Every list the app shows (sessions, tasks, projects, agents, needs, usage, hub board, each agent chat) is cached as JSON in `Caches/pai` (`PaiCache`), read and decoded off the main thread, and shown before the network answers; `PaiChat.preload()` starts those reads at configure. The first fetch after start skips the 300 ms debounce, later event bursts keep it. The session list publishes as soon as tasks and projects arrive; the slower `/threads/all` merges in afterwards. A usage reading with no windows keeps the last known windows until they reset (app, widget and watch). `PaiPerf` logs `PAIPERF <name> +<ms since process start>` at each launch step: `log stream --predicate 'eventMessage CONTAINS "PAIPERF"'`.
+
 ## Usage glance, widget and watch
 
 One snapshot, the glance (`submodules/PaiGlance`), feeds every surface outside the app: today's spend, the plan's Session and Weekly windows, spend by agent, how many threads run, and the questions waiting on him. `PaiGlanceLiveSource` reads the box's `/usage/summary` and `/needs` together (falling back to `/spend/forecast`, `/spend`, `/needs`, `/rail` and `/agents` on a box without the summary). `PaiGlanceSync` (`submodules/PaiUI`) refreshes it while the app runs and writes it to the app group, where the home-screen widget (`Telegram/WidgetKitWidget/PaiUsageWidget.swift`, small and medium) reads it; a tap opens `paigram://usage` or `paigram://agent/<slug>`, the agent's chat.

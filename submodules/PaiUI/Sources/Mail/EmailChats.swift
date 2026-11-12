@@ -18,6 +18,7 @@ public enum EmailChats {
     /// pai; a sign-in later configures them then and registers for pushes.
     public static func configure() {
         PaiPerf.first("app.configure")
+        PaiChat.preload()
         PaiAuth.apply()
         if self.authObserver == nil {
             self.authObserver = NotificationCenter.default.addObserver(forName: PaiAuth.didChange, object: nil, queue: .main, using: { _ in
