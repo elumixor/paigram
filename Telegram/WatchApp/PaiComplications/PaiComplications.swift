@@ -75,6 +75,12 @@ struct PaiComplicationView: View {
             default:
                 rectangular(glance)
             }
+        } else if let glance = entry.glance {
+            switch family {
+            case .accessoryInline: Text("\(PaiFormat.usd(glance.todayUsd))\(glance.needsCount > 0 ? " · \(glance.needsCount)?" : "")")
+            case .accessoryRectangular: rectangular(glance)
+            default: Text(PaiFormat.usd(glance.todayUsd)).font(.system(size: 12).monospacedDigit()).minimumScaleFactor(0.5)
+            }
         } else {
             switch family {
             case .accessoryInline: Text("Pai")
