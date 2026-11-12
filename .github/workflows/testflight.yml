@@ -1,13 +1,11 @@
 name: TestFlight
 
-# Push a tag (`bun run tag`, from this Mac, the box or pai's chat) and the build lands on the phone. It runs
-# on the developer's Mac as a self-hosted runner (label `paigram-mac`): free, and fast from its warm Bazel
-# cache. While the Mac sleeps the job waits in the queue and the same tag's GitHub runner build
-# (`testflight-hosted.yml`) ships it instead; whichever finishes second does nothing (`--once`). When the
-# Mac's job fails, stalls or times out, `fallback` starts the GitHub runner's build of the same tag.
+# Dispatched only, on an `ios-v*` tag cut by `bun run tag`: pai's build card runs
+# `gh workflow run testflight.yml --ref ios-vX.Y.Z`. It runs on the developer's Mac as a self-hosted runner
+# (label `paigram-mac`): free, and fast from its warm Bazel cache. While the Mac sleeps the job waits in
+# the queue. When the Mac's job fails, stalls or times out, `fallback` starts the GitHub runner's build
+# (`testflight-hosted.yml`) of the same tag. A version already on TestFlight uploads nothing (`--once`).
 on:
-  push:
-    tags: ['ios-v*']
   workflow_dispatch:
 
 # Lets mac-release.ts cancel the GitHub runner's build of the same tag and `fallback` start one: the

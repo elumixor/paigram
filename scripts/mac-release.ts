@@ -1,6 +1,6 @@
 /**
  * `bun scripts/mac-release.ts [tag]`: what the TestFlight workflow runs on this Mac (a self-hosted runner,
- * `paigram-mac`), so a tag pushed from anywhere — this Mac, the box, pai's chat — builds here, from the warm
+ * `paigram-mac`), so a tag dispatched from pai's build card builds here, from the warm
  * Bazel cache, in a fraction of a GitHub runner's time. It builds `~/dev/@desk/native/paigram-ios` in place
  * rather than a second checkout (this disk has no room for one), so it first checks that those files are
  * exactly the tagged commit: the box and this Mac share the tree by sync, so they are whenever the tag was

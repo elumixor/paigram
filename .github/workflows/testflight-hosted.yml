@@ -1,15 +1,11 @@
 name: TestFlight (GitHub runner)
 
-# The same release on a GitHub macOS runner (free for this public repo, about 1h40 with the queue),
-# started by every tag alongside the Mac's (`testflight.yml`) so a release goes out even while that Mac
-# is off. `gate` steps aside when the Mac has picked the tag up (the Mac's own `fallback` job starts this
-# workflow again should its build fail); a run started by hand or by that fallback always builds.
+# The same release on a GitHub macOS runner (free for this public repo, about 1h40 with the queue).
+# Dispatched only: by the Mac workflow's `fallback` job when its build fails, or by hand on an `ios-v*` tag.
 # GitHub's macOS pool often refuses the job outright ("not acquired by Runner of type hosted" after 15
 # minutes), so a build that never got a machine is tried once more on the macOS 15 image, which has the
 # same Xcode and a shorter queue.
 on:
-  push:
-    tags: ['ios-v*']
   workflow_dispatch:
 
 permissions:
@@ -21,32 +17,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  gate:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      build: ${{ steps.decide.outputs.build }}
-    steps:
-      - id: decide
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          if [ "$GITHUB_EVENT_NAME" != push ]; then
-            echo "build=true" >> "$GITHUB_OUTPUT"; exit 0
-          fi
-          # The Mac's runner picks a job up within seconds of the push when it is awake.
-          sleep 45
-          status=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow testflight.yml --branch "$GITHUB_REF_NAME" --limit 1 --json status --jq '.[0].status // "none"')
-          echo "the Mac's run of $GITHUB_REF_NAME is: $status"
-          case "$status" in
-            queued|waiting|pending|requested|none) echo "build=true" >> "$GITHUB_OUTPUT" ;;
-            *) echo "build=false" >> "$GITHUB_OUTPUT"; echo "::notice::The Mac is building $GITHUB_REF_NAME; this run steps aside (its fallback job starts this workflow again if that build fails)." ;;
-          esac
-
   build:
-    needs: gate
-    if: needs.gate.outputs.build == 'true'
     uses: ./.github/workflows/testflight-hosted-build.yml
     with:
       runner: macos-26
@@ -54,8 +25,8 @@ jobs:
 
   # Only a job that never reached a machine is retried: a build that failed on its own would fail again.
   retry-check:
-    needs: [gate, build]
-    if: always() && needs.gate.outputs.build == 'true' && needs.build.result != 'success'
+    needs: build
+    if: always() && needs.build.result != 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:

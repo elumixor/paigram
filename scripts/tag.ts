@@ -1,7 +1,6 @@
 /**
- * `bun run tag [--minor] [--dry-run]`: bump versions.json, commit it, tag it `ios-vX.Y.Z` and push. The tag
- * is what the TestFlight workflow waits for, so this is the whole release from any machine — no Xcode,
- * no Mac. Everything the build needs lives in the repo's GitHub secrets.
+ * `bun run tag [--minor] [--dry-run]`: bump versions.json, commit it, tag it `ios-vX.Y.Z` and push. It starts
+ * no build: pai's build card dispatches the TestFlight workflow on the tag. Everything the build needs lives in the repo's GitHub secrets.
  *
  * What gets built is what the tag points at, so the tree must be what is committed and pushed. On the box
  * the files arrive by sync while its `.git` is its own and lags behind: when the files already match
