@@ -17,6 +17,7 @@ public enum EmailChats {
     /// Before any account starts: email and WhatsApp sync and send through the box, once this phone is signed in to
     /// pai; a sign-in later configures them then and registers for pushes.
     public static func configure() {
+        PaiPerf.first("app.configure")
         PaiAuth.apply()
         if self.authObserver == nil {
             self.authObserver = NotificationCenter.default.addObserver(forName: PaiAuth.didChange, object: nil, queue: .main, using: { _ in

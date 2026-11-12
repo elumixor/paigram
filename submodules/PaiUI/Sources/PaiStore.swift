@@ -40,7 +40,9 @@ public final class PaiStore: ObservableObject {
         if let data = UserDefaults.standard.data(forKey: Self.cacheKey), let cached = try? JSONDecoder().decode(Cache.self, from: data) {
             sessions = cached.sessions
             projects = cached.projects
+            if !cached.sessions.isEmpty { PaiPerf.first("sessions.cached") }
         }
+        PaiPerf.first("store.init")
     }
 
     private struct Cache: Codable {
@@ -62,6 +64,7 @@ public final class PaiStore: ObservableObject {
 
     public func start() {
         guard followTask == nil else { return }
+        PaiPerf.first("store.start")
         connectionError = nil
         refresh()
         followTask = Task { [weak self] in
@@ -104,22 +107,33 @@ public final class PaiStore: ObservableObject {
             if let mainThread = try? await client.telegramInfo().mainThread { PaiChat.mainThreadId = mainThread }
         }
         Task { [client] in
-            if let usage = try? await client.usage() { PaiChat.usage = usage }
+            if let usage = try? await client.usage() {
+                PaiPerf.mark("load.usage")
+                PaiChat.usage = usage
+            }
         }
         refreshNeeds()
         do {
-            async let tasks = client.tasks()
-            async let projects = client.projects()
-            async let held = client.allThreads()
+            async let tasks = Self.timed("load.tasks") { try await client.tasks() }
+            async let projects = Self.timed("load.projects") { try await client.projects() }
+            async let held = Self.timed("load.threads") { try await client.allThreads() }
             let (fetched, fetchedProjects, fetchedHeld) = try await (tasks, projects, held)
             self.sessions = Self.merge(live: fetched.live, recent: fetched.recent, held: fetchedHeld.map(\.asSession))
             self.projects = fetchedProjects
             connectionError = nil
+            PaiPerf.first("sessions.network")
             persist()
         } catch is CancellationError {
         } catch {
             connectionError = error.localizedDescription
         }
+    }
+
+    /// Logs when one of `load`'s requests is done.
+    private static func timed<T>(_ name: String, _ work: () async throws -> T) async rethrows -> T {
+        let value = try await work()
+        PaiPerf.mark(name)
+        return value
     }
 
     /// Live processes win over their database rows; sorted so the ones needing attention come first.
@@ -167,6 +181,7 @@ public final class PaiStore: ObservableObject {
         needsTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: Self.refreshDebounce)
             guard let self, !Task.isCancelled, let fetched = try? await self.client.needs() else { return }
+            PaiPerf.mark("load.needs")
             PaiChat.needs = fetched
         }
     }
@@ -212,6 +227,7 @@ public final class PaiStore: ObservableObject {
         agentsTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: Self.refreshDebounce)
             guard let self, !Task.isCancelled, let fetched = try? await self.client.agents() else { return }
+            PaiPerf.mark("load.agents")
             PaiChat.agents = fetched
             if fetched != self.agents { self.agents = fetched }
         }
@@ -231,6 +247,7 @@ public final class PaiStore: ObservableObject {
         if let rows = messages[slug] { return rows }
         let cached = UserDefaults.standard.data(forKey: Self.messagesKey(slug)).flatMap { try? JSONDecoder().decode([PaiLogMessage].self, from: $0) } ?? []
         messages[slug] = cached
+        if !cached.isEmpty { PaiPerf.first("chat.\(slug).cached") }
         return cached
     }
 
@@ -248,6 +265,7 @@ public final class PaiStore: ObservableObject {
         do {
             let fetched = try await client.messages(agent: slug, after: last)
             merge(fetched, into: slug)
+            if !chat(slug).isEmpty { PaiPerf.first("chat.\(slug).network") }
             connectionError = nil
         } catch is CancellationError {
         } catch {

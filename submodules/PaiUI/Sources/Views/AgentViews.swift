@@ -125,6 +125,7 @@ struct AgentTreeView: View {
             }
         }
         .onAppear {
+            PaiPerf.first("view.agentTree.appear")
             store.start()
             store.refreshAgents()
         }

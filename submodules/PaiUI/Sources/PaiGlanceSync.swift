@@ -59,6 +59,7 @@ public final class PaiGlanceSync: NSObject, WCSessionDelegate {
                 guard case let .success(glance) = result else { return }
                 let previous = self.store?.glance
                 self.store?.saveGlance(glance)
+                PaiPerf.first("glance.saved")
                 if let store = self.store {
                     PaiUsageAlerts.post(store.crossings(in: glance))
                 }

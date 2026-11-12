@@ -183,6 +183,7 @@ struct HubView: View {
             }
         }
         .onAppear {
+            PaiPerf.first("view.hub.appear")
             store.start()
             store.refreshAgents()
             hub.start()
