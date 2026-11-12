@@ -84,7 +84,7 @@ struct MarkdownView: View {
 
     /// Inline markdown through the system parser; text that does not parse shows as it is.
     private func inline(_ text: String) -> Text {
-        return Text(PaiURN.markdown(text).paiLinked)
+        return Text(PaiPill.markdown(text).paiLinked)
     }
 
     private static func parse(_ source: String) -> [Block] {

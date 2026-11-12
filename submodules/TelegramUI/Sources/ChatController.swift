@@ -7762,12 +7762,12 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
             self.paiProjectObserver = NotificationCenter.default.addObserver(forName: PaiChat.projectChanged, object: nil, queue: .main, using: redrawTitle)
             self.paiUsageObserver = NotificationCenter.default.addObserver(forName: PaiChat.usageChanged, object: nil, queue: .main, using: redrawTitle)
             self.paiNeedsObserver = NotificationCenter.default.addObserver(forName: PaiChat.needsChanged, object: nil, queue: .main, using: redrawTitle)
-            // A Keep page's or dev session's title arrived: the messages naming one redraw their link with it.
-            self.paiURNObserver = NotificationCenter.default.addObserver(forName: PaiURN.resolved, object: nil, queue: .main, using: { [weak self] _ in
+            // A referenced record's look arrived: the messages naming one redraw its pill.
+            self.paiURNObserver = NotificationCenter.default.addObserver(forName: PaiPill.resolved, object: nil, queue: .main, using: { [weak self] _ in
                 guard let self else { return }
                 var ids: [MessageId] = []
                 self.chatDisplayNode.historyNode.forEachVisibleMessageItemNode { itemNode in
-                    if let message = itemNode.item?.message, !PaiURN.matches(in: message.text).isEmpty {
+                    if let message = itemNode.item?.message, !PaiPill.matches(text: message.text, entities: message.textEntitiesAttribute?.entities ?? []).isEmpty {
                         ids.append(message.id)
                     }
                 }

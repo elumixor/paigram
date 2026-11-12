@@ -93,6 +93,8 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
     private let textAccessibilityOverlayNode: TextAccessibilityOverlayNode
     public var statusNode: ChatMessageDateAndStatusNode?
     private var linkHighlightingNode: LinkHighlightingNode?
+    /// The capsules, marks and statuses of the pai pills in the text, under it.
+    private var paiPillsLayer: CALayer?
     private var shimmeringNode: ShimmeringLinkNode?
     private var textSelectionNode: TextSelectionNode?
     
@@ -457,10 +459,17 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
                     }
                 }
                 
+                var paiPills: [PaiPill.Placed] = []
                 // The pai bot's trailing metadata link is for this client to read, not to show.
                 if let trailer = PaiTrailer.find(text: rawText, entities: messageEntities ?? []) {
                     rawText = (rawText as NSString).substring(to: trailer.textEnd)
                     messageEntities = messageEntities?.filter { $0.range.upperBound <= trailer.textEnd }
+                    // An ask drawing its options as rows does not also list them in its text.
+                    if trailer.meta.kind == "ask", let rows = PaiAsk.rows(item.message) {
+                        let (strippedText, strippedEntities) = PaiAsk.stripOptionLines(text: rawText, entities: messageEntities ?? [], options: rows.map { $0.label })
+                        rawText = strippedText
+                        messageEntities = strippedEntities
+                    }
                 }
                 // Nor is the project line this client put in front of a thread's first message.
                 if PaiChat.isBot(item.message.peers[item.message.id.peerId]) {
@@ -472,11 +481,12 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
                             return MessageTextEntity(range: (entity.range.lowerBound - cut)..<(entity.range.upperBound - cut), type: entity.type)
                         }
                     }
-                    // Keep pages and dev sessions show as titled links, never as raw URNs.
-                    let (linkedText, linkedEntities) = PaiURN.rewrite(text: rawText, entities: messageEntities ?? [])
-                    if linkedText != rawText {
+                    // Records it names (Keep pages, calendar blocks, commits, cards…) show as pills, never as raw URNs.
+                    let (linkedText, linkedEntities, pills) = PaiPill.rewrite(text: rawText, entities: messageEntities ?? [])
+                    if !pills.isEmpty {
                         rawText = linkedText
                         messageEntities = linkedEntities
+                        paiPills = pills
                     }
                 }
                 
@@ -654,6 +664,11 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
                         updatedString.replaceCharacters(in: range, with: insertString)
                     }
                     attributedText = updatedString
+                }
+                if !paiPills.isEmpty {
+                    let styled = NSMutableAttributedString(attributedString: attributedText)
+                    PaiPill.style(styled, pills: paiPills, textColor: messageTheme.primaryTextColor)
+                    attributedText = styled
                 }
                                 
                 var customTruncationToken: ((UIFont, Bool) -> NSAttributedString?)?
@@ -912,6 +927,7 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
                             ))
                             animation.animator.updatePosition(layer: strongSelf.textNode.textNode.layer, position: realTextFrame.center, completion: nil)
                             animation.animator.updateBounds(layer: strongSelf.textNode.textNode.layer, bounds: CGRect(origin: CGPoint(), size: realTextFrame.size), completion: nil)
+                            strongSelf.updatePaiPills(frame: realTextFrame, textColor: messageTheme.primaryTextColor)
                             
                             
                             switch strongSelf.visibility {
@@ -1161,6 +1177,34 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
         if let statusNode = self.statusNode, statusNode.alpha != 0.0 {
             statusNode.layer.animateAlpha(from: statusNode.alpha, to: 0.0, duration: 0.2, removeOnCompletion: false)
         }
+    }
+    
+    private func updatePaiPills(frame: CGRect, textColor: UIColor) {
+        let textNode = self.textNode.textNode
+        guard let string = textNode.cachedLayout?.attributedString, string.length > 0 else {
+            self.paiPillsLayer?.removeFromSuperlayer()
+            self.paiPillsLayer = nil
+            return
+        }
+        let layers = PaiPill.layers(in: string, textColor: textColor, rects: { textNode.rangeRects(in: $0)?.rects ?? [] })
+        if layers.isEmpty {
+            self.paiPillsLayer?.removeFromSuperlayer()
+            self.paiPillsLayer = nil
+            return
+        }
+        let container: CALayer
+        if let current = self.paiPillsLayer {
+            container = current
+        } else {
+            container = CALayer()
+            self.paiPillsLayer = container
+            self.containerNode.layer.insertSublayer(container, below: textNode.layer)
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        container.frame = frame
+        container.sublayers = layers
+        CATransaction.commit()
     }
     
     override public func tapActionAtPoint(_ point: CGPoint, gesture: TapLongTapOrDoubleTapGesture, isEstimating: Bool) -> ChatMessageBubbleContentTapAction {

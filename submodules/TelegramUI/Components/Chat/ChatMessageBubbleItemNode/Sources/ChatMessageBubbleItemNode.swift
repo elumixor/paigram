@@ -425,6 +425,11 @@ private func contentNodeMessagesAndClassesForItem(_ item: ChatMessageItem) -> ([
             }
         }
         
+        // An ask whose options carry pictures, lines or pages: its options as rows under the question.
+        if paiTrailer?.meta.kind == "ask", PaiAsk.rows(message) != nil {
+            result.append((message, ChatMessagePaiAskBubbleContentNode.self, itemAttributes, BubbleItemAttributes(isAttachment: false, neighborType: .text, neighborSpacing: .default)))
+        }
+        
         if richText != nil && !skipText {
             result.append((message, ChatMessageRichDataBubbleContentNode.self, itemAttributes, BubbleItemAttributes(isAttachment: false, neighborType: .text, neighborSpacing: .default)))
             needReactions = false
@@ -2179,6 +2184,15 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
                         if !updatedButtons.isEmpty {
                             updatedRows.append(ReplyMarkupRow(buttons: updatedButtons))
                         }
+                    }
+                    if !updatedRows.isEmpty {
+                        replyMarkup = ReplyMarkupMessageAttribute(rows: updatedRows, flags: attribute.flags, placeholder: attribute.placeholder)
+                    }
+                } else if let askId = PaiTrailer.find(firstMessage)?.meta.askId, PaiAsk.rows(firstMessage) != nil {
+                    // The ask's options are drawn as rows in the bubble; only Done, Skip and links stay as buttons.
+                    let updatedRows = attribute.rows.compactMap { row -> ReplyMarkupRow? in
+                        let buttons = row.buttons.filter { !PaiAsk.isOptionButton($0, askId: askId) }
+                        return buttons.isEmpty ? nil : ReplyMarkupRow(buttons: buttons)
                     }
                     if !updatedRows.isEmpty {
                         replyMarkup = ReplyMarkupMessageAttribute(rows: updatedRows, flags: attribute.flags, placeholder: attribute.placeholder)

@@ -1,3 +1,4 @@
+import SafariServices
 import SwiftUI
 import SwiftSignalKit
 
@@ -493,14 +494,7 @@ private struct AskCard: View {
                 if let given = row.meta.answer {
                     Label(given, systemImage: "checkmark.bubble").font(.footnote).foregroundStyle(.secondary)
                 } else if let askId = row.meta.askId {
-                    ForEach(row.meta.options ?? [], id: \.self) { option in
-                        Button { answer(askId, option) } label: {
-                            Text(option).font(.footnote.weight(.medium)).frame(maxWidth: .infinity).padding(.vertical, 8)
-                                .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(Color.accentColor)
-                    }
+                    AskOptions(meta: row.meta) { answer(askId, $0) }
                     HStack(spacing: 6) {
                         TextField("Your answer", text: $typed, axis: .vertical)
                             .font(.footnote)
@@ -525,6 +519,176 @@ private struct AskCard: View {
         .frame(maxWidth: 420, alignment: .leading)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
+}
+
+/// An ask's options: plain buttons, or rows with a picture, a line and a page when the options carry them. A
+/// multi-select ask ticks options and sends them with Done; an ask with several questions shows each with its own
+/// options and sends every answer at once.
+@available(iOS 16.0, *)
+private struct AskOptions: View {
+    let meta: PaiLogMessage.Meta
+    let answer: (String) -> Void
+    @State private var picked: [Int: Set<Int>] = [:]
+
+    private struct Question {
+        let title: String?
+        let key: String
+        let options: [String]
+        let details: [PaiOptionDetail?]?
+        let multi: Bool
+    }
+
+    private var questions: [Question] {
+        if let questions = meta.questions, questions.count > 1 {
+            return questions.map { Question(title: $0.question, key: $0.question, options: $0.options, details: PaiOptionDetail.aligned($0.details, count: $0.options.count), multi: $0.multiSelect) }
+        }
+        let options = meta.options ?? []
+        return [Question(title: nil, key: "", options: options, details: PaiOptionDetail.aligned(meta.optionDetails, count: options.count), multi: meta.multiSelect ?? false)]
+    }
+
+    private func choice(_ question: Question, _ index: Int) -> String {
+        question.options.indices.filter { picked[index, default: []].contains($0) }.map { question.options[$0] }.joined(separator: ", ")
+    }
+
+    private func send(_ questions: [Question]) {
+        if questions.count == 1 {
+            answer(choice(questions[0], 0))
+            return
+        }
+        let answers = Dictionary(questions.indices.map { (questions[$0].key, choice(questions[$0], $0)) }, uniquingKeysWith: { a, _ in a })
+        guard let data = try? JSONSerialization.data(withJSONObject: answers), let text = String(data: data, encoding: .utf8) else { return }
+        answer(text)
+    }
+
+    var body: some View {
+        let questions = self.questions
+        let stepped = questions.count > 1
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(questions.indices, id: \.self) { q in
+                let question = questions[q]
+                if let title = question.title {
+                    Text(title).font(.footnote.weight(.semibold)).padding(.top, q > 0 ? 6 : 0)
+                }
+                ForEach(question.options.indices, id: \.self) { i in
+                    let option = question.options[i]
+                    let selected = picked[q, default: []].contains(i)
+                    let tap: () -> Void = {
+                        if question.multi || stepped {
+                            var set = picked[q, default: []]
+                            if question.multi {
+                                if set.contains(i) { set.remove(i) } else { set.insert(i) }
+                            } else {
+                                set = [i]
+                            }
+                            picked[q] = set
+                        } else {
+                            answer(option)
+                        }
+                    }
+                    if let detail = question.details?[i] {
+                        AskOptionRow(label: option, detail: detail, ticked: question.multi || stepped ? selected : nil, tap: tap)
+                    } else if question.details != nil {
+                        AskOptionRow(label: option, detail: PaiOptionDetail(), ticked: question.multi || stepped ? selected : nil, tap: tap)
+                    } else {
+                        Button(action: tap) {
+                            HStack(spacing: 6) {
+                                if question.multi || stepped {
+                                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                                }
+                                Text(option)
+                            }
+                            .font(.footnote.weight(.medium)).frame(maxWidth: .infinity).padding(.vertical, 8)
+                            .background(Color.accentColor.opacity(selected ? 0.22 : 0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Color.accentColor)
+                    }
+                }
+            }
+            if stepped || questions.first?.multi == true {
+                Button { send(questions) } label: {
+                    Label("Done", systemImage: "checkmark").font(.footnote.weight(.semibold)).frame(maxWidth: .infinity).padding(.vertical, 8)
+                        .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .foregroundStyle(.white)
+                }
+                .buttonStyle(.plain)
+                .disabled(picked.values.allSatisfy { $0.isEmpty })
+                .opacity(picked.values.allSatisfy { $0.isEmpty } ? 0.5 : 1)
+            }
+        }
+    }
+}
+
+/// One option with its details: a picture (hidden if it does not load), the label, a line under it, the page's
+/// domain, which opens the page instead of picking.
+@available(iOS 16.0, *)
+private struct AskOptionRow: View {
+    let label: String
+    let detail: PaiOptionDetail
+    /// Ticked or not on a card that collects picks; nil when a tap answers.
+    let ticked: Bool?
+    let tap: () -> Void
+    @State private var page: PaiWebPage?
+
+    var body: some View {
+        Button(action: tap) {
+            HStack(spacing: 10) {
+                if let ticked {
+                    Image(systemName: ticked ? "checkmark.circle.fill" : "circle")
+                        .font(.title3)
+                        .foregroundStyle(ticked ? Color.accentColor : Color.secondary)
+                }
+                if let image = detail.image.flatMap(URL.init(string:)) {
+                    AsyncImage(url: image) { phase in
+                        if let picture = phase.image {
+                            picture.resizable().scaledToFill()
+                                .frame(width: 44, height: 44)
+                                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        } else if case .empty = phase {
+                            RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color(.tertiarySystemFill)).frame(width: 44, height: 44)
+                        }
+                    }
+                }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(label).font(.footnote.weight(.medium)).lineLimit(1).truncationMode(.tail)
+                    if let subtitle = detail.subtitle {
+                        Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    }
+                    if let domain = detail.domain, let url = detail.url.flatMap(URL.init(string:)) {
+                        Text("\(domain) ↗").font(.caption).foregroundStyle(Color.accentColor)
+                            .padding(.vertical, 2)
+                            .contentShape(Rectangle())
+                            .onTapGesture { page = PaiWebPage(url: url) }
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 9).padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.accentColor.opacity(ticked == true ? 0.18 : 0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .sheet(item: $page) { page in
+            PaiSafari(url: page.url).ignoresSafeArea()
+        }
+    }
+}
+
+private struct PaiWebPage: Identifiable {
+    let url: URL
+    var id: URL { url }
+}
+
+/// The in-app browser.
+private struct PaiSafari: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> SFSafariViewController {
+        SFSafariViewController(url: url)
+    }
+
+    func updateUIViewController(_ controller: SFSafariViewController, context: Context) {}
 }
 
 /// A message an agent wrote for the user to send: where it goes, what it says, Send or Discard.

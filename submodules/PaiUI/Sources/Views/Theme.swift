@@ -84,12 +84,12 @@ extension Date {
 @available(iOS 16.0, *)
 struct MarkdownText: View {
     let text: String
-    /// Bumped when a Keep page's or dev session's title arrives, so its link shows the title.
+    /// Bumped when a referenced record's look arrives, so its link shows the title.
     @State private var titles = 0
     var body: some View {
         let _ = titles
-        Text(PaiURN.markdown(text).paiLinked)
-            .onReceive(NotificationCenter.default.publisher(for: PaiURN.resolved)) { _ in titles += 1 }
+        Text(PaiPill.markdown(text).paiLinked)
+            .onReceive(NotificationCenter.default.publisher(for: PaiPill.resolved)) { _ in titles += 1 }
     }
 }
 

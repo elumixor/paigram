@@ -395,6 +395,9 @@ public struct PaiLogMessage: Codable, Identifiable, Equatable {
         public var priority: String?
         public var agent: String?
         public var answer: String?
+        public var optionDetails: [PaiOptionDetail?]?
+        public var multiSelect: Bool?
+        public var questions: [PaiCardQuestion]?
 
         public init() {}
 
@@ -409,6 +412,9 @@ public struct PaiLogMessage: Codable, Identifiable, Equatable {
             priority = try? c.decodeIfPresent(String.self, forKey: .priority)
             agent = try? c.decodeIfPresent(String.self, forKey: .agent)
             answer = try? c.decodeIfPresent(String.self, forKey: .answer)
+            optionDetails = try? c.decodeIfPresent([PaiOptionDetail?].self, forKey: .optionDetails)
+            multiSelect = try? c.decodeIfPresent(Bool.self, forKey: .multiSelect)
+            questions = try? c.decodeIfPresent([PaiCardQuestion].self, forKey: .questions)
         }
     }
 

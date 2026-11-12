@@ -2,6 +2,77 @@ import Foundation
 import Postbox
 import TelegramCore
 
+/// What an ask option can carry besides its label (`OptionDetail` in `pai/src/protocol/rich.ts`): a line under it, a
+/// picture, a page. Every field is optional; a picture or page that is not http(s) is left out.
+public struct PaiOptionDetail: Codable, Equatable {
+    public var subtitle: String?
+    public var image: String?
+    public var url: String?
+
+    public init(subtitle: String? = nil, image: String? = nil, url: String? = nil) {
+        self.subtitle = subtitle
+        self.image = image
+        self.url = url
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        subtitle = (try? c.decodeIfPresent(String.self, forKey: .subtitle))?.paiNonEmpty
+        image = PaiOptionDetail.web(try? c.decodeIfPresent(String.self, forKey: .image))
+        url = PaiOptionDetail.web(try? c.decodeIfPresent(String.self, forKey: .url))
+    }
+
+    private static func web(_ value: String??) -> String? {
+        guard let value = value ?? nil, value.hasPrefix("https://") || value.hasPrefix("http://") else { return nil }
+        return value
+    }
+
+    public var isEmpty: Bool { subtitle == nil && image == nil && url == nil }
+
+    /// The page's host without `www.`, for the row's link.
+    public var domain: String? {
+        guard let url, let host = URL(string: url)?.host else { return nil }
+        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+    }
+
+    /// The details aligned with `options`, nil when none of them has any.
+    public static func aligned(_ details: [PaiOptionDetail?]?, count: Int) -> [PaiOptionDetail?]? {
+        guard let details else { return nil }
+        let rows = (0 ..< count).map { i -> PaiOptionDetail? in
+            guard i < details.count, let detail = details[i], !detail.isEmpty else { return nil }
+            return detail
+        }
+        return rows.contains(where: { $0 != nil }) ? rows : nil
+    }
+}
+
+/// One question of an ask that has several (`CardQuestion` in `pai/src/protocol/rich.ts`).
+public struct PaiCardQuestion: Codable, Equatable {
+    public var question: String
+    public var header: String?
+    public var options: [String]
+    public var details: [PaiOptionDetail?]?
+    public var multiSelect: Bool
+    public var freeText: Bool
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        question = (try? c.decodeIfPresent(String.self, forKey: .question)) ?? ""
+        header = try? c.decodeIfPresent(String.self, forKey: .header)
+        options = (try? c.decodeIfPresent([String].self, forKey: .options)) ?? []
+        details = try? c.decodeIfPresent([PaiOptionDetail?].self, forKey: .details)
+        multiSelect = (try? c.decodeIfPresent(Bool.self, forKey: .multiSelect)) ?? false
+        freeText = (try? c.decodeIfPresent(Bool.self, forKey: .freeText)) ?? false
+    }
+}
+
+extension String {
+    var paiNonEmpty: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
 /// The metadata the pai bot hides in a message's trailing link (`pai/src/protocol/rich.ts`).
 public struct PaiRichMeta: Decodable, Equatable {
     public struct Tool: Decodable, Equatable {
@@ -39,10 +110,49 @@ public struct PaiRichMeta: Decodable, Equatable {
     /// An ask: its id, the options, the answer once given; asks and notices carry a priority.
     public let askId: Int?
     public let options: [String]?
+    /// Index for index with `options`: a picture, a line, a page for the option; absent when none has any.
+    public let optionDetails: [PaiOptionDetail?]?
+    public let multiSelect: Bool?
+    /// An ask with several questions, each with its own options and details.
+    public let questions: [PaiCardQuestion]?
     public let answer: String?
     public let priority: String?
     /// The forum topic the agent's chat is in.
     public let thread: Int64?
+
+    private enum CodingKeys: String, CodingKey {
+        case v, kind, session, project, tools, durationMs, state, tool, startedAt, agent, agentName, breadcrumb, event, icon, items, status, askId, options, optionDetails, multiSelect, questions, answer, priority, thread
+    }
+
+    /// Only the version and kind are required: pai adds fields over time, and one that does not parse is left out,
+    /// not the whole trailer (its options would go with it).
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        v = try c.decode(Int.self, forKey: .v)
+        kind = try c.decode(String.self, forKey: .kind)
+        session = (try? c.decodeIfPresent(String.self, forKey: .session)) ?? ""
+        project = try? c.decodeIfPresent(String.self, forKey: .project)
+        tools = try? c.decodeIfPresent([Tool].self, forKey: .tools)
+        durationMs = try? c.decodeIfPresent(Double.self, forKey: .durationMs)
+        state = try? c.decodeIfPresent(String.self, forKey: .state)
+        tool = try? c.decodeIfPresent(String.self, forKey: .tool)
+        startedAt = try? c.decodeIfPresent(Double.self, forKey: .startedAt)
+        agent = try? c.decodeIfPresent(String.self, forKey: .agent)
+        agentName = try? c.decodeIfPresent(String.self, forKey: .agentName)
+        breadcrumb = try? c.decodeIfPresent(String.self, forKey: .breadcrumb)
+        event = try? c.decodeIfPresent(String.self, forKey: .event)
+        icon = try? c.decodeIfPresent(String.self, forKey: .icon)
+        items = try? c.decodeIfPresent([Event].self, forKey: .items)
+        status = try? c.decodeIfPresent(String.self, forKey: .status)
+        askId = try? c.decodeIfPresent(Int.self, forKey: .askId)
+        options = try? c.decodeIfPresent([String].self, forKey: .options)
+        optionDetails = try? c.decodeIfPresent([PaiOptionDetail?].self, forKey: .optionDetails)
+        multiSelect = try? c.decodeIfPresent(Bool.self, forKey: .multiSelect)
+        questions = try? c.decodeIfPresent([PaiCardQuestion].self, forKey: .questions)
+        answer = try? c.decodeIfPresent(String.self, forKey: .answer)
+        priority = try? c.decodeIfPresent(String.self, forKey: .priority)
+        thread = try? c.decodeIfPresent(Int64.self, forKey: .thread)
+    }
 
     public static let version = 1
     public var isStatus: Bool { kind == "status" }
