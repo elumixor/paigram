@@ -221,10 +221,10 @@ func paiAskMarkup(meta: [String: Any], ticked: Set<Int> = []) -> ReplyMarkupMess
     var rows: [ReplyMarkupRow] = options.enumerated().map { index, option in
         let title = multi ? "\(ticked.contains(index) ? "☑" : "☐") \(option.prefix(55))" : String(option.prefix(60))
         let data = (multi ? "m:\(askId):\(index)" : "k:\(askId):\(index)").data(using: .utf8)!
-        return ReplyMarkupRow(buttons: [ReplyMarkupButton(title: title, titleWhenForwarded: nil, action: .callback(requiresPassword: false, data: MemoryBuffer(data: data)))])
+        return ReplyMarkupRow(buttons: [ReplyMarkupButton(title: title, titleWhenForwarded: nil, action: .callback(requiresPassword: false, data: MemoryBuffer(data: data)), style: nil)])
     }
     if multi {
-        rows.append(ReplyMarkupRow(buttons: [ReplyMarkupButton(title: "✅ Done", titleWhenForwarded: nil, action: .callback(requiresPassword: false, data: MemoryBuffer(data: "M:\(askId)".data(using: .utf8)!)))]))
+        rows.append(ReplyMarkupRow(buttons: [ReplyMarkupButton(title: "✅ Done", titleWhenForwarded: nil, action: .callback(requiresPassword: false, data: MemoryBuffer(data: "M:\(askId)".data(using: .utf8)!)), style: nil)]))
     }
     return ReplyMarkupMessageAttribute(rows: rows, flags: [.inline], placeholder: nil)
 }
