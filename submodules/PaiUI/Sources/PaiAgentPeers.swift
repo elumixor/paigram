@@ -35,8 +35,11 @@ public enum PaiAgentPeers {
         guard PaiAuth.isSignedIn, self.engine != nil else {
             return
         }
+        // Every caller runs on the main queue.
         if #available(iOS 16.0, *) {
-            PaiHost.store.start()
+            MainActor.assumeIsolated {
+                PaiHost.store.start()
+            }
         }
     }
 
