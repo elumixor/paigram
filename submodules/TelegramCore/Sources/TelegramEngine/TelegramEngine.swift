@@ -53,6 +53,10 @@ public final class TelegramEngine {
         return WhatsApp(account: self.account)
     }()
 
+    public lazy var paiAgents: PaiAgents = {
+        return PaiAgents(account: self.account)
+    }()
+
     public lazy var privacy: Privacy = {
         return Privacy(account: self.account)
     }()

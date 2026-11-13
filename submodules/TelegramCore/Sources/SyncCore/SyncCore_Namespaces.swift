@@ -178,6 +178,8 @@ public struct Namespaces {
         public static let archive = PeerGroupId(rawValue: 1)
         /// Every email chat, behind one row in the chat list. Local: Telegram's server has no such folder.
         public static let email = PeerGroupId(rawValue: 2)
+        /// pai's agents, behind the pai row in the chat list. Local, like `email`.
+        public static let pai = PeerGroupId(rawValue: 3)
     }
 }
 
@@ -348,6 +350,7 @@ private enum PreferencesKeyValues: Int32 {
     case communitiesState = 50
     case emailState = 51
     case whatsAppState = 52
+    case paiAgentsState = 53
 }
 
 public func applicationSpecificPreferencesKey(_ value: Int32) -> ValueBoxKey {
@@ -468,6 +471,12 @@ public struct PreferencesKeys {
     public static let whatsAppState: ValueBoxKey = {
         let key = ValueBoxKey(length: 4)
         key.setInt32(0, value: PreferencesKeyValues.whatsAppState.rawValue)
+        return key
+    }()
+    
+    public static let paiAgentsState: ValueBoxKey = {
+        let key = ValueBoxKey(length: 4)
+        key.setInt32(0, value: PreferencesKeyValues.paiAgentsState.rawValue)
         return key
     }()
 

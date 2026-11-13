@@ -24,6 +24,7 @@ private let repliesIcon = generateTintedImage(image: UIImage(bundleImageName: "A
 private let anonymousSavedMessagesIcon = generateTintedImage(image: UIImage(bundleImageName: "Avatar/AnonymousSenderIcon"), color: .white)
 private let anonymousSavedMessagesDarkIcon = generateTintedImage(image: UIImage(bundleImageName: "Avatar/AnonymousSenderIcon"), color: UIColor(white: 1.0, alpha: 0.4))
 private let emailChatsIcon = generateTintedImage(image: UIImage(systemName: "envelope.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 26.0)), color: .white)
+private let paiChatsIcon = generateTintedImage(image: UIImage(systemName: "sparkles", withConfiguration: UIImage.SymbolConfiguration(pointSize: 26.0, weight: .semibold)), color: .white)
 private let myNotesIcon = generateTintedImage(image: UIImage(bundleImageName: "Avatar/MyNotesIcon"), color: .white)
 private let cameraIcon = generateTintedImage(image: UIImage(bundleImageName: "Avatar/CameraIcon"), color: .white)
 private let storyIcon = generateTintedImage(image: UIImage(bundleImageName: "Share/Story"), color: .white)
@@ -117,6 +118,8 @@ public func calculateAvatarColors(context: AccountContext?, explicitColorIndex: 
             colors = AvatarNode.savedMessagesColors
         } else if case .emailChatsIcon = icon {
             colors = AvatarNode.savedMessagesColors
+        } else if case .paiChatsIcon = icon {
+            colors = AvatarNode.paiColors
         } else if case .editAvatarIcon = icon, let theme {
             colors = [theme.list.itemAccentColor.withAlphaComponent(0.1), theme.list.itemAccentColor.withAlphaComponent(0.1)]
         } else if case let .archivedChatsIcon(hiddenByDefault) = icon, let theme = theme {
@@ -216,6 +219,7 @@ public enum AvatarNodeIcon: Equatable {
     case myNotesIcon
     case archivedChatsIcon(hiddenByDefault: Bool)
     case emailChatsIcon
+    case paiChatsIcon
     case editAvatarIcon
     case deletedIcon
     case phoneIcon
@@ -233,6 +237,7 @@ public enum AvatarNodeImageOverride: Equatable {
     case myNotesIcon
     case archivedChatsIcon(hiddenByDefault: Bool)
     case emailChatsIcon
+    case paiChatsIcon
     case editAvatarIcon(forceNone: Bool)
     case deletedIcon
     case phoneIcon
@@ -340,6 +345,10 @@ public final class AvatarNode: ASDisplayNode {
     
     static let savedMessagesColors: [UIColor] = [
         UIColor(rgb: 0x2a9ef1), UIColor(rgb: 0x72d5fd)
+    ]
+    
+    static let paiColors: [UIColor] = [
+        UIColor(rgb: 0x665fff), UIColor(rgb: 0x82b1ff)
     ]
     
     static let repostColors: [UIColor] = [
@@ -620,6 +629,9 @@ public final class AvatarNode: ASDisplayNode {
                 case .emailChatsIcon:
                     representation = nil
                     icon = .emailChatsIcon
+                case .paiChatsIcon:
+                    representation = nil
+                    icon = .paiChatsIcon
                 case let .archivedChatsIcon(hiddenByDefault):
                     representation = nil
                     icon = .archivedChatsIcon(hiddenByDefault: hiddenByDefault)
@@ -834,6 +846,9 @@ public final class AvatarNode: ASDisplayNode {
                 case .emailChatsIcon:
                     representation = nil
                     icon = .emailChatsIcon
+                case .paiChatsIcon:
+                    representation = nil
+                    icon = .paiChatsIcon
                 case let .archivedChatsIcon(hiddenByDefault):
                     representation = nil
                     icon = .archivedChatsIcon(hiddenByDefault: hiddenByDefault)
@@ -1107,6 +1122,15 @@ public final class AvatarNode: ASDisplayNode {
                     
                     if let emailChatsIcon = emailChatsIcon {
                         context.draw(emailChatsIcon.cgImage!, in: CGRect(origin: CGPoint(x: floor((bounds.size.width - emailChatsIcon.size.width) / 2.0), y: floor((bounds.size.height - emailChatsIcon.size.height) / 2.0)), size: emailChatsIcon.size))
+                    }
+                } else if case .paiChatsIcon = parameters.icon {
+                    let factor = bounds.size.width / 60.0
+                    context.translateBy(x: bounds.size.width / 2.0, y: bounds.size.height / 2.0)
+                    context.scaleBy(x: factor, y: -factor)
+                    context.translateBy(x: -bounds.size.width / 2.0, y: -bounds.size.height / 2.0)
+                    
+                    if let paiChatsIcon = paiChatsIcon {
+                        context.draw(paiChatsIcon.cgImage!, in: CGRect(origin: CGPoint(x: floor((bounds.size.width - paiChatsIcon.size.width) / 2.0), y: floor((bounds.size.height - paiChatsIcon.size.height) / 2.0)), size: paiChatsIcon.size))
                     }
                 } else if case .cameraIcon = parameters.icon {
                     let factor = bounds.size.width / 40.0

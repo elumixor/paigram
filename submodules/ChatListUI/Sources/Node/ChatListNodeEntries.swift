@@ -4,7 +4,6 @@ import TelegramCore
 import TelegramPresentationData
 import MergeLists
 import AccountContext
-import PaiUI
 
 enum ChatListNodeEntryId: Hashable {
     case Header
@@ -19,7 +18,6 @@ enum ChatListNodeEntryId: Hashable {
     case Notice
     case additionalCategory(Int)
     case TopPeer(EnginePeer.Id)
-    case PaiAgent(String)
 }
 
 enum ChatListNodeEntrySortIndex: Comparable {
@@ -428,7 +426,6 @@ enum ChatListNodeEntry: Comparable, Identifiable {
     case SectionHeader(presentationData: ChatListPresentationData, displayHide: Bool)
     case AdditionalCategory(index: Int, id: Int, title: String, image: UIImage?, appearance: ChatListNodeAdditionalCategory.Appearance, selected: Bool, presentationData: ChatListPresentationData)
     case TopPeer(index: Int, peer: EnginePeer)
-    case PaiAgentEntry(index: EngineChatList.Item.Index, row: PaiAgentRow, presentationData: ChatListPresentationData)
     
     var sortIndex: ChatListNodeEntrySortIndex {
         switch self {
@@ -452,8 +449,6 @@ enum ChatListNodeEntry: Comparable, Identifiable {
             return .additionalCategory(index)
         case let .TopPeer(index, _):
             return .topPeer(index)
-        case let .PaiAgentEntry(index, _, _):
-            return .index(index)
         }
     }
     
@@ -484,8 +479,6 @@ enum ChatListNodeEntry: Comparable, Identifiable {
             return .additionalCategory(id)
         case let .TopPeer(_, peer):
             return .TopPeer(peer.id)
-        case let .PaiAgentEntry(_, row, _):
-            return .PaiAgent(row.slug)
         }
     }
     
@@ -589,12 +582,6 @@ enum ChatListNodeEntry: Comparable, Identifiable {
                 } else {
                     return false
                 }
-            case let .PaiAgentEntry(lhsIndex, lhsRow, lhsPresentationData):
-                if case let .PaiAgentEntry(rhsIndex, rhsRow, rhsPresentationData) = rhs {
-                    return lhsIndex == rhsIndex && lhsRow == rhsRow && lhsPresentationData === rhsPresentationData
-                } else {
-                    return false
-                }
         }
     }
 }
@@ -617,7 +604,7 @@ struct ChatListContactPeer {
     }
 }
 
-func chatListNodeEntriesForView(view: EngineChatList, state: ChatListNodeState, savedMessagesPeer: EnginePeer?, foundPeers: [(EnginePeer, EnginePeer?)], hideArchivedFolderByDefault: Bool, displayArchiveIntro: Bool, mode: ChatListNodeMode, chatListLocation: ChatListControllerLocation, contacts: [ChatListContactPeer], accountPeerId: EnginePeer.Id, isMainTab: Bool, paiAgents: [PaiAgentRow] = []) -> (entries: [ChatListNodeEntry], loading: Bool) {
+func chatListNodeEntriesForView(view: EngineChatList, state: ChatListNodeState, savedMessagesPeer: EnginePeer?, foundPeers: [(EnginePeer, EnginePeer?)], hideArchivedFolderByDefault: Bool, displayArchiveIntro: Bool, mode: ChatListNodeMode, chatListLocation: ChatListControllerLocation, contacts: [ChatListContactPeer], accountPeerId: EnginePeer.Id, isMainTab: Bool) -> (entries: [ChatListNodeEntry], loading: Bool) {
     var groupItems = view.groupItems
     if isMainTab && state.archiveStoryState != nil && !groupItems.contains(where: { $0.id == .archive }) {
         groupItems.append(EngineChatList.GroupItem(
@@ -661,9 +648,6 @@ func chatListNodeEntriesForView(view: EngineChatList, state: ChatListNodeState, 
             groupEntryCount += 1
         }
         pinnedIndexOffset += UInt16(groupEntryCount)
-        if isMainTab {
-            pinnedIndexOffset += UInt16(paiAgents.count)
-        }
     }
     
     let filteredAdditionalItemEntries = view.additionalItems.filter { item -> Bool in
@@ -936,19 +920,18 @@ func chatListNodeEntriesForView(view: EngineChatList, state: ChatListNodeState, 
         }
         
         if !view.hasLater, case .chatList = mode {
-            // pai's agents sit under the Email row, in tree order.
-            if isMainTab {
-                for row in paiAgents.reversed() {
-                    let messageIndex = EngineMessage.Index(id: EngineMessage.Id(peerId: EnginePeer.Id(0), namespace: 0, id: 0), timestamp: 1)
-                    result.append(.PaiAgentEntry(index: .chatList(EngineChatList.Item.Index.ChatList(pinningIndex: pinningIndex, messageIndex: messageIndex)), row: row, presentationData: state.presentationData))
-                    if pinningIndex != 0 {
-                        pinningIndex -= 1
-                        hasPinned = true
-                    }
+            // Entries run bottom-up and the archive has to stay on top: it hides above the list. pai sits above Email.
+            let groupOrder: (EngineChatList.Group) -> Int = { id in
+                switch id {
+                case .email:
+                    return 0
+                case .pai:
+                    return 1
+                default:
+                    return 2
                 }
             }
-            // Entries run bottom-up and the archive has to stay on top: it hides above the list.
-            for groupReference in groupItems.sorted(by: { $0.id == .email && $1.id != .email }) {
+            for groupReference in groupItems.sorted(by: { groupOrder($0.id) < groupOrder($1.id) }) {
                 let messageIndex = EngineMessage.Index(id: EngineMessage.Id(peerId: EnginePeer.Id(0), namespace: 0, id: 0), timestamp: 1)
                 var mappedStoryState: ChatListNodeState.StoryState?
                 if groupReference.id == .archive, let archiveStoryState = state.archiveStoryState {

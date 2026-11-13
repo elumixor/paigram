@@ -57,6 +57,10 @@ public final class ChatListContainerNode: ASDisplayNode, ASGestureRecognizerDele
     private let context: AccountContext
     private weak var controller: ChatListControllerImpl?
     let location: ChatListControllerLocation
+    /// The Email and pai lists take the whole width; a forum's topics leave a column of the main list's avatars.
+    var coversMainList: Bool {
+        return self.location == .chatList(groupId: .email) || self.location == .chatList(groupId: .pai)
+    }
     private let chatListMode: ChatListNodeMode
     private let previewing: Bool
     private let isInlineMode: Bool
@@ -163,7 +167,6 @@ public final class ChatListContainerNode: ASDisplayNode, ASGestureRecognizerDele
             previousItemNode.listNode.peerSelected = nil
             previousItemNode.listNode.disabledPeerSelected = nil
             previousItemNode.listNode.groupSelected = nil
-            previousItemNode.listNode.paiAgentSelected = nil
             previousItemNode.listNode.updatePeerGrouping = nil
             previousItemNode.listNode.contentOffsetChanged = nil
             previousItemNode.listNode.contentScrollingEnded = nil
@@ -225,9 +228,6 @@ public final class ChatListContainerNode: ASDisplayNode, ASGestureRecognizerDele
         }
         itemNode.listNode.groupSelected = { [weak self] groupId in
             self?.groupSelected?(groupId)
-        }
-        itemNode.listNode.paiAgentSelected = { [weak self] slug in
-            self?.paiAgentSelected?(slug)
         }
         itemNode.listNode.openCommunity = { [weak self] communityId in
             self?.openCommunity?(communityId)
@@ -438,7 +438,6 @@ public final class ChatListContainerNode: ASDisplayNode, ASGestureRecognizerDele
     public var peerSelected: ((EnginePeer, Int64?, Bool, Bool, ChatListNodeEntryPromoInfo?) -> Void)?
     public var disabledPeerSelected: ((EnginePeer, Int64?, ChatListDisabledPeerReason) -> Void)?
     var groupSelected: ((EngineChatList.Group) -> Void)?
-    var paiAgentSelected: ((String) -> Void)?
     var openCommunity: ((EnginePeer.Id) -> Void)?
     var ungroupCommunity: ((EnginePeer.Id) -> Void)?
     var updatePeerGrouping: ((EnginePeer.Id, Bool) -> Void)?
@@ -1519,7 +1518,7 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
         var navigationHeaderPanels: AnyComponent<Empty>?
         if self.controller?.tabContainerData != nil || !panels.isEmpty {
             var tabs: AnyComponent<Empty>?
-            if let tabContainerData = self.controller?.tabContainerData, tabContainerData.0.count > 1, self.inlineStackContainerNode?.location != .chatList(groupId: .email) {
+            if let tabContainerData = self.controller?.tabContainerData, tabContainerData.0.count > 1, !(self.inlineStackContainerNode?.coversMainList ?? false) {
                 let folderFilterIndex: (ChatListFilterTabEntryId, [ChatListFilterTabEntry]) -> Int? = { id, entries in
                     var index = 0
                     for entry in entries {
@@ -1959,8 +1958,7 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
         var mainNavigationBarHeight = navigationBarHeight
         var cleanMainNavigationBarHeight = cleanNavigationBarHeight
         var mainInsets = insets
-        // The Email list takes the whole width; a forum's topics leave a column of the main list's avatars.
-        let inlineCoversMainList = self.inlineStackContainerNode?.location == .chatList(groupId: .email)
+        let inlineCoversMainList = self.inlineStackContainerNode?.coversMainList ?? false
         if self.inlineStackContainerNode != nil && "".isEmpty {
             mainNavigationBarHeight = visualNavigationHeight
             cleanMainNavigationBarHeight = visualNavigationHeight
@@ -2348,7 +2346,7 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
                     }
                 }
                 
-                inlineStackContainerNode.leftSeparatorLayer.isHidden = inlineStackContainerNode.location == .chatList(groupId: .email)
+                inlineStackContainerNode.leftSeparatorLayer.isHidden = inlineStackContainerNode.coversMainList
                 
                 inlineStackContainerNode.presentAlert = self.mainContainerNode.presentAlert
                 inlineStackContainerNode.present = self.mainContainerNode.present

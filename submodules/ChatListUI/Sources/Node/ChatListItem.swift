@@ -799,6 +799,9 @@ private func groupReferenceTitle(item: ChatListItem) -> String {
     if case let .groupReference(groupReferenceData) = item.content, groupReferenceData.groupId == .email {
         return "Email"
     }
+    if case let .groupReference(groupReferenceData) = item.content, groupReferenceData.groupId == .pai {
+        return "pai"
+    }
     return item.presentationData.strings.ChatList_ArchivedChatsTitle
 }
 
@@ -1892,7 +1895,7 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                 UIView.transition(with: self.avatarNode.view, duration: 0.3, options: [.transitionCrossDissolve], animations: {
                 }, completion: nil)
             }
-            self.avatarNode.setPeer(context: item.context, theme: item.presentationData.theme, peer: peer, overrideImage: groupReferenceData.groupId == .email ? .emailChatsIcon : .archivedChatsIcon(hiddenByDefault: groupReferenceData.hiddenByDefault), emptyColor: item.presentationData.theme.list.mediaPlaceholderColor, synchronousLoad: synchronousLoads)
+            self.avatarNode.setPeer(context: item.context, theme: item.presentationData.theme, peer: peer, overrideImage: groupReferenceData.groupId == .email ? .emailChatsIcon : (groupReferenceData.groupId == .pai ? .paiChatsIcon : .archivedChatsIcon(hiddenByDefault: groupReferenceData.hiddenByDefault)), emptyColor: item.presentationData.theme.list.mediaPlaceholderColor, synchronousLoad: synchronousLoads)
         }
         
         if item.interaction.activateChatPreview == nil {

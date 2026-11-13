@@ -7748,12 +7748,15 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
         self.didAppear = true
         
         // The pai bot's chat keeps its activity feed alive while open; a new agent list, project or usage redraws the title.
-        if !wasAppearedBefore, PaiChat.isBot(self.presentationInterfaceState.renderedPeer?.peer) {
-            if #available(iOS 16.0, *) {
-                PaiHost.store.start()
-            }
-            if let peerId = self.chatLocation.peerId {
-                PaiNotificationAnswer.writeConfig(basePath: self.context.sharedContext.basePath, botUserId: peerId.id._internalGetInt64Value())
+        // An agent's own chat redraws the same way: its rail, its role line, its pills.
+        if !wasAppearedBefore, PaiChat.drawsPai(self.presentationInterfaceState.renderedPeer?.peer) {
+            if PaiChat.isBot(self.presentationInterfaceState.renderedPeer?.peer) {
+                if #available(iOS 16.0, *) {
+                    PaiHost.store.start()
+                }
+                if let peerId = self.chatLocation.peerId {
+                    PaiNotificationAnswer.writeConfig(basePath: self.context.sharedContext.basePath, botUserId: peerId.id._internalGetInt64Value())
+                }
             }
             let redrawTitle: (Notification) -> Void = { [weak self] _ in
                 guard let self else { return }

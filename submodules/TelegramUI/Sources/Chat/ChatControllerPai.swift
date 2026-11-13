@@ -22,25 +22,27 @@ private func paiThread(peerId: PeerId, threadId: Int64) -> ChatReplyThreadMessag
 extension ChatControllerImpl {
     /// Into an agent's chat, keeping the navigation stack the shape of the tree: going down pushes (so the back
     /// swipe goes up a level), going up pops to the level when it is on the stack and switches this chat otherwise.
-    /// An agent with a topic is that topic of the bot chat; a sub-agent's chat is a screen of the app.
+    /// An agent with a topic is that topic of the bot chat; any other agent's is its own chat (its peer's).
     func openPaiAgent(slug: String?, thread: Int64?) {
-        guard #available(iOS 16.0, *), let navigationController = self.effectiveNavigationController, let peerId = self.chatLocation.peerId else {
+        guard let navigationController = self.effectiveNavigationController, let chatPeerId = self.chatLocation.peerId else {
             return
         }
+        // In an agent's own chat, topics are the bot's.
+        let currentSlug = chatPeerId.isPaiAgent ? PaiAgentList.slug(peerId: chatPeerId) : PaiChat.agent(thread: self.chatLocation.threadId)?.slug
+        let botPeerId = chatPeerId.isPaiAgent ? PaiChat.botPeerId : chatPeerId
         let target = PaiChat.agent(slug) ?? PaiChat.agent(thread: thread)
         let targetSlug = target?.slug ?? slug
         let threadId = thread ?? targetSlug.flatMap { PaiChat.thread(of: $0) }
         let stack = navigationController.viewControllers
         let selfIndex = stack.firstIndex(where: { $0 === self }) ?? stack.count - 1
+        let goesDown = currentSlug.flatMap { current in targetSlug.map { PaiChat.isAncestor(current, of: $0) } } ?? false
 
-        if let threadId {
+        if let threadId, let peerId = botPeerId {
             if let existing = stack.last(where: { ($0 as? ChatControllerImpl)?.chatLocation.peerId == peerId && ($0 as? ChatControllerImpl)?.chatLocation.threadId == threadId }) {
                 let _ = navigationController.popToViewController(existing, animated: true)
                 return
             }
-            let current = PaiChat.agent(thread: self.chatLocation.threadId)
-            let goesDown = current.flatMap { current in targetSlug.map { PaiChat.isAncestor(current.slug, of: $0) } } ?? false
-            if goesDown {
+            if goesDown || chatPeerId.isPaiAgent {
                 let controller = ChatControllerImpl(context: self.context, chatLocation: .replyThread(message: paiThread(peerId: peerId, threadId: threadId)))
                 navigationController.setViewControllers(Array(stack.prefix(selfIndex + 1)) + [controller], animated: true)
             } else {
@@ -53,17 +55,23 @@ extension ChatControllerImpl {
         guard let targetSlug else {
             return
         }
-        if let existing = stack.last(where: { ($0 as? PaiAgentChatController)?.slug == targetSlug }) {
+        let agentPeerId = paiAgentPeerId(slug: targetSlug)
+        if let existing = stack.last(where: { ($0 as? ChatControllerImpl)?.chatLocation.peerId == agentPeerId }) {
             let _ = navigationController.popToViewController(existing, animated: true)
             return
         }
-        // A sub-agent's chat goes right above its parent's, whichever screen that is.
-        let parentIndex = target?.parent.flatMap { parent in stack.lastIndex(where: { ($0 as? PaiAgentChatController)?.slug == parent }) }
-        let chat = PaiAgentChatController(context: self.context, slug: targetSlug)
-        chat.openAgent = { [weak self] slug in
-            self?.openPaiAgent(slug: slug, thread: nil)
+        // A sub-agent's chat goes right above its parent's, whichever chat that is.
+        let parentIndex = target?.parent.flatMap { parent -> Int? in
+            let parentThread = PaiChat.thread(of: parent)
+            return stack.lastIndex(where: { controller in
+                guard let chat = controller as? ChatControllerImpl else {
+                    return false
+                }
+                return chat.chatLocation.peerId == paiAgentPeerId(slug: parent) || (parentThread != nil && chat.chatLocation.peerId == botPeerId && chat.chatLocation.threadId == parentThread)
+            })
         }
-        navigationController.setViewControllers(Array(stack.prefix((parentIndex ?? selfIndex) + 1)) + [chat], animated: true)
+        let controller = ChatControllerImpl(context: self.context, chatLocation: .peer(id: agentPeerId))
+        navigationController.setViewControllers(Array(stack.prefix((parentIndex ?? selfIndex) + 1)) + [controller], animated: true)
     }
 
     /// A thread named only by its short id (a reply's "started […]" link): always pushed as a fresh chat,
@@ -109,7 +117,7 @@ extension ChatControllerImpl {
     /// A voice call with the agent whose chat this is; pai's own anywhere else in the bot chat.
     func startPaiCall() {
         guard #available(iOS 16.0, *) else { return }
-        let slug = PaiChat.agent(thread: self.chatLocation.threadId)?.slug ?? PaiChat.paiSlug
+        let slug = self.chatLocation.peerId.flatMap(PaiAgentList.slug(peerId:)) ?? PaiChat.agent(thread: self.chatLocation.threadId)?.slug ?? PaiChat.paiSlug
         PaiCall.shared.start(agent: slug)
     }
 

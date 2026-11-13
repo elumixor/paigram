@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import TelegramCore
 
 /// Every thread the daemon knows, kept current from the global event stream.
 @available(iOS 16.0, *)
@@ -180,6 +181,10 @@ public final class PaiStore: ObservableObject {
     private func handle(_ event: PaiEvent) {
         if event.kind == "message.new", let message = try? event.payload.decode(PaiLogMessage.self) {
             receive(message)
+        }
+        // Agent chats are TelegramCore's: each row of the log goes there as it arrives.
+        if event.kind == "message.new" || event.kind == "message.updated", let row = try? JSONEncoder().encode(event.payload) {
+            PaiAgentsSync.receive(rowJSON: row)
         }
         if event.kind.hasPrefix("agent.") { refreshAgents() }
         if event.kind.hasPrefix("draft.") || event.kind == "message.new" { refreshDrafts() }

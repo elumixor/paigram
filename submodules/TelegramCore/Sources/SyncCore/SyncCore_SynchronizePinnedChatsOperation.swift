@@ -44,7 +44,7 @@ public final class SynchronizePinnedChatsOperation: PostboxCoding {
 }
 
 public func addSynchronizePinnedChatsOperation(transaction: Transaction, groupId: PeerGroupId) {
-    if groupId == Namespaces.PeerGroup.email {
+    if groupId == Namespaces.PeerGroup.email || groupId == Namespaces.PeerGroup.pai {
         return
     }
     let rawId: Int32 = groupId.rawValue

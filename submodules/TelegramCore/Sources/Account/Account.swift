@@ -1308,6 +1308,7 @@ public class Account {
         if !supplementary {
             let _ = failInterruptedEmailSends(postbox: postbox).start()
             let _ = failInterruptedWhatsAppSends(postbox: postbox).start()
+            let _ = failInterruptedPaiAgentSends(postbox: postbox).start()
         }
         if !supplementary {
             self.pendingStoryManager = PendingStoryManager(postbox: postbox, network: network, accountPeerId: peerId, stateManager: self.stateManager, messageMediaPreuploadManager: self.messageMediaPreuploadManager, revalidationContext: self.mediaReferenceRevalidationContext, auxiliaryMethods: self.auxiliaryMethods)

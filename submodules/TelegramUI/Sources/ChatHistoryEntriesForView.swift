@@ -377,7 +377,7 @@ func chatHistoryEntriesForView(
     }
     
     // pai's service rows in a topic: a run of consecutive events shows as one row, the run's last, folded.
-    if isPaiBot, location.threadId != nil {
+    if (isPaiBot && location.threadId != nil) || chatPeer?.id.isPaiAgent == true {
         var folded: [MessageId: [PaiEventLine]] = [:]
         var single: [MessageId] = []
         var dropped = Set<Int>()

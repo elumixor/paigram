@@ -10,7 +10,6 @@ import TelegramUIPreferences
 import TelegramBaseController
 import OverlayStatusController
 import AccountContext
-import PaiUI
 import AlertUI
 import PresentationDataUtils
 import UndoUI
@@ -297,6 +296,8 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                 title = self.presentationData.strings.DialogList_Title
             } else if groupId == .email {
                 title = "Email"
+            } else if groupId == .pai {
+                title = "pai"
             } else {
                 title = self.presentationData.strings.ChatList_ArchivedChatsTitle
             }
@@ -1567,22 +1568,15 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
             self.ungroupCommunity(communityId: communityId)
         }
 
-        self.chatListDisplayNode.mainContainerNode.paiAgentSelected = { [weak self] slug in
-            guard let self, let navigationController = self.navigationController as? NavigationController else {
-                return
-            }
-            PaiAgentList.open(slug: slug, context: self.context, navigationController: navigationController)
-        }
-
         self.chatListDisplayNode.mainContainerNode.groupSelected = { [weak self] groupId in
             guard let self else {
                 return
             }
             
             // Opens inside this controller, not pushed over it, so the tab bar stays.
-            if groupId == .email {
+            if groupId == .email || groupId == .pai {
                 self.chatListDisplayNode.mainContainerNode.currentItemNode.clearHighlightAnimated(true)
-                self.setInlineChatList(location: .chatList(groupId: .email))
+                self.setInlineChatList(location: .chatList(groupId: groupId))
                 return
             }
             
@@ -2177,7 +2171,7 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                 }
             })
             
-            if self.previewing || self.location == .chatList(groupId: .email) {
+            if self.previewing || self.location == .chatList(groupId: .email) || self.location == .chatList(groupId: .pai) {
                 self.storiesReady.set(.single(true))
             } else {
                 self.storySubscriptionsDisposable = (self.context.engine.messages.storySubscriptions(isHidden: self.location == .chatList(groupId: .archive))
@@ -7173,6 +7167,8 @@ private final class ChatListLocationContext {
                 defaultTitle = presentationData.strings.DialogList_Title
             } else if groupId == .email {
                 defaultTitle = "Email"
+            } else if groupId == .pai {
+                defaultTitle = "pai"
             } else {
                 defaultTitle = presentationData.strings.ChatList_ArchivedChatsTitle
             }
@@ -7295,7 +7291,7 @@ private final class ChatListLocationContext {
                 } else {
                     self.storyButton = nil
                 }
-            } else if case .chatList(.email) = self.location {
+            } else if self.location == .chatList(groupId: .email) || self.location == .chatList(groupId: .pai) {
                 self.rightButton = nil
             } else {
                 let parentController = self.parentController

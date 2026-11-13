@@ -6,6 +6,11 @@ import TelegramCore
 public enum PaiChat {
     private static let lastThreadKey = "pai.lastThreadId"
 
+    /// Whether a chat draws pai's messages (cards, pills, folded events): the bot's, or an agent's own.
+    public static func drawsPai(_ peer: Peer?) -> Bool {
+        return isBot(peer) || peer?.id.isPaiAgent == true
+    }
+
     /// Whether a chat is the pai bot's.
     public static func isBot(_ peer: Peer?) -> Bool {
         guard let user = peer as? TelegramUser, user.botInfo != nil else { return false }

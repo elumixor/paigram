@@ -76,7 +76,7 @@ func emailGloballyUniqueId(gmailId: String) -> Int64 {
 
 public extension PeerId {
     var isEmail: Bool {
-        return self.namespace == Namespaces.Peer.Email
+        return self.namespace == Namespaces.Peer.Email && !self.isPaiAgent
     }
 }
 

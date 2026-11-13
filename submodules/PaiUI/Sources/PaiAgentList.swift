@@ -5,84 +5,42 @@ import SwiftSignalKit
 import TelegramCore
 import UIKit
 
-/// An agent as a row of the chat list: who it is, what it is for, and whether it runs, rests or waits on the user.
-public struct PaiAgentRow: Equatable {
-    public enum State: Equatable {
-        case running
-        case idle
-        /// Waiting on the user's decision.
-        case blocked
-        /// Stopped by the user.
-        case paused
-    }
-
-    public let slug: String
-    public let name: String
-    public let role: String?
-    public let avatar: String?
-    public let job: String
-    public let state: State
-    /// How many decisions it waits on.
-    public let needs: Int
-
-    public var statusText: String {
-        switch state {
-        case .running: return "Working"
-        case .blocked: return needs > 1 ? "\(needs) questions" : "Waiting on you"
-        case .paused: return "Stopped"
-        case .idle: return "Idle"
-        }
-    }
-}
-
-/// The agents shown in the chat list, kept fresh by the daemon's event stream.
+/// Opening the agents' chats.
 public enum PaiAgentList {
-    /// The live agents in tree order; finished, closed and trashed ones are left out.
-    public static func rows() -> [PaiAgentRow] {
-        let needs = PaiChat.needs
-        return PaiChat.agents.compactMap { agent in
-            switch agent.status {
-            case "done", "closed": return nil
-            default: break
-            }
-            let open = needs.filter { $0.agent == agent.slug }.count
-            let state: PaiAgentRow.State
-            if open > 0 || agent.status == "waiting" {
-                state = .blocked
-            } else if agent.status == "paused" {
-                state = .paused
-            } else if agent.isBusy {
-                state = .running
-            } else {
-                state = .idle
-            }
-            return PaiAgentRow(slug: agent.slug, name: agent.name, role: agent.role, avatar: agent.avatar, job: agent.job, state: state, needs: open)
+    /// The agent whose peer this is.
+    public static func slug(peerId: EnginePeer.Id) -> String? {
+        guard peerId.isPaiAgent else {
+            return nil
         }
+        return PaiChat.agents.first(where: { paiAgentPeerId(slug: $0.slug) == peerId })?.slug
     }
 
-    /// The rows now and whenever an agent or a decision changes. Subscribing starts following the daemon.
-    public static func signal() -> Signal<[PaiAgentRow], NoError> {
-        return Signal { subscriber in
-            subscriber.putNext(rows())
-            let center = NotificationCenter.default
-            let observers = [PaiChat.agentsChanged, PaiChat.needsChanged].map { name in
-                center.addObserver(forName: name, object: nil, queue: nil) { _ in
-                    subscriber.putNext(rows())
-                }
-            }
-            if #available(iOS 16.0, *), PaiAuth.isSignedIn {
-                Task { @MainActor in
-                    PaiHost.store.start()
-                }
-            }
-            return ActionDisposable {
-                observers.forEach(center.removeObserver)
-            }
+    /// Under an agent chat's title: its role, and what it is doing when it is not idle.
+    public static func subtitle(peerId: EnginePeer.Id) -> String? {
+        guard let slug = slug(peerId: peerId), let agent = PaiChat.agent(slug) else {
+            return nil
         }
-        |> distinctUntilChanged
+        let state: String?
+        if agent.status == "waiting" || PaiChat.needs.contains(where: { $0.agent == slug }) {
+            state = "waiting on you"
+        } else if agent.isBusy {
+            state = "working"
+        } else {
+            state = nil
+        }
+        let role = agent.role.flatMap { $0.isEmpty ? nil : $0 } ?? "agent"
+        return [role, state].compactMap { $0 }.joined(separator: " · ")
     }
 
-    /// Into an agent's chat: pai's is the bot chat, an agent with a topic is that topic, a sub-agent's is a screen of the app.
+    /// The agent whose peer this is, when its chat is the bot's: pai's own (the bot chat) or one with a topic.
+    public static func botChatSlug(peerId: EnginePeer.Id) -> String? {
+        guard let slug = slug(peerId: peerId) else {
+            return nil
+        }
+        return slug == PaiChat.paiSlug || PaiChat.thread(of: slug) != nil ? slug : nil
+    }
+
+    /// Into an agent's chat: pai's is the bot chat, an agent with a topic is that topic, any other agent's is its own chat.
     public static func open(slug: String, context: AccountContext, navigationController: NavigationController) {
         let threadId = slug == PaiChat.paiSlug ? nil : PaiChat.thread(of: slug)
         if slug == PaiChat.paiSlug || threadId != nil {
@@ -100,17 +58,13 @@ public enum PaiAgentList {
             })
             return
         }
-        guard #available(iOS 16.0, *) else {
-            return
-        }
-        let chat = PaiAgentChatController(context: context, slug: slug)
-        chat.openAgent = { [weak navigationController] next in
-            guard let navigationController else {
+        let _ = (context.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: paiAgentPeerId(slug: slug)))
+        |> deliverOnMainQueue).startStandalone(next: { [weak navigationController] peer in
+            guard let navigationController, let peer else {
                 return
             }
-            open(slug: next, context: context, navigationController: navigationController)
-        }
-        navigationController.pushViewController(chat)
+            context.sharedContext.navigateToChatController(NavigateToChatControllerParams(navigationController: navigationController, context: context, chatLocation: .peer(peer)))
+        })
     }
 
     private static func botPeer(context: AccountContext) -> Signal<EnginePeer?, NoError> {

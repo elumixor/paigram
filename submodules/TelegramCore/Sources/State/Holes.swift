@@ -425,6 +425,9 @@ func fetchMessageHistoryHole(accountPeerId: PeerId, source: FetchMessageHistoryH
     if case let .direct(peerId, _) = peerInput, peerId.isWhatsApp {
         return fetchWhatsAppHistoryHole(postbox: postbox, accountPeerId: accountPeerId, peerId: peerId, namespace: namespace, direction: direction, space: space, count: count)
     }
+    if case let .direct(peerId, _) = peerInput, peerId.isPaiAgent {
+        return fetchPaiAgentHistoryHole(postbox: postbox, accountPeerId: accountPeerId, peerId: peerId, namespace: namespace, direction: direction, space: space, count: count)
+    }
     if case let .direct(peerId, _) = peerInput, peerId.isEmail {
         return fetchEmailHistoryHole(postbox: postbox, accountPeerId: accountPeerId, peerId: peerId, namespace: namespace, direction: direction, space: space, count: count)
     }
@@ -1184,7 +1187,7 @@ func groupBoundaryPeer(_ peerId: PeerId, accountPeerId: PeerId) -> Api.Peer {
 
 func fetchChatListHole(postbox: Postbox, network: Network, accountPeerId: PeerId, groupId: PeerGroupId, hole: ChatListHole) -> Signal<Never, NoError> {
     // Postbox seeds every new group with a hole; Telegram has no such folder to fill this one from.
-    if groupId == Namespaces.PeerGroup.email {
+    if groupId == Namespaces.PeerGroup.email || groupId == Namespaces.PeerGroup.pai {
         return postbox.transaction { transaction -> Void in
             transaction.replaceChatListHole(groupId: groupId, index: hole.index, hole: nil)
         }

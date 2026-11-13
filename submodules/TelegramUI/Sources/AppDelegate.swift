@@ -1219,6 +1219,7 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
         |> deliverOnMainQueue).start(next: { context in
             EmailChats.attach(engine: context?.engine)
             WhatsAppChats.attach(engine: context?.engine)
+            PaiAgentPeers.attach(engine: context?.engine)
         })
             
         self.context.set(self.sharedContextPromise.get()

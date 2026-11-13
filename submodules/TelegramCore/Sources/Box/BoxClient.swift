@@ -82,7 +82,7 @@ enum BoxClient {
 
     private static let decoder = JSONDecoder()
 
-    private static func perform<T: Decodable>(_ request: URLRequest) -> Signal<T, BoxError> {
+    private static func performData(_ request: URLRequest) -> Signal<Data, BoxError> {
         return Signal { subscriber in
             let task = self.session.dataTask(with: request, completionHandler: { data, response, error in
                 if let error {
@@ -95,16 +95,23 @@ enum BoxClient {
                     subscriber.putError(.http(status: status, body: String(decoding: data, as: UTF8.self)))
                     return
                 }
-                do {
-                    subscriber.putNext(try self.decoder.decode(T.self, from: data))
-                    subscriber.putCompletion()
-                } catch {
-                    subscriber.putError(.decoding(String(describing: error)))
-                }
+                subscriber.putNext(data)
+                subscriber.putCompletion()
             })
             task.resume()
             return ActionDisposable {
                 task.cancel()
+            }
+        }
+    }
+
+    private static func perform<T: Decodable>(_ request: URLRequest) -> Signal<T, BoxError> {
+        return self.performData(request)
+        |> mapToSignal { data -> Signal<T, BoxError> in
+            do {
+                return .single(try self.decoder.decode(T.self, from: data))
+            } catch {
+                return .fail(.decoding(String(describing: error)))
             }
         }
     }
@@ -128,6 +135,21 @@ enum BoxClient {
             return .fail(.notConfigured)
         }
         return self.perform(request)
+    }
+
+    /// A route's answer as it came, for JSON read as plain objects (pai's message log).
+    static func getData(_ path: String, query: [String: String] = [:]) -> Signal<Data, BoxError> {
+        guard let request = self.request(method: "GET", path: path, query: query) else {
+            return .fail(.notConfigured)
+        }
+        return self.performData(request)
+    }
+
+    static func postData(_ path: String, json: Any) -> Signal<Data, BoxError> {
+        guard let data = try? JSONSerialization.data(withJSONObject: json), let request = self.request(method: "POST", path: path, body: data) else {
+            return .fail(.notConfigured)
+        }
+        return self.performData(request)
     }
 
     static func post<T: Decodable, B: Encodable>(_ path: String, body: B) -> Signal<T, BoxError> {

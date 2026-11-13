@@ -44,7 +44,7 @@ func fillBoxHistoryHole(postbox: Postbox, peerId: PeerId, namespace: MessageId.N
     }
 }
 
-private func retryingBoxPage(_ page: Signal<BoxHistoryPage?, NoError>, attempts: Int, wait: Double) -> Signal<BoxHistoryPage?, NoError> {
+func retryingBoxPage(_ page: Signal<BoxHistoryPage?, NoError>, attempts: Int, wait: Double) -> Signal<BoxHistoryPage?, NoError> {
     return page
     |> mapToSignal { result -> Signal<BoxHistoryPage?, NoError> in
         guard result == nil, attempts > 0 else {

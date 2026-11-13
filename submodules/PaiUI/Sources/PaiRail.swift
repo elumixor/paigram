@@ -18,8 +18,11 @@ public struct PaiRail: Equatable {
 
     /// The strip for a topic of the bot chat (nil or pai's main topic: every agent); nil when nothing runs or waits.
     public static func state(thread: Int64?) -> PaiRail? {
-        let scope = PaiChat.agent(thread: thread) ?? PaiChat.agent(PaiChat.paiSlug)
-        let scopeSlug = scope?.slug ?? PaiChat.paiSlug
+        return state(agent: PaiChat.agent(thread: thread)?.slug ?? PaiChat.paiSlug)
+    }
+
+    /// The strip for an agent's chat: it and the agents under it (pai's: every agent).
+    public static func state(agent scopeSlug: String) -> PaiRail? {
         let live = PaiChat.agents.filter { $0.status != "done" && $0.status != "closed" }
         let members = scopeSlug == PaiChat.paiSlug
             ? live.filter { !$0.isPai }

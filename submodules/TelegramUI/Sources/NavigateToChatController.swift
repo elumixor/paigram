@@ -29,6 +29,11 @@ public func navigateToChatControllerImpl(_ params: NavigateToChatControllerParam
         navigateToChatControllerImpl(params.with(chatLocation: .replyThread(thread)))
         return
     }
+    // An agent's chat that lives in the bot (pai's own, or one with a topic) opens there.
+    if case let .peer(peer) = params.chatLocation, let slug = PaiAgentList.botChatSlug(peerId: peer.id) {
+        PaiAgentList.open(slug: slug, context: params.context, navigationController: params.navigationController)
+        return
+    }
     if case let .peer(peer) = params.chatLocation {
         let _ = params.context.engine.peers.ensurePeerIsLocallyAvailable(peer: peer).startStandalone()
     }

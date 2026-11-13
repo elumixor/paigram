@@ -1444,7 +1444,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
                 footerPanels.append(panel)
             }
         }
-        if self.chatPresentationInterfaceState.search == nil, PaiChat.isBot(self.chatPresentationInterfaceState.renderedPeer?.peer), let rail = PaiRail.state(thread: self.chatPresentationInterfaceState.chatLocation.threadId) {
+        if self.chatPresentationInterfaceState.search == nil, let railPeer = self.chatPresentationInterfaceState.renderedPeer?.peer, PaiChat.drawsPai(railPeer), let rail = railPeer.id.isPaiAgent ? PaiAgentList.slug(peerId: railPeer.id).flatMap(PaiRail.state(agent:)) : PaiRail.state(thread: self.chatPresentationInterfaceState.chatLocation.threadId) {
             footerPanels.append(HeaderPanelContainerComponent.Panel(
                 key: "pai-rail",
                 orderIndex: 1,

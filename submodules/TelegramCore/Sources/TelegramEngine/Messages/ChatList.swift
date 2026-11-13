@@ -5,6 +5,7 @@ public final class EngineChatList: Equatable {
         case root
         case archive
         case email
+        case pai
     }
 
     public typealias MessageTagSummaryInfo = ChatListMessageTagSummaryInfo
@@ -468,6 +469,8 @@ public extension EngineChatList.Group {
         case let .group(value):
             if value == Namespaces.PeerGroup.email.rawValue {
                 self = .email
+            } else if value == Namespaces.PeerGroup.pai.rawValue {
+                self = .pai
             } else {
                 assert(value == Namespaces.PeerGroup.archive.rawValue)
                 self = .archive
@@ -483,6 +486,8 @@ public extension EngineChatList.Group {
             return Namespaces.PeerGroup.archive
         case .email:
             return Namespaces.PeerGroup.email
+        case .pai:
+            return Namespaces.PeerGroup.pai
         }
     }
 }
