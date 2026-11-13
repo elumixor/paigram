@@ -1658,7 +1658,7 @@ plist_fragment(
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>When you send your location to your friends, Telegram needs access to show them a map.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>We need this so that you can record and share voice messages and videos with sound.</string>
+    <string>We need this so that you can talk to your agents on calls, and record and share voice messages and videos with sound.</string>
     <key>NSMotionUsageDescription</key>
     <string>When you send your location to your friends, Telegram needs access to show them a map.</string>
     <key>NSPhotoLibraryAddUsageDescription</key>

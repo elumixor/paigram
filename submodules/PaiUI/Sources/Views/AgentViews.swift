@@ -154,6 +154,9 @@ struct AgentTreeRow: View {
             if let spent = spentToday {
                 Text(spent).font(.caption.monospacedDigit()).foregroundStyle(.tertiary)
             }
+            if !agent.isClosed {
+                PaiCallButton(slug: agent.slug, size: 28)
+            }
         }
         .opacity(agent.isClosed ? 0.55 : 1)
     }
@@ -232,9 +235,13 @@ struct AgentChatView: View {
                 ToolbarItem(placement: .topBarLeading) { Button(action: back) { Image(systemName: "chevron.left") } }
                 ToolbarItem(placement: .topBarTrailing) {
                     if let error = store.connectionError {
-                        Image(systemName: "bolt.slash").foregroundStyle(.red).help(error)
+                        HStack(spacing: 10) {
+                            PaiCallButton(slug: slug, size: 30)
+                            Image(systemName: "bolt.slash").foregroundStyle(.red).help(error)
+                        }
                     } else if let agent {
                         HStack(spacing: 10) {
+                            PaiCallButton(slug: slug, size: 30)
                             AgentStatusIcon(status: agent.isBusy ? "working" : PaiAgentStatus.effective(agent: agent.slug, posted: agent.status)).help(PaiAgentStatus.label(agent.status))
                             if agent.isBusy {
                                 StopButton {
@@ -367,6 +374,8 @@ private struct AgentMessageRow: View {
 
     var body: some View {
         switch row.kind {
+        case "event" where row.meta.event == "call.ended":
+            PaiCallEndedCard(row: row, slug: slug)
         case "event":
             EventLine(row: row, isHere: (row.meta.agent ?? slug) == slug) { open(row.meta.agent ?? slug) }
         case "notice":

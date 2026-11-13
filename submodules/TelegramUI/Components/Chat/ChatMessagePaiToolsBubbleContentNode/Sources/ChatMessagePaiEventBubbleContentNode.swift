@@ -78,7 +78,7 @@ public final class ChatMessagePaiEventBubbleContentNode: ChatMessageBubbleConten
                 }
                 if !folded || expanded {
                     for line in lines {
-                        drawn.append((paiLineImage(symbol: line.symbol, text: line.text, font: font, color: line.isError ? errorColor : service.primaryText, maxWidth: maxWidth), line))
+                        drawn.append((paiLineImage(symbol: line.symbol, trailingSymbol: line.event == "call.ended" ? "phone.fill" : nil, text: line.text, font: font, color: line.isError ? errorColor : service.primaryText, maxWidth: maxWidth), line))
                     }
                 }
 
@@ -137,6 +137,15 @@ public final class ChatMessagePaiEventBubbleContentNode: ChatMessageBubbleConten
                 guard let self, let item = self.item else { return }
                 PaiEventFold.toggle(item.message.id)
                 self.requestInlineUpdate?()
+            }))
+        }
+        // A finished call: the tap calls the agent again.
+        if line.event == "call.ended" {
+            let slug = line.agent ?? PaiChat.agent(thread: item.message.threadId)?.slug ?? PaiChat.paiSlug
+            return ChatMessageBubbleContentTapAction(content: .custom({
+                if #available(iOS 16.0, *) {
+                    PaiCall.shared.start(agent: slug)
+                }
             }))
         }
         guard line.agent != nil || line.thread != nil else {

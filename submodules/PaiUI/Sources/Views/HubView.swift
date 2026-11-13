@@ -138,12 +138,13 @@ final class PaiHubStore: ObservableObject {
 
 @available(iOS 16.0, *)
 enum HubTab: String, CaseIterable, Identifiable {
-    case agents, tasks, routines, memory, tools, skills
+    case agents, calls, tasks, routines, memory, tools, skills
 
     var id: String { rawValue }
     var title: String {
         switch self {
         case .agents: return "Agents"
+        case .calls: return "Calls"
         case .tasks: return "Tasks"
         case .routines: return "Routines"
         case .memory: return "Memory"
@@ -154,6 +155,7 @@ enum HubTab: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .agents: return "person.2"
+        case .calls: return "phone"
         case .tasks: return "rectangle.split.3x1"
         case .routines: return "clock.arrow.circlepath"
         case .memory: return "brain.head.profile"
@@ -240,6 +242,7 @@ struct HubView: View {
     @ViewBuilder private var pane: some View {
         switch tab {
         case .agents: AgentsPane(hub: hub, openAgent: openAgent, openThread: openThread)
+        case .calls: PaiCallsList()
         case .tasks: TaskBoard(hub: hub, openAgent: openAgent)
         case .routines: RoutinesPane(hub: hub)
         case .memory: ContextListView(kind: "memory", title: "Memory", settings: hub.settings)
@@ -323,12 +326,16 @@ private struct AgentsPane: View {
                 ForEach(rows) { row in
                     switch row {
                     case let .agent(agent, depth):
-                        AgentRow(agent: agent, depth: depth, waiting: hub.needs.filter { $0.agent == agent.slug }.count, stop: { hub.stop(agent: agent) })
+                        HStack(spacing: 8) {
+                            AgentRow(agent: agent, depth: depth, waiting: hub.needs.filter { $0.agent == agent.slug }.count, stop: { hub.stop(agent: agent) })
+                            PaiCallButton(slug: agent.slug, size: 30)
+                        }
                             .contentShape(Rectangle())
                             .onTapGesture { openAgent(agent) }
                             .swipeActions { if agent.isBusy { Button("Stop", role: .destructive) { hub.stop(agent: agent) } } }
                             .contextMenu {
                                 Button { openAgent(agent) } label: { Label("Open chat", systemImage: "bubble.left") }
+                                Button { PaiCall.shared.start(agent: agent.slug) } label: { Label("Call", systemImage: "phone") }
                                 if agent.isBusy { Button(role: .destructive) { hub.stop(agent: agent) } label: { Label("Stop", systemImage: "stop.circle") } }
                             }
                             .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))

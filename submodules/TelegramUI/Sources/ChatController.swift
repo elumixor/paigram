@@ -6369,6 +6369,9 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
         paiUsageItem.action = #selector(self.rightNavigationButtonAction)
         self.paiUsageNavigationButton = ChatNavigationButton(action: .openChatInfo(expandAvatar: true, section: nil), buttonItem: paiUsageItem)
         self.paiUsageNode.update(usage: PaiChat.usage, theme: self.presentationData.theme)
+        self.paiUsageNode.call = { [weak self] in
+            self?.startPaiCall()
+        }
         
         self.moreBarButton.setContent(.more(MoreHeaderButton.optionsCircleImage(color: self.presentationData.theme.rootController.navigationBar.buttonColor)))
         self.moreInfoNavigationButton = ChatNavigationButton(action: .toggleInfoPanel, buttonItem: UIBarButtonItem(customDisplayNode: self.moreBarButton)!)

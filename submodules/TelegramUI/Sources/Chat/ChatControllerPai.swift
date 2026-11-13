@@ -106,6 +106,13 @@ extension ChatControllerImpl {
         }
     }
 
+    /// A voice call with the agent whose chat this is; pai's own anywhere else in the bot chat.
+    func startPaiCall() {
+        guard #available(iOS 16.0, *) else { return }
+        let slug = PaiChat.agent(thread: self.chatLocation.threadId)?.slug ?? PaiChat.paiSlug
+        PaiCall.shared.start(agent: slug)
+    }
+
     /// pai's settings: status, usage, what its sessions are given.
     func openPaiSettings() {
         guard #available(iOS 16.0, *) else { return }
@@ -161,6 +168,9 @@ final class PaiUsageRingNode: ASDisplayNode {
     private let fill = CAShapeLayer()
     private let percentNode = ImmediateTextNode()
     private let timeNode = ImmediateTextNode()
+    /// The phone left of the ring: a voice call with this chat's agent.
+    private let phoneNode = HighlightableButtonNode()
+    var call: (() -> Void)?
     private var usage: PaiUsage?
     private var theme: PresentationTheme?
     private var card: UIView?
@@ -175,6 +185,13 @@ final class PaiUsageRingNode: ASDisplayNode {
         }
         self.addSubnode(self.percentNode)
         self.addSubnode(self.timeNode)
+        self.addSubnode(self.phoneNode)
+        self.phoneNode.accessibilityLabel = "Call"
+        self.phoneNode.addTarget(self, action: #selector(self.phonePressed), forControlEvents: .touchUpInside)
+    }
+
+    @objc private func phonePressed() {
+        self.call?()
     }
 
     override func didLoad() {
@@ -194,7 +211,7 @@ final class PaiUsageRingNode: ASDisplayNode {
     }
 
     override func calculateSizeThatFits(_ constrainedSize: CGSize) -> CGSize {
-        return CGSize(width: 44.0, height: 44.0)
+        return CGSize(width: 84.0, height: 44.0)
     }
 
     private static func color(_ percent: Double, accent: UIColor) -> UIColor {
@@ -206,7 +223,10 @@ final class PaiUsageRingNode: ASDisplayNode {
         self.theme = theme
         let size = CGSize(width: 44.0, height: 44.0)
         let bar = theme.rootController.navigationBar
-        let center = CGPoint(x: size.width / 2.0, y: size.height / 2.0)
+        let center = CGPoint(x: 40.0 + size.width / 2.0, y: size.height / 2.0)
+        let phone = UIImage(systemName: "phone.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 17.0, weight: .semibold))?.withTintColor(bar.accentTextColor, renderingMode: .alwaysOriginal)
+        self.phoneNode.setImage(phone, for: .normal)
+        self.phoneNode.frame = CGRect(x: 0.0, y: 0.0, width: 40.0, height: 44.0)
         let window = usage?.limiting
         let percent = max(0.0, min(100.0, window?.percent ?? 0.0))
 

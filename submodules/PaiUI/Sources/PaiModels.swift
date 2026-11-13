@@ -398,6 +398,11 @@ public struct PaiLogMessage: Codable, Identifiable, Equatable {
         public var optionDetails: [PaiOptionDetail?]?
         public var multiSelect: Bool?
         public var questions: [PaiCardQuestion]?
+        /// A `call.ended` card: which call, how long, on which engine, what came of it.
+        public var callId: String?
+        public var durationS: Double?
+        public var engine: String?
+        public var headline: String?
 
         public init() {}
 
@@ -415,6 +420,10 @@ public struct PaiLogMessage: Codable, Identifiable, Equatable {
             optionDetails = try? c.decodeIfPresent([PaiOptionDetail?].self, forKey: .optionDetails)
             multiSelect = try? c.decodeIfPresent(Bool.self, forKey: .multiSelect)
             questions = try? c.decodeIfPresent([PaiCardQuestion].self, forKey: .questions)
+            callId = try? c.decodeIfPresent(String.self, forKey: .callId)
+            durationS = try? c.decodeIfPresent(Double.self, forKey: .durationS)
+            engine = try? c.decodeIfPresent(String.self, forKey: .engine)
+            headline = try? c.decodeIfPresent(String.self, forKey: .headline)
         }
     }
 

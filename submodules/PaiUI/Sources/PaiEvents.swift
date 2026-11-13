@@ -36,6 +36,7 @@ public enum PaiEventIcon {
         "notice": "bell",
         "error": "exclamationmark.triangle",
         "agent.closed": "archivebox",
+        "call.ended": "phone",
     ]
 
     /// The trailer's own icon wins; an event pai has not named yet gets the bell.
