@@ -1,6 +1,7 @@
 import Foundation
 import UIKit
 import TelegramCore
+import PaiUI
 import AsyncDisplayKit
 import Display
 import UIKit
@@ -506,6 +507,32 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
         if message.id.namespace == Namespaces.Message.Local && message.attributes.contains(where: { $0 is TypingDraftMessageAttribute }) {
             return .single(ContextController.Items(content: .list([])))
         }
+    }
+    // Paigram: pai's log in an agent's topic, from before the topic, is no Telegram message: it is copied, or forwarded
+    // once the bot has posted it (`materializePaiRows`), and nothing else.
+    if messages.count == 1, PaiChat.isHistoryRow(messages[0]) {
+        let message = messages[0]
+        let strings = chatPresentationInterfaceState.strings
+        let fullText = message.text as NSString
+        let text = (PaiTrailer.find(message).map { fullText.substring(to: min($0.textEnd, fullText.length)) } ?? message.text).trimmingCharacters(in: .whitespacesAndNewlines)
+        var actions: [ContextMenuItem] = []
+        if !text.isEmpty {
+            actions.append(.action(ContextMenuActionItem(text: strings.Conversation_ContextMenuCopy, icon: { theme in
+                return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Copy"), color: theme.actionSheet.primaryTextColor)
+            }, action: { _, f in
+                UIPasteboard.general.string = text
+                f(.default)
+            })))
+        }
+        if PaiChat.isForwardable(message) {
+            actions.append(.action(ContextMenuActionItem(text: strings.Conversation_ContextMenuForward, icon: { theme in
+                return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Forward"), color: theme.actionSheet.primaryTextColor)
+            }, action: { _, f in
+                interfaceInteraction.forwardMessages([message])
+                f(.dismissWithoutContent)
+            })))
+        }
+        return .single(ContextController.Items(content: .list(actions)))
     }
     
     var isEmbeddedMode = false
@@ -2796,6 +2823,17 @@ func chatAvailableMessageActionsImpl(engine: TelegramEngine, accountPeerId: Engi
                     }
                 } else {
                     optionsMap[id]!.insert(.deleteLocally)
+                }
+                // Paigram: the pai bot's chat forwards his own words and its agents' answers, never an event, card or
+                // ask; pai's log in a topic (no Telegram message) is neither unsent nor reported.
+                if PaiChat.isBot(getPeer(id.peerId)) {
+                    if !PaiChat.isForwardable(message) {
+                        optionsMap[id]!.remove(.forward)
+                    }
+                    if PaiChat.isHistoryRow(message) {
+                        optionsMap[id]!.remove(.deleteGlobally)
+                        optionsMap[id]!.remove(.report)
+                    }
                 }
             }
             

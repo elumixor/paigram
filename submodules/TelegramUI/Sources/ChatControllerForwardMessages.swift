@@ -13,9 +13,17 @@ import PremiumUI
 import ReactionSelectionNode
 import TopMessageReactions
 import ChatMessagePaymentAlertController
+import PaiUI
 
 extension ChatControllerImpl {
     func forwardMessages(messageIds: [EngineMessage.Id], options: ChatInterfaceForwardOptionsState? = nil, resetCurrent: Bool = false) {
+        // pai's log in an agent's topic is no Telegram message: the bot posts those rows first, and its messages go.
+        if let botPeerId = PaiChat.botPeerId, messageIds.contains(where: { $0.peerId == botPeerId && $0.namespace == Namespaces.Message.Box }) {
+            self.materializePaiRows(messageIds, completion: { [weak self] ids in
+                self?.forwardMessages(messageIds: ids, options: options, resetCurrent: resetCurrent)
+            })
+            return
+        }
         let _ = (self.context.engine.data.get(EngineDataMap(
             messageIds.map(TelegramEngine.EngineData.Item.Messages.Message.init)
         ))

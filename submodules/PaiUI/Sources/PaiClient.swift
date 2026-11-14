@@ -100,6 +100,12 @@ public final class PaiClient {
 
     public func telegramInfo() async throws -> PaiTelegramInfo { try await call(PaiTelegramInfo.self, "/m/telegram/info") }
 
+    /// A row of pai's log posted by the bot as real messages so it can be forwarded (Paigram's Forward on a topic's
+    /// history from before the topic): once per row, the same messages every time.
+    public func materialize(row id: Int) async throws -> PaiMaterialized {
+        try await call(PaiMaterialized.self, "/telegram/materialize", method: "POST", body: ["messageId": id])
+    }
+
     // MARK: Agents
 
     public func agents() async throws -> [PaiAgent] { try await call([PaiAgent].self, "/agents") }
@@ -212,4 +218,10 @@ public final class PaiClient {
             continuation.onTermination = { _ in task.cancel() }
         }
     }
+}
+
+/// What `POST /telegram/materialize` answers: the bot's messages for the row, in order, and the topic they are in.
+public struct PaiMaterialized: Decodable {
+    public let messageIds: [Int32]
+    public let thread: Int64?
 }
