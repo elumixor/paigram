@@ -8,7 +8,7 @@ public struct PaiAgentInfo: Codable, Equatable {
     public let name: String
     /// The line under the chat's title.
     public let role: String?
-    /// An absolute address of the agent's portrait.
+    /// An absolute address of the agent's portrait, set once the app stored it at `paiAgentAvatarResource(url:)`.
     public let avatar: String?
     public let parent: String?
     /// A Telegram bot topic the agent talks in; its chat here redirects there.
@@ -79,10 +79,16 @@ public func paiAgentPeerId(slug: String) -> PeerId {
     return PeerId(namespace: Namespaces.Peer.Email, id: PeerId.Id._internalFromInt64Value(paiAgentIdBase | Int64(hash)))
 }
 
+/// Where the app stores an agent's portrait, scaled down: pai serves 1024² PNGs over 1 MB, which reach the chat list
+/// cut at 1 MB when fetched as an `HttpReferenceMediaResource`.
+public func paiAgentAvatarResource(url: String) -> LocalFileMediaResource {
+    return LocalFileMediaResource(fileId: BoxMessageIds.globallyUniqueId(key: "pai-avatar:\(url)"))
+}
+
 /// The agent as a user peer: portrait as its photo, rewritten only when its name or picture changed.
 func storePaiAgentPeer(transaction: Transaction, agent: PaiAgentInfo) {
     let peerId = paiAgentPeerId(slug: agent.slug)
-    let picture: [TelegramMediaImageRepresentation] = agent.avatar.map { [TelegramMediaImageRepresentation(dimensions: PixelDimensions(width: 256, height: 256), resource: HttpReferenceMediaResource(url: $0, size: nil), progressiveSizes: [], immediateThumbnailData: nil)] } ?? []
+    let picture: [TelegramMediaImageRepresentation] = agent.avatar.map { [TelegramMediaImageRepresentation(dimensions: PixelDimensions(width: 256, height: 256), resource: paiAgentAvatarResource(url: $0), progressiveSizes: [], immediateThumbnailData: nil)] } ?? []
     let current = transaction.getPeer(peerId) as? TelegramUser
     if current?.firstName != agent.name || current?.photo != picture {
         let user = TelegramUser(id: peerId, accessHash: nil, firstName: agent.name, lastName: nil, username: nil, phone: nil, photo: picture, botInfo: nil, restrictionInfo: nil, flags: [], emojiStatus: nil, usernames: [], storiesHidden: nil, nameColor: nil, backgroundEmojiId: nil, profileColor: nil, profileBackgroundEmojiId: nil, subscriberCount: nil, verificationIconFileId: nil)
