@@ -68,6 +68,7 @@ swift_library(
         "//submodules/Components/ProgressIndicatorComponent:ProgressIndicatorComponent",
         "//submodules/TelegramAnimatedStickerNode:TelegramAnimatedStickerNode",
         "//submodules/PremiumUI:PremiumUI",
+        "//submodules/PaiUI:PaiUI",
         "//submodules/TelegramUniversalVideoContent:TelegramUniversalVideoContent",
         "//submodules/Components/HierarchyTrackingLayer:HierarchyTrackingLayer",
         "//submodules/Components/ComponentDisplayAdapters:ComponentDisplayAdapters",

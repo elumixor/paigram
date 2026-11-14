@@ -296,8 +296,6 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                 title = self.presentationData.strings.DialogList_Title
             } else if groupId == .email {
                 title = "Email"
-            } else if groupId == .pai {
-                title = "pai"
             } else {
                 title = self.presentationData.strings.ChatList_ArchivedChatsTitle
             }
@@ -1461,7 +1459,17 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                         return
                     }
                     
-                    if case let .channel(channel) = peer, channel.isForumOrMonoForum, let threadId {
+                    // Paigram: a topic of a bot's forum (the pai bot's agents) opens as that topic, not as the bot's chat.
+                    if case .user = peer, case .forum = self.location, let threadId {
+                        self.context.sharedContext.navigateToChatController(NavigateToChatControllerParams(
+                            navigationController: navigationController,
+                            context: self.context,
+                            chatLocation: .replyThread(ChatReplyThreadMessage(peerId: peer.id, threadId: threadId, channelMessageId: nil, isChannelPost: false, isForumPost: true, isMonoforumPost: false, maxMessage: nil, maxReadIncomingMessageId: nil, maxReadOutgoingMessageId: nil, unreadCount: 0, initialFilledHoles: IndexSet(), initialAnchor: .automatic, isNotAvailable: false)),
+                            subject: subject,
+                            keepStack: .always
+                        ))
+                        self.chatListDisplayNode.clearHighlightAnimated(true)
+                    } else if case let .channel(channel) = peer, channel.isForumOrMonoForum, let threadId {
                         self.context.sharedContext.navigateToChatController(NavigateToChatControllerParams(
                             navigationController: navigationController,
                             context: self.context,
@@ -1574,7 +1582,7 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
             }
             
             // Opens inside this controller, not pushed over it, so the tab bar stays.
-            if groupId == .email || groupId == .pai {
+            if groupId == .email {
                 self.chatListDisplayNode.mainContainerNode.currentItemNode.clearHighlightAnimated(true)
                 self.setInlineChatList(location: .chatList(groupId: groupId))
                 return
@@ -2171,7 +2179,7 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
                 }
             })
             
-            if self.previewing || self.location == .chatList(groupId: .email) || self.location == .chatList(groupId: .pai) {
+            if self.previewing || self.location == .chatList(groupId: .email) {
                 self.storiesReady.set(.single(true))
             } else {
                 self.storySubscriptionsDisposable = (self.context.engine.messages.storySubscriptions(isHidden: self.location == .chatList(groupId: .archive))
@@ -7167,8 +7175,6 @@ private final class ChatListLocationContext {
                 defaultTitle = presentationData.strings.DialogList_Title
             } else if groupId == .email {
                 defaultTitle = "Email"
-            } else if groupId == .pai {
-                defaultTitle = "pai"
             } else {
                 defaultTitle = presentationData.strings.ChatList_ArchivedChatsTitle
             }
@@ -7291,7 +7297,7 @@ private final class ChatListLocationContext {
                 } else {
                     self.storyButton = nil
                 }
-            } else if self.location == .chatList(groupId: .email) || self.location == .chatList(groupId: .pai) {
+            } else if self.location == .chatList(groupId: .email) {
                 self.rightButton = nil
             } else {
                 let parentController = self.parentController

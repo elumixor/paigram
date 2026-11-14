@@ -4863,21 +4863,7 @@ extension ChatControllerImpl {
         }, statuses: ChatPanelInterfaceInteractionStatuses(editingMessage: self.editingMessage.get(), startingBot: self.startingBot.get(), unblockingPeer: self.unblockingPeer.get(), searching: self.searching.get(), loadingMessage: self.loadingMessage.get(), inlineSearch: self.performingInlineSearch.get()))
         
         interfaceInteraction.openPai = { [weak self] in
-            guard let self, let navigationController = self.navigationController as? NavigationController else {
-                return
-            }
-            let hub = PaiHubController(context: self.context)
-            hub.openThread = { [weak self, weak navigationController] threadId in
-                guard let self, let navigationController else {
-                    return
-                }
-                let _ = navigationController.popToViewController(self, animated: true)
-                self.updateChatLocationThread(threadId: threadId, animationDirection: nil)
-            }
-            hub.openAgent = { [weak self] slug in
-                self?.openPaiAgent(slug: slug, thread: nil)
-            }
-            navigationController.pushViewController(hub)
+            self?.openPaiTopics()
         }
         self.interfaceInteraction = interfaceInteraction
         

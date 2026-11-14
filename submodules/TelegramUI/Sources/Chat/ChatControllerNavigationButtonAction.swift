@@ -398,13 +398,13 @@ extension ChatControllerImpl {
                 })
             }
         case let .openChatInfo(expandAvatar, section):
-            // The pai bot's title (its breadcrumb) opens Projects, every agent and thread; its avatar the settings.
-            if PaiChat.isBot(self.presentationInterfaceState.renderedPeer?.peer), #available(iOS 16.0, *) {
+            // The pai bot's title (its breadcrumb) opens its topic list; its avatar the topic's agent's profile.
+            if PaiChat.isBot(self.presentationInterfaceState.renderedPeer?.peer) {
                 if !expandAvatar {
-                    self.interfaceInteraction?.openPai?()
+                    self.openPaiTopics()
                     return
                 }
-                self.openPaiSettings()
+                self.openPaiProfile()
                 return
             }
             let _ = self.presentVoiceMessageDiscardAlert(action: { [weak self] in

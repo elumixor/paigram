@@ -57,9 +57,9 @@ public final class ChatListContainerNode: ASDisplayNode, ASGestureRecognizerDele
     private let context: AccountContext
     private weak var controller: ChatListControllerImpl?
     let location: ChatListControllerLocation
-    /// The Email and pai lists take the whole width; a forum's topics leave a column of the main list's avatars.
+    /// The Email list takes the whole width; a forum's topics leave a column of the main list's avatars.
     var coversMainList: Bool {
-        return self.location == .chatList(groupId: .email) || self.location == .chatList(groupId: .pai)
+        return self.location == .chatList(groupId: .email)
     }
     private let chatListMode: ChatListNodeMode
     private let previewing: Bool

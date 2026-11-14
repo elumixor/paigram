@@ -920,15 +920,13 @@ func chatListNodeEntriesForView(view: EngineChatList, state: ChatListNodeState, 
         }
         
         if !view.hasLater, case .chatList = mode {
-            // Entries run bottom-up and the archive has to stay on top: it hides above the list. pai sits above Email.
+            // Entries run bottom-up and the archive has to stay on top: it hides above the list.
             let groupOrder: (EngineChatList.Group) -> Int = { id in
                 switch id {
                 case .email:
                     return 0
-                case .pai:
-                    return 1
                 default:
-                    return 2
+                    return 1
                 }
             }
             for groupReference in groupItems.sorted(by: { groupOrder($0.id) < groupOrder($1.id) }) {

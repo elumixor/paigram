@@ -1,6 +1,7 @@
 import Foundation
 import Postbox
 import TelegramCore
+import PaiUI
 import SwiftSignalKit
 import Display
 import TelegramUIPreferences
@@ -311,6 +312,9 @@ public func chatListViewForLocation(chatListLocation: ChatListControllerLocation
             }
             
             var items: [EngineChatList.Item] = []
+            // Paigram: the pai bot's topics run in the agent tree's order (pai's main topic first); a topic that is no
+            // agent's (a plain thread) follows them by its last message.
+            let isPaiBot = PaiChat.isBot(view.peer)
             for item in view.items {
                 guard let peer = view.peer else {
                     continue
@@ -383,9 +387,13 @@ public func chatListViewForLocation(chatListLocation: ChatListControllerLocation
                     }
                 }
                 
+                var sortTimestamp = item.index.timestamp
+                if isPaiBot, let rank = PaiChat.topicRank(thread: item.id) {
+                    sortTimestamp = Int32.max - 1 - Int32(clamping: rank)
+                }
                 items.append(EngineChatList.Item(
                     id: .forum(item.id),
-                    index: .forum(pinnedIndex: pinnedIndex, timestamp: item.index.timestamp, threadId: item.id, namespace: item.index.id.namespace, id: item.index.id.id),
+                    index: .forum(pinnedIndex: pinnedIndex, timestamp: sortTimestamp, threadId: item.id, namespace: item.index.id.namespace, id: item.index.id.id),
                     messages: item.topMessage.flatMap { [EngineMessage($0)] } ?? [],
                     readCounters: readCounters,
                     isMuted: isMuted,
@@ -406,6 +414,10 @@ public func chatListViewForLocation(chatListLocation: ChatListControllerLocation
                     isPremiumRequiredToMessage: false,
                     mediaDraftContentType: nil
                 ))
+            }
+            // The list runs in the order given, not by index: the pai bot's topics go by the index given them above.
+            if isPaiBot {
+                items.sort(by: { $0.index < $1.index })
             }
             
             let list = EngineChatList(

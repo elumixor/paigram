@@ -4,6 +4,7 @@ import AsyncDisplayKit
 import Display
 import SwiftSignalKit
 import TelegramCore
+import PaiUI
 import TelegramPresentationData
 import ItemListUI
 import PresentationDataUtils
@@ -798,9 +799,6 @@ private func revealOptions(strings: PresentationStrings, theme: PresentationThem
 private func groupReferenceTitle(item: ChatListItem) -> String {
     if case let .groupReference(groupReferenceData) = item.content, groupReferenceData.groupId == .email {
         return "Email"
-    }
-    if case let .groupReference(groupReferenceData) = item.content, groupReferenceData.groupId == .pai {
-        return "pai"
     }
     return item.presentationData.strings.ChatList_ArchivedChatsTitle
 }
@@ -1895,7 +1893,7 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                 UIView.transition(with: self.avatarNode.view, duration: 0.3, options: [.transitionCrossDissolve], animations: {
                 }, completion: nil)
             }
-            self.avatarNode.setPeer(context: item.context, theme: item.presentationData.theme, peer: peer, overrideImage: groupReferenceData.groupId == .email ? .emailChatsIcon : (groupReferenceData.groupId == .pai ? .paiChatsIcon : .archivedChatsIcon(hiddenByDefault: groupReferenceData.hiddenByDefault)), emptyColor: item.presentationData.theme.list.mediaPlaceholderColor, synchronousLoad: synchronousLoads)
+            self.avatarNode.setPeer(context: item.context, theme: item.presentationData.theme, peer: peer, overrideImage: groupReferenceData.groupId == .email ? .emailChatsIcon : .archivedChatsIcon(hiddenByDefault: groupReferenceData.hiddenByDefault), emptyColor: item.presentationData.theme.list.mediaPlaceholderColor, synchronousLoad: synchronousLoads)
         }
         
         if item.interaction.activateChatPreview == nil {
@@ -4395,7 +4393,10 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                         }
                         
                         let avatarIconContent: EmojiStatusComponent.Content
-                        if threadInfo.id == 1 {
+                        // Paigram: an agent's topic of the pai bot shows the agent's portrait.
+                        if case let .forum(peerId) = item.chatListLocation, peerId == PaiChat.botPeerId, let portrait = PaiAgentList.topicIcon(thread: threadInfo.id, size: 32.0) {
+                            avatarIconContent = .image(image: portrait, tintColor: nil)
+                        } else if threadInfo.id == 1 {
                             avatarIconContent = .image(image: PresentationResourcesChatList.generalTopicIcon(item.presentationData.theme), tintColor: nil)
                         } else if let fileId = threadInfo.info.icon, fileId != 0 {
                             avatarIconContent = .animation(content: .customEmoji(fileId: fileId), size: CGSize(width: 48.0, height: 48.0), placeholderColor: item.presentationData.theme.list.mediaPlaceholderColor, themeColor: item.presentationData.theme.list.itemAccentColor, loopMode: .count(0))
