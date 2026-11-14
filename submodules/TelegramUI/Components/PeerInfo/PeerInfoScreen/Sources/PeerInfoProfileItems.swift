@@ -51,6 +51,9 @@ func infoItems(
     guard let data = data else {
         return []
     }
+    if case let .user(user) = data.peer, user.id.isPaiAgent {
+        return paiAgentInfoItems(peerId: user.id, context: context, presentationData: presentationData, interaction: interaction)
+    }
     
     var currentPeerInfoSection: InfoSection = .peerInfo
         

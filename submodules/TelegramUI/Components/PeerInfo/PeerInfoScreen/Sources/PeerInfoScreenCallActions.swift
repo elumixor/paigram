@@ -2,6 +2,7 @@ import Foundation
 import UIKit
 import Display
 import AccountContext
+import PaiUI
 import SwiftSignalKit
 import TelegramCore
 import AsyncDisplayKit
@@ -16,6 +17,12 @@ import AvatarNode
 extension PeerInfoScreenNode {
     func requestCall(isVideo: Bool, gesture: ContextGesture? = nil, contextController: ContextControllerProtocol? = nil, result: ((ContextMenuActionResult) -> Void)? = nil, backAction: ((ContextControllerProtocol) -> Void)? = nil) {
         guard let controller = self.controller, !controller.presentAccountFrozenInfoIfNeeded() else {
+            return
+        }
+        if let slug = PaiAgentList.slug(peerId: self.peerId) {
+            if #available(iOS 16.0, *) {
+                PaiCall.shared.start(agent: slug)
+            }
             return
         }
         let peerId = self.peerId

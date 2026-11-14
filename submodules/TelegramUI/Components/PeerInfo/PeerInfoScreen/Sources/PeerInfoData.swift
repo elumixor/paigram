@@ -4,6 +4,7 @@ import Postbox
 import TelegramCore
 import SwiftSignalKit
 import AccountContext
+import PaiUI
 import PeerPresenceStatusManager
 import TelegramStringFormatting
 import TelegramPresentationData
@@ -1209,6 +1210,7 @@ func peerInfoScreenData(
                 case presence(TelegramUserPresence)
                 case bot(subscriberCount: Int32?)
                 case support
+                case paiAgent(String)
             }
             let status = Signal<PeerInfoStatusData?, NoError> { subscriber in
                 class Manager {
@@ -1249,6 +1251,9 @@ func peerInfoScreenData(
                     if user.flags.contains(.isSupport) {
                         return .support
                     }
+                    if user.id.isPaiAgent {
+                        return .paiAgent(PaiAgentList.subtitle(peerId: user.id) ?? "agent")
+                    }
                     if user.botInfo != nil {
                         return .bot(subscriberCount: user.subscriberCount)
                     }
@@ -1267,6 +1272,8 @@ func peerInfoScreenData(
                         }
                     case .support:
                         subscriber.putNext(PeerInfoStatusData(text: strings.Bot_GenericSupportStatus, isActivity: false, key: nil))
+                    case let .paiAgent(text):
+                        subscriber.putNext(PeerInfoStatusData(text: text, isActivity: false, key: nil))
                     default:
                         var presence: TelegramUserPresence?
                         if case let .presence(value) = inputData {
@@ -2582,6 +2589,11 @@ func peerInfoHeaderButtons(peer: EnginePeer?, cachedData: CachedPeerData?, isOpe
         }
         var callsAvailable = false
         var videoCallsAvailable = false
+        // One of pai's agents: its chat is its topic of the pai bot's chat, and a call is pai's own voice call.
+        if user.id.isPaiAgent {
+            result.append(.call)
+            return result
+        }
         // An email correspondent or a WhatsApp person is not a Telegram user: nothing to call, block or share.
         if user.id.isBridged {
             result.append(.mute)
