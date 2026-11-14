@@ -6,18 +6,16 @@ import SwiftUI
 import TelegramPresentationData
 import UIKit
 
-/// The pai bot's profile: what runs, what it costs, and what its sessions are given
-/// (tools, skills, instructions, memories). Opened from the avatar in the chat's bar.
+/// pai's settings, a row of pai's profile: the daemon it talks to, what runs, the limits and what the sessions cost,
+/// and signing out. What the sessions are given (tools, skills, instructions, memories) are rows of the profile itself
+/// (`PaiProfile.swift`), which open `ContextListView` below.
 @available(iOS 16.0, *)
 public final class PaiSettingsController: PaiHostedController {
-    /// Set by the chat: opens the Pai screen (threads by project) on top of this one.
-    public var openProjects: (() -> Void)?
-
     public override init(context: AccountContext) {
         super.init(context: context)
         let close: () -> Void = { [weak self] in self?.dismiss() }
         self.host(PaiSignInGate(close: close) {
-            SettingsView(store: PaiHost.store, settings: PaiSettingsStore(), openProjects: { [weak self] in self?.openProjects?() }, close: close)
+            SettingsView(store: PaiHost.store, settings: PaiSettingsStore(), close: close)
         })
     }
 
@@ -81,27 +79,10 @@ private func attempt<T>(_ body: () async throws -> T) async -> Result<T, Error> 
     }
 }
 
-/// Which section a context kind gets: symbol, colour, title.
-@available(iOS 16.0, *)
-private struct ContextKind {
-    let kind: String
-    let title: String
-    let symbol: String
-    let color: Color
-
-    static let all = [
-        ContextKind(kind: "tool", title: "Tools", symbol: "wrench.and.screwdriver.fill", color: .blue),
-        ContextKind(kind: "skill", title: "Skills", symbol: "sparkles", color: .purple),
-        ContextKind(kind: "instruction", title: "Instructions", symbol: "text.alignleft", color: .orange),
-        ContextKind(kind: "memory", title: "Memories", symbol: "brain.head.profile", color: .pink),
-    ]
-}
-
 @available(iOS 16.0, *)
 struct SettingsView: View {
     @ObservedObject var store: PaiStore
     @ObservedObject var settings: PaiSettingsStore
-    let openProjects: () -> Void
     let close: () -> Void
 
     var body: some View {
@@ -110,7 +91,6 @@ struct SettingsView: View {
                 header
                 statusSection
                 usageSection
-                contextSection
                 PaiSignOutSection()
             }
             .listStyle(.insetGrouped)
@@ -120,12 +100,6 @@ struct SettingsView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     if let error = settings.error ?? store.connectionError { Image(systemName: "bolt.slash").foregroundStyle(.red).help(error) }
                 }
-            }
-            .navigationDestination(for: ContextKindRoute.self) { route in
-                ContextListView(kind: route.kind, title: route.title, settings: settings)
-            }
-            .navigationDestination(for: ContextItemRoute.self) { route in
-                ContextDetailView(id: route.id, settings: settings)
             }
             .refreshable { await settings.load() }
         }
@@ -159,13 +133,7 @@ struct SettingsView: View {
 
     private var statusSection: some View {
         Section {
-            Button(action: openProjects) {
-                HStack {
-                    SettingsRow(symbol: "person.2.fill", color: .green, title: "Agents & tasks", value: threadsValue)
-                    Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
-                }
-            }
-            .foregroundStyle(.primary)
+            SettingsRow(symbol: "person.2.fill", color: .green, title: "Threads", value: threadsValue)
             if let health = settings.health {
                 SettingsRow(symbol: "clock.fill", color: .gray, title: "Uptime", value: Self.duration(health.uptime))
             }
@@ -199,38 +167,12 @@ struct SettingsView: View {
         }
     }
 
-    private var contextSection: some View {
-        Section {
-            ForEach(ContextKind.all, id: \.kind) { kind in
-                NavigationLink(value: ContextKindRoute(kind: kind.kind, title: kind.title)) {
-                    SettingsRow(symbol: kind.symbol, color: kind.color, title: kind.title, value: countValue(kind.kind))
-                }
-            }
-        } header: {
-            Text("What the sessions are given")
-        } footer: {
-            Text("Tools are what a running session reported at its start. Instructions are the system prompt in its parts: the general one, then one per module.")
-        }
-    }
-
-    private func countValue(_ kind: String) -> String {
-        let items = settings.items(kind)
-        if kind == "tool" { return "\(items.reduce(0) { $0 + $1.lines.count })" }
-        return items.isEmpty ? (settings.isLoading ? "…" : "0") : "\(items.count)"
-    }
-
     static func duration(_ seconds: Double) -> String {
         let s = Int(seconds)
         if s < 3600 { return "\(s / 60)m" }
         if s < 86400 { return "\(s / 3600)h \(s % 3600 / 60)m" }
         return "\(s / 86400)d \(s % 86400 / 3600)h"
     }
-}
-
-@available(iOS 16.0, *)
-private struct ContextKindRoute: Hashable {
-    let kind: String
-    let title: String
 }
 
 /// A row in Telegram's settings style: a coloured square icon, a title, a value on the right.
