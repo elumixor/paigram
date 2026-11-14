@@ -3,15 +3,18 @@ import UIKit
 import SwiftSignalKit
 import TelegramCore
 
-/// The app's half of the agent chats (TelegramCore holds the rest): the agents pai lists become peers under the pai
-/// row, and pai's event stream, which only the app follows, keeps their chats live.
+/// The app's half of the agents' identities (TelegramCore holds the rest): the agents pai lists become peers with
+/// their portraits, for their profiles, and TelegramCore learns which topic of the pai bot's chat is whose, to load
+/// each topic's history from before it (`PaiTopicHistory.swift`). pai's event stream, which only the app follows,
+/// keeps the agent list fresh.
 public enum PaiAgentPeers {
     private static var engine: TelegramEngine?
     private static let updateDisposable = MetaDisposable()
+    private static let botDisposable = MetaDisposable()
     private static var observers: [NSObjectProtocol] = []
     private static var loadingAvatars = Set<String>()
 
-    /// The account whose chat list shows the agents.
+    /// The account whose agents these are.
     public static func attach(engine: TelegramEngine?) {
         self.engine = engine
         if self.observers.isEmpty {
@@ -22,11 +25,9 @@ public enum PaiAgentPeers {
                 NotificationCenter.default.addObserver(forName: PaiAuth.didChange, object: nil, queue: .main, using: { _ in
                     self.follow()
                 }),
-                NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main, using: { _ in
-                    self.engine?.paiAgents.syncNow()
-                }),
             ]
         }
+        self.resolveBot()
         self.push()
         self.follow()
     }
@@ -44,15 +45,31 @@ public enum PaiAgentPeers {
         }
     }
 
+    /// The pai bot's peer, so its topics get their history before the chat is first opened.
+    private static func resolveBot() {
+        guard PaiChat.botPeerId == nil, let engine = self.engine else {
+            return
+        }
+        self.botDisposable.set((engine.peers.resolvePeerByName(name: PaiSecrets.botUsername, referrer: nil)
+        |> deliverOnMainQueue).start(next: { result in
+            guard case let .result(peer) = result, let peer else {
+                return
+            }
+            if PaiChat.botPeerId == nil {
+                PaiChat.botPeerId = peer.id
+            }
+            self.push()
+        }))
+    }
+
     private static func push() {
         guard let engine = self.engine else {
             return
         }
         let base = PaiSecrets.baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let agents = PaiChat.agents.map { agent -> PaiAgentInfo in
-            let url = agent.avatar.map { $0.hasPrefix("http") ? $0 : base + ($0.hasPrefix("/") ? "" : "/") + $0 }
             // The peer gets its photo once the portrait is stored; until then it shows its initials.
-            let avatar = url.flatMap { url -> String? in
+            let avatar = PaiAvatars.address(agent.avatar).flatMap { url -> String? in
                 if engine.resources.completedResourcePath(id: EngineMediaResource(paiAgentAvatarResource(url: url)).id) != nil {
                     return url
                 }
@@ -64,7 +81,15 @@ public enum PaiAgentPeers {
         guard !agents.isEmpty else {
             return
         }
-        self.updateDisposable.set(engine.paiAgents.update(agents: agents).start())
+        self.updateDisposable.set(engine.paiAgents.update(agents: agents, botPeerId: PaiChat.botPeerId).start())
+    }
+
+    /// An agent's portrait as stored for its peer (256 pixels square), for lists that draw it: nil until downloaded.
+    public static func storedPortrait(url: String) -> UIImage? {
+        guard let engine = self.engine, let path = engine.resources.completedResourcePath(id: EngineMediaResource(paiAgentAvatarResource(url: url)).id) else {
+            return nil
+        }
+        return UIImage(contentsOfFile: path)
     }
 
     /// Downloads a portrait, scales it to the 256-pixel square the peer photo declares and stores it where the agent

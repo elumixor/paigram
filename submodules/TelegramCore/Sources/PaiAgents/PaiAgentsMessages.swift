@@ -33,22 +33,6 @@ struct PaiLogRow {
         }
         return array.compactMap(PaiLogRow.init(json:))
     }
-
-    var agentMeta: String? {
-        return self.meta["agent"] as? String
-    }
-
-    /// The agent chats the row shows in, the way `/messages?agent=` filters it.
-    func chats(known: Set<String>) -> [String] {
-        var result: [String] = []
-        for slug in [self.from, self.to, self.agentMeta].compactMap({ $0 }) where known.contains(slug) && !result.contains(slug) {
-            result.append(slug)
-        }
-        if known.contains("pai"), !result.contains("pai"), self.kind == "ask" || self.kind == "answer", self.from == "user" || self.to == "user" {
-            result.append("pai")
-        }
-        return result
-    }
 }
 
 /// The light markdown agents write, as message entities: **bold**, *italic*/_italic_, `code`, ```blocks``` and [links](url).
@@ -137,15 +121,6 @@ func paiMarkdown(_ source: String) -> (String, [MessageTextEntity]) {
     return (output, withBoxLinks(entities, text: output))
 }
 
-/// What a row looks like in one agent's chat: its text, whether it came in, who wrote it, and an ask's buttons.
-struct PaiRowContent {
-    let text: String
-    let entities: [MessageTextEntity]
-    let incoming: Bool
-    let authorSlug: String?
-    let markup: ReplyMarkupMessageAttribute?
-}
-
 private func base64url(_ data: Data) -> String {
     return data.base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
 }
@@ -163,115 +138,91 @@ private func firstLine(_ text: String) -> String {
     return text.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? text
 }
 
-func paiRowContent(row: PaiLogRow, slug: String, agents: [PaiAgentInfo]) -> PaiRowContent {
+/// A row of pai's log in an agent's topic, drawn the way the bot draws its own messages there (`telegram.ts`): the
+/// text with a trailer naming the agent and the kind, so the user's words read as his (`user`, `Message.isPaiEcho`),
+/// an agent's answer as a reply (`result`), and events, cards, asks and notices as they do in the chat.
+func paiHistoryContent(row: PaiLogRow, slug: String, thread: Int64, agents: [PaiAgentInfo]) -> (String, [MessageTextEntity]) {
     let name = { (slug: String) -> String in agents.first(where: { $0.slug == slug })?.name ?? slug }
-    var trailer: [String: Any] = ["v": 1, "session": ""]
-    for key in ["agent", "breadcrumb", "event", "icon", "priority", "thread"] {
+    var trailer: [String: Any] = ["v": 1, "session": slug, "agent": slug, "agentName": name(slug), "thread": thread, "author": row.from, "authorName": name(row.from)]
+    for key in ["breadcrumb", "event", "icon", "priority"] {
         if let value = row.meta[key] {
             trailer[key] = value
         }
     }
-    let incomingAuthor = row.from == "user" ? nil : row.from
+    let said = { (kind: String) -> (String, [MessageTextEntity]) in
+        trailer["kind"] = kind
+        let (body, entities) = paiMarkdown(row.body)
+        return paiWithTrailer(body, entities, meta: trailer)
+    }
     switch row.kind {
     case "event":
         trailer["kind"] = "event"
-        let (text, entities) = paiWithTrailer(row.body, [], meta: trailer)
-        return PaiRowContent(text: text, entities: entities, incoming: true, authorSlug: incomingAuthor, markup: nil)
+        return paiWithTrailer(row.body, [], meta: trailer)
     case "notice":
-        let (text, entities) = paiMarkdown("🔔 " + row.body)
-        return PaiRowContent(text: text, entities: entities, incoming: true, authorSlug: incomingAuthor, markup: nil)
+        trailer["kind"] = "notice"
+        let (body, entities) = paiMarkdown("🔔 " + row.body)
+        return paiWithTrailer(body, entities, meta: trailer)
     case "delegate", "request", "report", "response":
         let isOut = row.kind == "delegate" || row.kind == "request"
         let other = isOut ? row.to : row.from
-        if (isOut && row.from == slug) || (!isOut && row.to == slug), other != "user" {
+        if other != "user", (isOut && row.from == slug) || (!isOut && row.to == slug) {
             trailer["kind"] = isOut ? "delegation" : "report"
             trailer["agent"] = other
             trailer["agentName"] = name(other)
             if let status = row.meta["status"] {
                 trailer["status"] = status
             }
-            let (text, entities) = paiWithTrailer(firstLine(row.body), [], meta: trailer)
-            return PaiRowContent(text: text, entities: entities, incoming: true, authorSlug: row.from, markup: nil)
+            return paiWithTrailer(firstLine(row.body), [], meta: trailer)
         }
-        let (text, entities) = paiMarkdown(row.body)
-        return PaiRowContent(text: text, entities: entities, incoming: row.from != "user", authorSlug: incomingAuthor, markup: nil)
+        return said(row.from == "user" ? "user" : "result")
     case "ask":
-        trailer["kind"] = "ask"
         for key in ["askId", "options", "optionDetails", "multiSelect", "questions", "answer"] {
             if let value = row.meta[key] {
                 trailer[key] = value
             }
         }
-        let (body, bodyEntities) = paiMarkdown(row.body)
-        let (text, entities) = paiWithTrailer(body, bodyEntities, meta: trailer)
-        return PaiRowContent(text: text, entities: entities, incoming: true, authorSlug: incomingAuthor, markup: paiAskMarkup(meta: row.meta))
+        return said("ask")
     default:
-        let (text, entities) = paiMarkdown(row.body)
-        return PaiRowContent(text: text, entities: entities, incoming: row.from != "user", authorSlug: incomingAuthor, markup: nil)
+        return said(row.from == "user" ? "user" : "result")
     }
 }
 
-/// An open ask's options as inline buttons carrying the callbacks pai's bot sends (`k:` picks, `m:` toggles, `M:` is
-/// Done); the app answers them through `/asks/<id>/answer`.
-func paiAskMarkup(meta: [String: Any], ticked: Set<Int> = []) -> ReplyMarkupMessageAttribute? {
-    guard meta["answer"] == nil || meta["answer"] is NSNull, let askId = (meta["askId"] as? NSNumber)?.intValue, let options = meta["options"] as? [String], !options.isEmpty else {
+/// A topic's history rows are `Box` messages of the bot's peer, one id space for every topic: a row's id times 32
+/// plus a slot per topic, so a row two agents share (a hand-off) can be in both topics and ids still follow the log.
+private let paiHistorySlots: Int32 = 32
+
+func paiHistorySlot(thread: Int64) -> Int32 {
+    return Int32(UInt64(bitPattern: thread) % UInt64(paiHistorySlots - 1)) + 1
+}
+
+func paiHistoryMessageId(peerId: PeerId, thread: Int64, row: Int32) -> MessageId {
+    return MessageId(peerId: peerId, namespace: Namespaces.Message.Box, id: row * paiHistorySlots + paiHistorySlot(thread: thread))
+}
+
+/// The row of pai's log a topic's history message is (`POST /telegram/materialize` takes it).
+public func paiLogRowId(historyMessageId id: MessageId) -> Int32? {
+    guard id.namespace == Namespaces.Message.Box else {
         return nil
     }
-    let multi = (meta["multiSelect"] as? Bool) ?? false
-    var rows: [ReplyMarkupRow] = options.enumerated().map { index, option in
-        let title = multi ? "\(ticked.contains(index) ? "☑" : "☐") \(option.prefix(55))" : String(option.prefix(60))
-        let data = (multi ? "m:\(askId):\(index)" : "k:\(askId):\(index)").data(using: .utf8)!
-        return ReplyMarkupRow(buttons: [ReplyMarkupButton(title: title, titleWhenForwarded: nil, action: .callback(requiresPassword: false, data: MemoryBuffer(data: data)), style: nil)])
-    }
-    if multi {
-        rows.append(ReplyMarkupRow(buttons: [ReplyMarkupButton(title: "✅ Done", titleWhenForwarded: nil, action: .callback(requiresPassword: false, data: MemoryBuffer(data: "M:\(askId)".data(using: .utf8)!)), style: nil)]))
-    }
-    return ReplyMarkupMessageAttribute(rows: rows, flags: [.inline], placeholder: nil)
+    return id.id / paiHistorySlots
 }
 
-/// Stores a row in one agent's chat (or rewrites it there, when pai changed it: an answered ask); its id is the row's.
+/// The newest log row before a history message id (exclusive bound for `/messages?before=`).
+func paiLogRowBound(historyMessageId id: Int32) -> Int32 {
+    return id / paiHistorySlots
+}
+
+/// Stores a row of pai's log in an agent's topic as the bot's message, dated when it was written.
 @discardableResult
-func storePaiRow(transaction: Transaction, accountPeerId: PeerId, row: PaiLogRow, slug: String, agents: [PaiAgentInfo]) -> MessageId {
-    let peerId = paiAgentPeerId(slug: slug)
-    let id = MessageId(peerId: peerId, namespace: Namespaces.Message.Box, id: row.id)
-    let content = paiRowContent(row: row, slug: slug, agents: agents)
-    let authorId: PeerId
-    if !content.incoming {
-        authorId = accountPeerId
-    } else if let author = content.authorSlug, agents.contains(where: { $0.slug == author }) {
-        authorId = paiAgentPeerId(slug: author)
-    } else {
-        authorId = peerId
+func storePaiHistoryRow(transaction: Transaction, botPeerId: PeerId, thread: Int64, row: PaiLogRow, slug: String, agents: [PaiAgentInfo]) -> MessageId {
+    let id = paiHistoryMessageId(peerId: botPeerId, thread: thread, row: row.id)
+    if transaction.getMessage(id) != nil {
+        return id
     }
-    var attributes: [MessageAttribute] = [TextEntitiesMessageAttribute(entities: content.entities)]
-    if let markup = content.markup {
-        attributes.append(markup)
-    }
-    // An answer draws as a reply to its ask, which shows it settled.
-    let askMessageId = row.kind == "answer" ? ((row.meta["quote"] as? [String: Any])?["messageId"] as? NSNumber).map { MessageId(peerId: peerId, namespace: Namespaces.Message.Box, id: $0.int32Value) } : nil
-    if let askMessageId, transaction.getMessage(askMessageId) != nil {
-        attributes.append(ReplyMessageAttribute(messageId: askMessageId, threadMessageId: nil, quote: nil, isQuote: false, innerSubject: nil))
-    }
-    var flags: StoreMessageFlags = []
-    if content.incoming {
-        flags.insert(.Incoming)
-    }
-    let (tags, globalTags) = tagsForStoreMessage(incoming: content.incoming, attributes: attributes, media: [], textEntities: content.entities, isPinned: false)
-    let message = StoreMessage(id: id, customStableId: nil, globallyUniqueId: nil, groupingKey: nil, threadId: nil, timestamp: Int32(clamping: Int64(row.createdAt / 1000)), flags: flags, tags: tags, globalTags: globalTags, localTags: [], forwardInfo: nil, authorId: authorId, text: content.text, attributes: attributes, media: [])
-    if let current = transaction.getMessage(id) {
-        // An ask answered here stays answered when its row comes again.
-        if row.kind == "ask", paiTrailerMeta(current)?["answer"] != nil {
-            return id
-        }
-        let unchanged = current.text == content.text && current.author?.id == authorId && (current.attributes.first(where: { $0 is ReplyMarkupMessageAttribute }) == nil) == (content.markup == nil)
-        if !unchanged {
-            transaction.updateMessage(id, update: { _ in .update(message) })
-        }
-    } else {
-        let _ = transaction.addMessages([message], location: .Random)
-    }
-    if let askMessageId {
-        markPaiAskAnswered(transaction: transaction, id: askMessageId, answer: row.body)
-    }
+    let (text, entities) = paiHistoryContent(row: row, slug: slug, thread: thread, agents: agents)
+    let attributes: [MessageAttribute] = [TextEntitiesMessageAttribute(entities: entities)]
+    let (tags, globalTags) = tagsForStoreMessage(incoming: true, attributes: attributes, media: [], textEntities: entities, isPinned: false)
+    let message = StoreMessage(id: id, customStableId: nil, globallyUniqueId: nil, groupingKey: nil, threadId: thread, timestamp: Int32(clamping: Int64(row.createdAt / 1000)), flags: [.Incoming], tags: tags, globalTags: globalTags, localTags: [], forwardInfo: nil, authorId: botPeerId, text: text, attributes: attributes, media: [])
+    let _ = transaction.addMessages([message], location: .Random)
     return id
 }

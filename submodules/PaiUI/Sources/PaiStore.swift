@@ -1,6 +1,12 @@
 import Foundation
 import SwiftUI
-import TelegramCore
+
+/// One store for the app's lifetime; the chat starts it and the screens read from it.
+@available(iOS 16.0, *)
+@MainActor
+public enum PaiHost {
+    public static let store = PaiStore()
+}
 
 /// Every thread the daemon knows, kept current from the global event stream.
 @available(iOS 16.0, *)
@@ -19,8 +25,6 @@ public final class PaiStore: ObservableObject {
     @Published public private(set) var projects: [PaiProject] = []
     /// pai and its agents; the same list `PaiChat.agents` keeps for the chat's nodes.
     @Published public private(set) var agents: [PaiAgent] = PaiChat.agents
-    /// Each agent's chat as far as it has been opened, newest last; cached so it opens at once.
-    @Published public private(set) var messages: [String: [PaiLogMessage]] = [:]
     @Published public private(set) var connectionError: String?
     /// Messages agents wrote for the user to send, still waiting on him.
     @Published public private(set) var drafts: [PaiDraft] = []
@@ -34,8 +38,6 @@ public final class PaiStore: ObservableObject {
     private var settled: Set<String> = []
     /// `/threads/all` from the last load, merged into the next one until its own answer arrives.
     private var heldSessions: [PaiSession]?
-    /// The agents' chats being read from disk, one read each.
-    private var chatReads: [String: Task<Void, Never>] = [:]
 
     private static let reconnectDelay: UInt64 = 4_000_000_000
     private static let refreshDebounce: UInt64 = 300_000_000
@@ -179,13 +181,6 @@ public final class PaiStore: ObservableObject {
     ]
 
     private func handle(_ event: PaiEvent) {
-        if event.kind == "message.new", let message = try? event.payload.decode(PaiLogMessage.self) {
-            receive(message)
-        }
-        // Agent chats are TelegramCore's: each row of the log goes there as it arrives.
-        if event.kind == "message.new" || event.kind == "message.updated", let row = try? JSONEncoder().encode(event.payload) {
-            PaiAgentsSync.receive(rowJSON: row)
-        }
         if event.kind.hasPrefix("agent.") { refreshAgents() }
         if event.kind.hasPrefix("draft.") || event.kind == "message.new" { refreshDrafts() }
         // A task waiting on the user is one of the decisions `/needs` serves, so a task that was
@@ -264,100 +259,6 @@ public final class PaiStore: ObservableObject {
             PaiChat.agents = fetched
             if fetched != self.agents { self.agents = fetched }
         }
-    }
-
-    private static func messagesName(_ slug: String) -> String { "messages.\(slug)" }
-    private static let keptMessages = 200
-
-    /// Starts reading an agent's cached chat before its screen first draws, so it opens with its rows.
-    public func prime(_ slug: String) { _ = readChat(slug) }
-
-    /// What a view shows of an agent's chat; filled from the cache when it is read, then by `loadChat`.
-    public func rows(_ slug: String) -> [PaiLogMessage] { messages[slug] ?? [] }
-
-    /// Reads an agent's cached chat from disk the first time, decoded off the main thread.
-    private func readChat(_ slug: String) -> Task<Void, Never> {
-        if let read = chatReads[slug] { return read }
-        let read = Task { [weak self] in
-            let cached = await PaiCache.load([PaiLogMessage].self, Self.messagesName(slug), legacyKey: "pai.messages.\(slug)") ?? []
-            guard let self, self.messages[slug] == nil else { return }
-            self.messages[slug] = cached
-            if !cached.isEmpty { PaiPerf.first("chat.\(slug).cached") }
-        }
-        chatReads[slug] = read
-        return read
-    }
-
-    /// An agent's chat, once its cache has been read.
-    private func chat(_ slug: String) async -> [PaiLogMessage] {
-        await readChat(slug).value
-        return messages[slug] ?? []
-    }
-
-    private func store(_ rows: [PaiLogMessage], for slug: String) {
-        let kept = Array(rows.suffix(Self.keptMessages))
-        messages[slug] = kept
-        PaiCache.save(kept.filter { $0.id > 0 }, Self.messagesName(slug))
-    }
-
-    /// Catches an agent's chat up: what came after the last row held, or the latest page the first time.
-    public func loadChat(_ slug: String) async {
-        let held = await chat(slug)
-        guard !Task.isCancelled else { return }
-        let last = held.last(where: { $0.id > 0 })?.id
-        do {
-            let fetched = try await client.messages(agent: slug, after: last)
-            merge(fetched, into: slug)
-            if !(messages[slug] ?? []).isEmpty { PaiPerf.first("chat.\(slug).network") }
-            connectionError = nil
-        } catch is CancellationError {
-        } catch {
-            connectionError = error.localizedDescription
-        }
-    }
-
-    private func merge(_ rows: [PaiLogMessage], into slug: String) {
-        guard !rows.isEmpty else { return }
-        var byId: [Int: PaiLogMessage] = [:]
-        for row in messages[slug] ?? [] { byId[row.id] = row }
-        for row in rows { byId[row.id] = row }
-        // What the user wrote shows at once; the logged row replaces it when it arrives.
-        let sent = Set(rows.filter { $0.from == "user" }.map(\.body))
-        let merged = byId.values.filter { $0.id > 0 || !sent.contains($0.body) }.sorted { a, b in
-            if (a.id > 0) != (b.id > 0) { return a.id > 0 }
-            return a.id > 0 ? a.id < b.id : a.id > b.id
-        }
-        store(merged, for: slug)
-    }
-
-    /// A row from the live stream lands in every open chat it belongs to.
-    private func receive(_ message: PaiLogMessage) {
-        for slug in messages.keys where message.concerns(slug) {
-            merge([message], into: slug)
-        }
-    }
-
-    /// The user writes to an agent; the row shows before the daemon has logged it.
-    public func send(_ text: String, to slug: String) async throws {
-        let pending = PaiLogMessage(id: -Int(Date().timeIntervalSince1970 * 1000), from: "user", to: slug, kind: "chat", body: text, createdAt: Date().timeIntervalSince1970 * 1000)
-        store(await chat(slug) + [pending], for: slug)
-        do {
-            try await client.message(agent: slug, text: text)
-        } catch {
-            store((messages[slug] ?? []).filter { $0.id != pending.id }, for: slug)
-            throw error
-        }
-    }
-
-    /// Answers an agent's question; the ask shows the answer from then on.
-    public func answer(ask id: Int, text: String, in slug: String) async throws {
-        try await client.answer(ask: id, text: text)
-        store(await chat(slug).map { row in
-            guard row.meta.askId == id, row.kind == "ask" else { return row }
-            var row = row
-            row.meta.answer = text
-            return row
-        }, for: slug)
     }
 
     // MARK: Actions

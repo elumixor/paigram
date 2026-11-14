@@ -425,8 +425,9 @@ func fetchMessageHistoryHole(accountPeerId: PeerId, source: FetchMessageHistoryH
     if case let .direct(peerId, _) = peerInput, peerId.isWhatsApp {
         return fetchWhatsAppHistoryHole(postbox: postbox, accountPeerId: accountPeerId, peerId: peerId, namespace: namespace, direction: direction, space: space, count: count)
     }
-    if case let .direct(peerId, _) = peerInput, peerId.isPaiAgent {
-        return fetchPaiAgentHistoryHole(postbox: postbox, accountPeerId: accountPeerId, peerId: peerId, namespace: namespace, direction: direction, space: space, count: count)
+    // Only Paigram puts a box hole in a user's topic: pai's log from before an agent's topic in the pai bot's chat.
+    if case let .direct(peerId, threadId?) = peerInput, namespace == Namespaces.Message.Box, peerId.namespace == Namespaces.Peer.CloudUser {
+        return fetchPaiTopicHistoryHole(postbox: postbox, peerId: peerId, thread: threadId, namespace: namespace, direction: direction, space: space, count: count)
     }
     if case let .direct(peerId, _) = peerInput, peerId.isEmail {
         return fetchEmailHistoryHole(postbox: postbox, accountPeerId: accountPeerId, peerId: peerId, namespace: namespace, direction: direction, space: space, count: count)

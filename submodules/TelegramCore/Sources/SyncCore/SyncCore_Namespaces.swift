@@ -178,7 +178,8 @@ public struct Namespaces {
         public static let archive = PeerGroupId(rawValue: 1)
         /// Every email chat, behind one row in the chat list. Local: Telegram's server has no such folder.
         public static let email = PeerGroupId(rawValue: 2)
-        /// pai's agents, behind the pai row in the chat list. Local, like `email`.
+        /// Where an earlier Paigram kept pai's agents' chats, behind a "pai" row. Agents have no chats now (their
+        /// topics in the pai bot's chat are), so it stays empty; reserved so a database that held them stays quiet.
         public static let pai = PeerGroupId(rawValue: 3)
     }
 }

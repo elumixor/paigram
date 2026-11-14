@@ -119,7 +119,8 @@ func deleteMessagesInteractively(transaction: Transaction, stateManager: Account
         
         if peerId.namespace == Namespaces.Peer.CloudChannel || peerId.namespace == Namespaces.Peer.CloudGroup || peerId.namespace == Namespaces.Peer.CloudUser {
             let remoteMessageIds = peerMessageIds.filter { id in
-                if id.namespace == Namespaces.Message.Local || id.namespace == Namespaces.Message.ScheduledLocal || id.namespace == Namespaces.Message.QuickReplyLocal || id.namespace == Namespaces.Message.EphemeralLocal {
+                // A box message in a Telegram chat (pai's log in the pai bot's topics) is this device's alone: its id is no Telegram message's.
+                if id.namespace == Namespaces.Message.Local || id.namespace == Namespaces.Message.ScheduledLocal || id.namespace == Namespaces.Message.QuickReplyLocal || id.namespace == Namespaces.Message.EphemeralLocal || id.namespace == Namespaces.Message.Box {
                     return false
                 }
                 return true

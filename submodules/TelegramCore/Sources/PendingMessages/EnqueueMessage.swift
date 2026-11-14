@@ -570,17 +570,6 @@ private func opportunisticallyTransformOutgoingMedia(network: Network, postbox: 
 }
 
 public func enqueueMessages(account: Account, peerId: PeerId, messages: [EnqueueMessage]) -> Signal<[MessageId?], NoError> {
-    if peerId.isPaiAgent {
-        return account.postbox.transaction { transaction -> [MessageId] in
-            return enqueuePaiAgentMessages(transaction: transaction, accountPeerId: account.peerId, peerId: peerId, messages: messages)
-        }
-        |> map { ids -> [MessageId?] in
-            for id in ids {
-                let _ = sendPaiAgentMessage(postbox: account.postbox, accountPeerId: account.peerId, messageId: id).startStandalone()
-            }
-            return ids
-        }
-    }
     if peerId.isWhatsApp {
         return account.postbox.transaction { transaction -> [MessageId] in
             return enqueueWhatsAppMessages(transaction: transaction, accountPeerId: account.peerId, peerId: peerId, messages: messages)
@@ -654,8 +643,7 @@ public func resendMessages(account: Account, messageIds: [MessageId]) -> Signal<
         let others = messageIds.filter { !$0.peerId.isBridged }
         let email = resendEmailMessages(postbox: account.postbox, accountPeerId: account.peerId, messageIds: boxIds.filter { $0.peerId.isEmail })
         let whatsApp = resendWhatsAppMessages(postbox: account.postbox, messageIds: boxIds.filter { $0.peerId.isWhatsApp })
-        let agents = resendPaiAgentMessages(postbox: account.postbox, accountPeerId: account.peerId, messageIds: boxIds.filter { $0.peerId.isPaiAgent })
-        let box = combineLatest(email, whatsApp, agents) |> map { _ in Void() }
+        let box = combineLatest(email, whatsApp) |> map { _ in Void() }
         return others.isEmpty ? box : combineLatest(box, resendMessages(account: account, messageIds: others)) |> map { _ in Void() }
     }
     return account.postbox.transaction { transaction -> Void in

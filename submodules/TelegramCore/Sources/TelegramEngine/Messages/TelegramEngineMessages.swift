@@ -110,13 +110,6 @@ public extension TelegramEngine {
         }
 
         public func requestMessageActionCallback(messageId: MessageId, isGame: Bool, password: String?, data: MemoryBuffer?) -> Signal<MessageActionCallbackResult, MessageActionCallbackError> {
-            // An ask's buttons in an agent chat answer through pai, not a bot.
-            if messageId.peerId.isPaiAgent {
-                guard let data, let answer = paiAgentAskCallback(postbox: self.account.postbox, messageId: messageId, data: data.makeData()) else {
-                    return .single(.none)
-                }
-                return (answer |> mapToSignal { _ -> Signal<MessageActionCallbackResult, NoError> in .complete() } |> then(.single(.none))) |> castError(MessageActionCallbackError.self)
-            }
             return _internal_requestMessageActionCallback(account: self.account, messageId: messageId, isGame: isGame, password: password, data: data)
         }
 

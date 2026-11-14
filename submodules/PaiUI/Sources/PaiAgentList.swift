@@ -5,7 +5,7 @@ import SwiftSignalKit
 import TelegramCore
 import UIKit
 
-/// Opening the agents' chats.
+/// pai's agents in Telegram's screens: an agent's peer is its profile, its chat is its topic of the bot's chat.
 public enum PaiAgentList {
     /// The agent whose peer this is.
     public static func slug(peerId: EnginePeer.Id) -> String? {
@@ -15,55 +15,46 @@ public enum PaiAgentList {
         return PaiChat.agents.first(where: { paiAgentPeerId(slug: $0.slug) == peerId })?.slug
     }
 
-    /// Under an agent chat's title: its role, and what it is doing when it is not idle.
+    /// The peer an agent's profile is.
+    public static func peerId(slug: String) -> EnginePeer.Id {
+        return paiAgentPeerId(slug: slug)
+    }
+
+    /// Under an agent's name: its role, and what it is doing when it is not idle.
     public static func subtitle(peerId: EnginePeer.Id) -> String? {
         guard let slug = slug(peerId: peerId), let agent = PaiChat.agent(slug) else {
             return nil
         }
-        let state: String?
-        if agent.status == "waiting" || PaiChat.needs.contains(where: { $0.agent == slug }) {
-            state = "waiting on you"
+        let role = agent.role.flatMap { $0.isEmpty ? nil : $0 } ?? (agent.isPai ? "assistant" : "agent")
+        return [role, state(agent)].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    /// What an agent is doing, in a word; nil when idle.
+    public static func state(_ agent: PaiAgent) -> String? {
+        if agent.status == "waiting" || PaiChat.needs.contains(where: { $0.agent == agent.slug }) {
+            return "waiting on you"
         } else if agent.isBusy {
-            state = "working"
-        } else {
-            state = nil
+            return "working"
+        } else if agent.isClosed || agent.status == "done" {
+            return "closed"
         }
-        let role = agent.role.flatMap { $0.isEmpty ? nil : $0 } ?? "agent"
-        return [role, state].compactMap { $0 }.joined(separator: " · ")
+        return nil
     }
 
-    /// The agent whose peer this is, when its chat is the bot's: pai's own (the bot chat) or one with a topic.
-    public static func botChatSlug(peerId: EnginePeer.Id) -> String? {
-        guard let slug = slug(peerId: peerId) else {
-            return nil
-        }
-        return slug == PaiChat.paiSlug || PaiChat.thread(of: slug) != nil ? slug : nil
-    }
-
-    /// Into an agent's chat: pai's is the bot chat, an agent with a topic is that topic, any other agent's is its own chat.
+    /// Into an agent's chat: its topic of the bot's chat (pai's is the main topic, as is any agent without a topic yet).
     public static func open(slug: String, context: AccountContext, navigationController: NavigationController) {
-        let threadId = slug == PaiChat.paiSlug ? nil : PaiChat.thread(of: slug)
-        if slug == PaiChat.paiSlug || threadId != nil {
-            let _ = (botPeer(context: context) |> deliverOnMainQueue).startStandalone(next: { [weak navigationController] peer in
-                guard let navigationController, let peer else {
-                    return
-                }
-                let location: NavigateToChatControllerParams.Location
-                if let threadId {
-                    location = .replyThread(ChatReplyThreadMessage(peerId: peer.id, threadId: threadId, channelMessageId: nil, isChannelPost: false, isForumPost: true, isMonoforumPost: false, maxMessage: nil, maxReadIncomingMessageId: nil, maxReadOutgoingMessageId: nil, unreadCount: 0, initialFilledHoles: IndexSet(), initialAnchor: .automatic, isNotAvailable: false))
-                } else {
-                    location = .peer(peer)
-                }
-                context.sharedContext.navigateToChatController(NavigateToChatControllerParams(navigationController: navigationController, context: context, chatLocation: location))
-            })
-            return
-        }
-        let _ = (context.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: paiAgentPeerId(slug: slug)))
-        |> deliverOnMainQueue).startStandalone(next: { [weak navigationController] peer in
+        let threadId = PaiChat.thread(of: slug) ?? PaiChat.mainThreadId
+        let _ = (botPeer(context: context) |> deliverOnMainQueue).startStandalone(next: { [weak navigationController] peer in
             guard let navigationController, let peer else {
                 return
             }
-            context.sharedContext.navigateToChatController(NavigateToChatControllerParams(navigationController: navigationController, context: context, chatLocation: .peer(peer)))
+            let location: NavigateToChatControllerParams.Location
+            if let threadId {
+                location = .replyThread(ChatReplyThreadMessage(peerId: peer.id, threadId: threadId, channelMessageId: nil, isChannelPost: false, isForumPost: true, isMonoforumPost: false, maxMessage: nil, maxReadIncomingMessageId: nil, maxReadOutgoingMessageId: nil, unreadCount: 0, initialFilledHoles: IndexSet(), initialAnchor: .automatic, isNotAvailable: false))
+            } else {
+                location = .peer(peer)
+            }
+            context.sharedContext.navigateToChatController(NavigateToChatControllerParams(navigationController: navigationController, context: context, chatLocation: location))
         })
     }
 
@@ -80,6 +71,34 @@ public enum PaiAgentList {
         }
         |> take(1)
     }
+
+    /// A topic's icon in the bot chat's topic list: its agent's portrait. Nil for a topic that is no agent's.
+    public static func topicIcon(thread: Int64, size: CGFloat) -> UIImage? {
+        return PaiChat.agent(thread: thread).map { portrait(agent: $0, size: size) }
+    }
+
+    /// An agent's portrait in a circle as it is stored for its peer, its initials until then.
+    public static func portrait(agent: PaiAgent, size: CGFloat) -> UIImage {
+        let key = "\(agent.slug):\(agent.avatar ?? ""):\(Int(size))" as NSString
+        if let cached = portraits.object(forKey: key) {
+            return cached
+        }
+        guard let stored = PaiAvatars.address(agent.avatar).flatMap({ PaiAvatars.cached($0) ?? PaiAgentPeers.storedPortrait(url: $0) }) else {
+            return PaiAvatars.placeholder(name: agent.name, slug: agent.slug, size: size)
+        }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = UIScreen.main.scale
+        let image = UIGraphicsImageRenderer(size: CGSize(width: size, height: size), format: format).image { _ in
+            UIBezierPath(ovalIn: CGRect(x: 0, y: 0, width: size, height: size)).addClip()
+            let scale = max(size / max(stored.size.width, 1), size / max(stored.size.height, 1))
+            let drawn = CGSize(width: stored.size.width * scale, height: stored.size.height * scale)
+            stored.draw(in: CGRect(x: (size - drawn.width) / 2, y: (size - drawn.height) / 2, width: drawn.width, height: drawn.height))
+        }
+        portraits.setObject(image, forKey: key)
+        return image
+    }
+
+    private static let portraits = NSCache<NSString, UIImage>()
 }
 
 /// Agent portraits, fetched once per run; the URLs are public.
@@ -88,6 +107,18 @@ public enum PaiAvatars {
 
     public static func cached(_ url: String) -> UIImage? {
         cache.object(forKey: url as NSString)
+    }
+
+    /// An agent's `avatar` (absolute, or a path on the box) as an address.
+    public static func address(_ avatar: String?) -> String? {
+        guard let avatar, !avatar.isEmpty else {
+            return nil
+        }
+        if avatar.hasPrefix("http") {
+            return avatar
+        }
+        let base = PaiSecrets.baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return base + (avatar.hasPrefix("/") ? "" : "/") + avatar
     }
 
     public static func image(_ url: String) -> Signal<UIImage?, NoError> {

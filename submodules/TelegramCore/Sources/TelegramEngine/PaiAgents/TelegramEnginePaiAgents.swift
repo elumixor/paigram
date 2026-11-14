@@ -3,7 +3,8 @@ import Postbox
 import SwiftSignalKit
 
 public extension TelegramEngine {
-    /// Paigram's agent chats: pai's agents as local user peers under the pai row, each chat pai's message log.
+    /// pai's agents on this device: each a local user peer for its profile (portrait, name, role); its chat is its forum
+    /// topic of the pai bot, whose history from before the topic comes from pai's log (`PaiTopicHistory.swift`).
     final class PaiAgents {
         private let account: Account
 
@@ -11,30 +12,13 @@ public extension TelegramEngine {
             self.account = account
         }
 
-        /// The agents the app read from pai (`/agents`): their peers made or updated, chats of new ones started.
-        public func update(agents: [PaiAgentInfo]) -> Signal<Never, NoError> {
-            return updatePaiAgents(postbox: self.account.postbox, agents: agents) |> ignoreValues
-        }
-
-        /// Reads the message log now (the app came to the front).
-        public func syncNow() {
-            PaiAgentsSync.request()
+        /// The agents the app read from pai (`/agents`) and the pai bot's peer, once known.
+        public func update(agents: [PaiAgentInfo], botPeerId: EnginePeer.Id?) -> Signal<Never, NoError> {
+            return updatePaiAgents(postbox: self.account.postbox, agents: agents, botPeerId: botPeerId) |> ignoreValues
         }
 
         public func peerId(slug: String) -> EnginePeer.Id {
             return paiAgentPeerId(slug: slug)
-        }
-
-        public func state() -> Signal<PaiAgentsState, NoError> {
-            return self.account.postbox.preferencesView(keys: [PreferencesKeys.paiAgentsState])
-            |> map { view -> PaiAgentsState in
-                return view.values[PreferencesKeys.paiAgentsState]?.get(PaiAgentsState.self) ?? .empty
-            }
-            |> distinctUntilChanged
-        }
-
-        public func agent(peerId: EnginePeer.Id) -> Signal<PaiAgentInfo?, NoError> {
-            return self.state() |> map { $0.agent(peerId: peerId) } |> distinctUntilChanged
         }
     }
 }

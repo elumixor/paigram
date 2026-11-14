@@ -1718,7 +1718,7 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
             guard let message = messages.first else {
                 return
             }
-            if Namespaces.Message.allEphemeral.contains(message.id.namespace) {
+            if Namespaces.Message.allEphemeral.contains(message.id.namespace) || PaiChat.isHistoryRow(message) {
                 return
             }
             if case .default = reaction, strongSelf.chatLocation.peerId == strongSelf.context.account.peerId {
@@ -3703,6 +3703,10 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
         }, setupReply: { [weak self] messageId in
             self?.interfaceInteraction?.setupReplyMessage(messageId, nil, { _, f in f() })
         }, canSetupReply: { [weak self] message in
+            // pai's log in an agent's topic: no Telegram message to reply to.
+            if PaiChat.isHistoryRow(message) {
+                return .none
+            }
             if Namespaces.Message.allEphemeral.contains(message.id.namespace) {
                 if !message.flags.contains(.Incoming) {
                     return .none
@@ -7748,15 +7752,12 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
         self.didAppear = true
         
         // The pai bot's chat keeps its activity feed alive while open; a new agent list, project or usage redraws the title.
-        // An agent's own chat redraws the same way: its rail, its role line, its pills.
-        if !wasAppearedBefore, PaiChat.drawsPai(self.presentationInterfaceState.renderedPeer?.peer) {
-            if PaiChat.isBot(self.presentationInterfaceState.renderedPeer?.peer) {
-                if #available(iOS 16.0, *) {
-                    PaiHost.store.start()
-                }
-                if let peerId = self.chatLocation.peerId {
-                    PaiNotificationAnswer.writeConfig(basePath: self.context.sharedContext.basePath, botUserId: peerId.id._internalGetInt64Value())
-                }
+        if !wasAppearedBefore, PaiChat.isBot(self.presentationInterfaceState.renderedPeer?.peer) {
+            if #available(iOS 16.0, *) {
+                PaiHost.store.start()
+            }
+            if let peerId = self.chatLocation.peerId {
+                PaiNotificationAnswer.writeConfig(basePath: self.context.sharedContext.basePath, botUserId: peerId.id._internalGetInt64Value())
             }
             let redrawTitle: (Notification) -> Void = { [weak self] _ in
                 guard let self else { return }

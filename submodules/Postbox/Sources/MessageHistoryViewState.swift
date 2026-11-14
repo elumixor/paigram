@@ -296,7 +296,12 @@ public struct PeerIdAndNamespace: Hashable {
 
 private func canContainHoles(_ peerIdAndNamespace: PeerIdAndNamespace, input: MessageHistoryInput, seedConfiguration: SeedConfiguration) -> Bool {
     switch input {
-    case .automatic:
+    case let .automatic(threadId, _):
+        // A thread holds whatever holes its own table has, as an external thread does: Paigram keeps a `Box` hole in
+        // each agent's topic of the pai bot for pai's log from before the topic, which no peer's own history has.
+        if threadId != nil {
+            return true
+        }
         guard let messageNamespaces = seedConfiguration.messageHoles[peerIdAndNamespace.peerId.namespace] else {
             return false
         }

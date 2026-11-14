@@ -4,6 +4,7 @@ import Display
 import AsyncDisplayKit
 import ComponentFlow
 import Postbox
+import SwiftSignalKit
 import TelegramCore
 import TelegramPresentationData
 import AccountContext
@@ -20,58 +21,117 @@ private func paiThread(peerId: PeerId, threadId: Int64) -> ChatReplyThreadMessag
 }
 
 extension ChatControllerImpl {
-    /// Into an agent's chat, keeping the navigation stack the shape of the tree: going down pushes (so the back
-    /// swipe goes up a level), going up pops to the level when it is on the stack and switches this chat otherwise.
-    /// An agent with a topic is that topic of the bot chat; any other agent's is its own chat (its peer's).
+    /// Into an agent's chat, its topic of the bot chat, keeping the navigation stack the shape of the tree: going down
+    /// pushes (so the back swipe goes up a level), going up pops to the level when it is on the stack and switches this
+    /// chat otherwise. An agent without a topic yet opens its profile.
     func openPaiAgent(slug: String?, thread: Int64?) {
-        guard let navigationController = self.effectiveNavigationController, let chatPeerId = self.chatLocation.peerId else {
+        guard let navigationController = self.effectiveNavigationController, let botPeerId = self.chatLocation.peerId else {
             return
         }
-        // In an agent's own chat, topics are the bot's.
-        let currentSlug = chatPeerId.isPaiAgent ? PaiAgentList.slug(peerId: chatPeerId) : PaiChat.agent(thread: self.chatLocation.threadId)?.slug
-        let botPeerId = chatPeerId.isPaiAgent ? PaiChat.botPeerId : chatPeerId
+        let currentSlug = PaiChat.agent(thread: self.chatLocation.threadId)?.slug
         let target = PaiChat.agent(slug) ?? PaiChat.agent(thread: thread)
         let targetSlug = target?.slug ?? slug
-        let threadId = thread ?? targetSlug.flatMap { PaiChat.thread(of: $0) }
+        guard let threadId = thread ?? targetSlug.flatMap({ PaiChat.thread(of: $0) }) else {
+            if let targetSlug {
+                self.openPaiProfile(slug: targetSlug)
+            }
+            return
+        }
         let stack = navigationController.viewControllers
         let selfIndex = stack.firstIndex(where: { $0 === self }) ?? stack.count - 1
         let goesDown = currentSlug.flatMap { current in targetSlug.map { PaiChat.isAncestor(current, of: $0) } } ?? false
-
-        if let threadId, let peerId = botPeerId {
-            if let existing = stack.last(where: { ($0 as? ChatControllerImpl)?.chatLocation.peerId == peerId && ($0 as? ChatControllerImpl)?.chatLocation.threadId == threadId }) {
-                let _ = navigationController.popToViewController(existing, animated: true)
-                return
-            }
-            if goesDown || chatPeerId.isPaiAgent {
-                let controller = ChatControllerImpl(context: self.context, chatLocation: .replyThread(message: paiThread(peerId: peerId, threadId: threadId)))
-                navigationController.setViewControllers(Array(stack.prefix(selfIndex + 1)) + [controller], animated: true)
-            } else {
-                let _ = navigationController.popToViewController(self, animated: true)
-                self.updateChatLocationThread(threadId: threadId, animationDirection: nil)
-            }
-            return
-        }
-
-        guard let targetSlug else {
-            return
-        }
-        let agentPeerId = paiAgentPeerId(slug: targetSlug)
-        if let existing = stack.last(where: { ($0 as? ChatControllerImpl)?.chatLocation.peerId == agentPeerId }) {
+        if let existing = stack.last(where: { ($0 as? ChatControllerImpl)?.chatLocation.peerId == botPeerId && ($0 as? ChatControllerImpl)?.chatLocation.threadId == threadId }) {
             let _ = navigationController.popToViewController(existing, animated: true)
             return
         }
-        // A sub-agent's chat goes right above its parent's, whichever chat that is.
-        let parentIndex = target?.parent.flatMap { parent -> Int? in
-            let parentThread = PaiChat.thread(of: parent)
-            return stack.lastIndex(where: { controller in
-                guard let chat = controller as? ChatControllerImpl else {
+        if goesDown {
+            let controller = ChatControllerImpl(context: self.context, chatLocation: .replyThread(message: paiThread(peerId: botPeerId, threadId: threadId)))
+            navigationController.setViewControllers(Array(stack.prefix(selfIndex + 1)) + [controller], animated: true)
+        } else {
+            let _ = navigationController.popToViewController(self, animated: true)
+            self.updateChatLocationThread(threadId: threadId, animationDirection: nil)
+        }
+    }
+
+    /// The bot chat's topics as Telegram's forum topic list (in the agent tree's order, each with its agent's
+    /// portrait), opened from the breadcrumb above this chat; back from it, or from a topic picked there, returns.
+    func openPaiTopics() {
+        guard let navigationController = self.effectiveNavigationController, let peerId = self.chatLocation.peerId else {
+            return
+        }
+        if let existing = navigationController.viewControllers.last(where: { ($0 as? ChatListController)?.location == .forum(peerId: peerId) }) {
+            let _ = navigationController.popToViewController(existing, animated: true)
+            return
+        }
+        self.context.sharedContext.navigateToForumChannel(context: self.context, peerId: peerId, navigationController: navigationController)
+    }
+
+    /// An agent's profile: Telegram's profile screen on its peer, with Call; the agent of this topic by default
+    /// (pai's in the main topic). Before pai's agent list has been read there is no peer yet: pai's settings then.
+    func openPaiProfile(slug: String? = nil) {
+        let slug = slug ?? PaiChat.agent(thread: self.chatLocation.threadId)?.slug ?? PaiChat.paiSlug
+        let _ = (self.context.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: PaiAgentList.peerId(slug: slug)))
+        |> deliverOnMainQueue).startStandalone(next: { [weak self] peer in
+            guard let self else {
+                return
+            }
+            if let peer, let controller = self.context.sharedContext.makePeerInfoController(context: self.context, updatedPresentationData: self.updatedPresentationData, peer: peer, mode: .generic, avatarInitiallyExpanded: false, fromChat: true, requestsContext: nil) {
+                self.effectiveNavigationController?.pushViewController(controller)
+            } else if let settings = PaiProfile.controller(context: self.context, list: .settings) {
+                self.effectiveNavigationController?.pushViewController(settings)
+            }
+        })
+    }
+
+    /// Forwarding pai's log (an agent's history from before its topic): the bot posts each row as real messages
+    /// (`POST /telegram/materialize`, the same ones every time), loaded here so they can stand in for the rows, in order.
+    func materializePaiRows(_ messageIds: [MessageId], completion: @escaping ([MessageId]) -> Void) {
+        guard #available(iOS 16.0, *), let peerId = self.chatLocation.peerId else {
+            return
+        }
+        let status = OverlayStatusController(theme: self.presentationData.theme, type: .loading(cancelled: nil))
+        self.present(status, in: .window(.root))
+        let context = self.context
+        Task { @MainActor [weak self, weak status] in
+            var ids: [MessageId] = []
+            var failed = false
+            for id in messageIds.sorted() {
+                guard let row = paiLogRowId(historyMessageId: id) else {
+                    ids.append(id)
+                    continue
+                }
+                do {
+                    let posted = try await PaiClient().materialize(row: Int(row))
+                    ids.append(contentsOf: posted.messageIds.map { MessageId(peerId: peerId, namespace: Namespaces.Message.Cloud, id: $0) })
+                } catch {
+                    failed = true
+                }
+            }
+            let posted = ids.filter { $0.namespace == Namespaces.Message.Cloud && $0.peerId == peerId }
+            if !posted.isEmpty {
+                let _ = await (context.engine.messages.getMessagesLoadIfNecessary(posted)
+                |> `catch` { _ -> Signal<GetMessagesResult, NoError> in
+                    return .single(.result([]))
+                }
+                |> filter { result in
+                    if case .result = result {
+                        return true
+                    }
                     return false
                 }
-                return chat.chatLocation.peerId == paiAgentPeerId(slug: parent) || (parentThread != nil && chat.chatLocation.peerId == botPeerId && chat.chatLocation.threadId == parentThread)
-            })
+                |> take(1)).get()
+            }
+            status?.dismiss()
+            guard let self else {
+                return
+            }
+            if failed {
+                self.present(textAlertController(context: self.context, title: nil, text: "pai could not post some of these, so they are not forwarded.", actions: [TextAlertAction(type: .defaultAction, title: "OK", action: {})]), in: .window(.root))
+            }
+            if !ids.isEmpty {
+                completion(ids)
+            }
         }
-        let controller = ChatControllerImpl(context: self.context, chatLocation: .peer(id: agentPeerId))
-        navigationController.setViewControllers(Array(stack.prefix((parentIndex ?? selfIndex) + 1)) + [controller], animated: true)
     }
 
     /// A thread named only by its short id (a reply's "started […]" link): always pushed as a fresh chat,
@@ -114,19 +174,11 @@ extension ChatControllerImpl {
         }
     }
 
-    /// A voice call with the agent whose chat this is; pai's own anywhere else in the bot chat.
+    /// A voice call with the agent whose topic this is; pai's own anywhere else in the bot chat.
     func startPaiCall() {
         guard #available(iOS 16.0, *) else { return }
-        let slug = self.chatLocation.peerId.flatMap(PaiAgentList.slug(peerId:)) ?? PaiChat.agent(thread: self.chatLocation.threadId)?.slug ?? PaiChat.paiSlug
+        let slug = PaiChat.agent(thread: self.chatLocation.threadId)?.slug ?? PaiChat.paiSlug
         PaiCall.shared.start(agent: slug)
-    }
-
-    /// pai's settings: status, usage, what its sessions are given.
-    func openPaiSettings() {
-        guard #available(iOS 16.0, *) else { return }
-        let settings = PaiSettingsController(context: self.context)
-        settings.openProjects = { [weak self] in self?.interfaceInteraction?.openPai?() }
-        self.effectiveNavigationController?.pushViewController(settings)
     }
 
     /// Interrupts the session a busy status card shows; the card updates once the daemon reports it stopped.
@@ -140,7 +192,7 @@ extension ChatControllerImpl {
 
 /// The pai bot's chat titles itself with where it is: "pai › Hiring › Screener" over an agent's topic, "pai" over
 /// the main one, "pai › <topic>" over a plain thread; under it, how many decisions wait on the user. Tapping it
-/// opens the hub.
+/// opens the topic list (`openPaiTopics`).
 /// nil anywhere outside the bot's chat, which keeps Telegram's own title.
 func paiTitleContent(_ interfaceState: ChatPresentationInterfaceState, base: ChatTitleContent) -> ChatTitleContent? {
     guard PaiChat.isBot(interfaceState.renderedPeer?.peer), case .standard(.default) = interfaceState.mode else {
@@ -182,7 +234,7 @@ final class PaiUsageRingNode: ASDisplayNode {
     private var usage: PaiUsage?
     private var theme: PresentationTheme?
     private var card: UIView?
-    private var clock: Timer?
+    private var clock: Foundation.Timer?
 
     override init() {
         super.init()
@@ -208,7 +260,7 @@ final class PaiUsageRingNode: ASDisplayNode {
         press.minimumPressDuration = 0.25
         self.view.addGestureRecognizer(press)
         // The time to the reset counts down between usage updates.
-        self.clock = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
+        self.clock = Foundation.Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { [weak self] _ in
             guard let self, let theme = self.theme else { return }
             self.update(usage: self.usage, theme: theme)
         }

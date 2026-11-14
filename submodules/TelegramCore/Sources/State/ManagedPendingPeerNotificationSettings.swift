@@ -90,9 +90,6 @@ func managedPendingPeerNotificationSettings(postbox: Postbox, network: Network) 
 }
 
 func pushPeerNotificationSettings(postbox: Postbox, network: Network, peerId: PeerId, threadId: Int64?, settings: PeerNotificationSettings) -> Signal<Void, NoError> {
-    if peerId.isPaiAgent {
-        return pushPaiAgentNotificationSettings(postbox: postbox, peerId: peerId, settings: settings)
-    }
     if peerId.isEmail {
         return pushEmailNotificationSettings(postbox: postbox, peerId: peerId, settings: settings)
     }

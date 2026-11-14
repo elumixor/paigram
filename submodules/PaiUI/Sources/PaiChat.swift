@@ -6,11 +6,6 @@ import TelegramCore
 public enum PaiChat {
     private static let lastThreadKey = "pai.lastThreadId"
 
-    /// Whether a chat draws pai's messages (cards, pills, folded events): the bot's, or an agent's own.
-    public static func drawsPai(_ peer: Peer?) -> Bool {
-        return isBot(peer) || peer?.id.isPaiAgent == true
-    }
-
     /// Whether a chat is the pai bot's.
     public static func isBot(_ peer: Peer?) -> Bool {
         guard let user = peer as? TelegramUser, user.botInfo != nil else { return false }
@@ -172,6 +167,63 @@ extension PaiChat {
     public static func isAncestor(_ ancestor: String, of slug: String) -> Bool {
         chain(to: slug).dropLast().contains { $0.slug == ancestor }
     }
+
+    /// The agents under one, open ones first, the latest active first.
+    public static func children(of slug: String) -> [PaiAgent] {
+        agents.filter { $0.parent == slug && $0.slug != slug }.sorted { a, b in
+            if a.isClosed != b.isClosed { return !a.isClosed }
+            return (a.lastActive ?? 0) > (b.lastActive ?? 0)
+        }
+    }
+
+    /// Every agent in tree order, depth first from pai: how the bot chat's topic list runs.
+    public static func treeOrder() -> [PaiAgent] {
+        var result: [PaiAgent] = []
+        func walk(_ agent: PaiAgent) {
+            guard !result.contains(where: { $0.slug == agent.slug }) else { return }
+            result.append(agent)
+            for child in children(of: agent.slug) { walk(child) }
+        }
+        if let pai = agent(paiSlug) { walk(pai) }
+        let slugs = Set(agents.map(\.slug))
+        // Agents whose parent is unknown hang under pai.
+        for orphan in agents where orphan.parent.map({ !slugs.contains($0) }) ?? (orphan.slug != paiSlug) {
+            walk(orphan)
+        }
+        return result
+    }
+
+    /// Where a topic of the bot chat stands in the topic list, 0 first: pai's main topic, then the agents in tree
+    /// order; nil for a topic that is no agent's (a plain thread), which follows them by its last message.
+    public static func topicRank(thread: Int64) -> Int? {
+        if thread == mainThreadId { return 0 }
+        guard let index = treeOrder().firstIndex(where: { $0.threadId == thread && !$0.isPai }) else { return nil }
+        return index + 1
+    }
+}
+
+// MARK: Forwarding
+
+extension PaiChat {
+    /// A message of the bot chat that is pai's log, loaded into an agent's topic from before the topic existed: no
+    /// Telegram message, so it is forwarded once the bot has posted it (`POST /telegram/materialize`).
+    public static func isHistoryRow(_ message: Message) -> Bool {
+        message.id.namespace == Namespaces.Message.Box && isBot(message.peers[message.id.peerId])
+    }
+
+    /// Whether a message of the bot chat may be forwarded: his own words and what pai and its agents answered, never
+    /// an event, card, ask, notice or status line.
+    public static func isForwardable(_ message: Message) -> Bool {
+        if message.isPaiEcho || !message.flags.contains(.Incoming) {
+            return true
+        }
+        guard let kind = PaiTrailer.find(message)?.meta.kind else {
+            return true
+        }
+        return forwardableKinds.contains(kind)
+    }
+
+    private static let forwardableKinds: Set<String> = ["turn", "result", "report", "user"]
 }
 
 /// A plain thread (`start_thread`, not an agent) named only by its short id, the way pai mentions one in a

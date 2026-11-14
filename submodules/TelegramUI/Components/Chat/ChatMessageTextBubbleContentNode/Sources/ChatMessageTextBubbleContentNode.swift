@@ -472,7 +472,7 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
                     }
                 }
                 // Nor is the project line this client put in front of a thread's first message.
-                if PaiChat.drawsPai(item.message.peers[item.message.id.peerId]) {
+                if PaiChat.isBot(item.message.peers[item.message.id.peerId]) {
                     let cut = PaiChat.prefixLength(in: rawText)
                     if cut > 0 {
                         rawText = (rawText as NSString).substring(from: cut)
@@ -1281,7 +1281,7 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
 
                 // "started [… · 323f24]" — a reply mentioning a thread by its short id: into that
                 // thread's chat in the app, not out to whatever the bot happened to put in the link.
-                if let item = self.item, PaiChat.drawsPai(item.message.peers[item.message.id.peerId]), let attributeText, let shortId = PaiThreadLink.shortId(in: attributeText) {
+                if let item = self.item, PaiChat.isBot(item.message.peers[item.message.id.peerId]), let attributeText, let shortId = PaiThreadLink.shortId(in: attributeText) {
                     return ChatMessageBubbleContentTapAction(content: .custom({ [weak item] in
                         item?.controllerInteraction.openPaiThread?(shortId)
                     }), rects: rects, activate: makeActivate(urlRange))
