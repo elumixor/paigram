@@ -30,6 +30,16 @@ private func pillImage(status: String, font: UIFont, color: UIColor) -> UIImage?
     }
 }
 
+/// A layer shows a symbol's untinted glyph (black), so the chevron is drawn tinted into a bitmap.
+private func chevronImage(pointSize: CGFloat, color: UIColor) -> UIImage? {
+    guard let symbol = UIImage(systemName: "chevron.right", withConfiguration: UIImage.SymbolConfiguration(pointSize: pointSize, weight: .semibold)) else { return nil }
+    let format = UIGraphicsImageRendererFormat()
+    format.scale = UIScreenScale
+    return UIGraphicsImageRenderer(size: symbol.size, format: format).image { _ in
+        symbol.withTintColor(color, renderingMode: .alwaysOriginal).draw(at: .zero)
+    }
+}
+
 /// Work pai handed to an agent (`delegation`: the agent, the brief's first line, its live status) or what an agent
 /// said back (`report`: its first line); either is a way into that agent's chat, by tap or by swiping left.
 public final class ChatMessagePaiCardBubbleContentNode: ChatMessageBubbleContentNode {
@@ -125,10 +135,11 @@ public final class ChatMessagePaiCardBubbleContentNode: ChatMessageBubbleContent
                 let name = meta?.agentName ?? agent?.name ?? meta?.agent ?? "Agent"
                 let facePlaceholder = PaiAvatars.placeholder(name: name, slug: meta?.agent ?? name, size: faceSize)
                 let faceUrl = agent?.avatar
+                // Not `accentTextColor`: wallpaper themes may leave it fully transparent.
                 let symbol = PaiEventIcon.symbol(event: isDelegation ? "delegation" : "report")
-                let title = paiLineImage(symbol: symbol, text: name, font: titleFont, color: colors.accentTextColor, maxWidth: maxWidth - (pill.map { $0.size.width + pillGap } ?? 0.0))
+                let title = paiLineImage(symbol: symbol, text: name, font: titleFont, color: colors.primaryTextColor, maxWidth: maxWidth - (pill.map { $0.size.width + pillGap } ?? 0.0))
                 let line = paiLineImage(symbol: nil, text: Self.firstLine(text), font: lineFont, color: colors.secondaryTextColor, maxWidth: maxWidth)
-                let chevron = UIImage(systemName: "chevron.right", withConfiguration: UIImage.SymbolConfiguration(pointSize: lineFont.pointSize * 0.85, weight: .semibold))?.withTintColor(colors.secondaryTextColor.withAlphaComponent(0.6), renderingMode: .alwaysOriginal)
+                let chevron = chevronImage(pointSize: lineFont.pointSize * 0.85, color: colors.secondaryTextColor.withAlphaComponent(0.6))
 
                 let titleWidth = (title?.size.width ?? 0.0) + (pill.map { $0.size.width + pillGap } ?? 0.0)
                 let titleHeight = max(title?.size.height ?? 0.0, pill?.size.height ?? 0.0)
