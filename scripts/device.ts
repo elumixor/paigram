@@ -1,9 +1,10 @@
 /**
  * `bun run device [--no-build] [--device <name|udid>]`: the release build TestFlight ships, signed Ad Hoc
- * instead, installed straight on an iPhone over USB or Wi-Fi and launched. No upload, no processing,
+ * instead, installed straight on an iPhone over USB or Wi-Fi and launched, and its watch app on the Apple
+ * Watch paired with this Mac, when there is one (Developer Mode on the watch). No upload, no processing,
  * no version bump. The iPhone has to be paired with this Mac once by cable (`xcrun devicectl manage pair`,
  * Developer Mode on; `pymobiledevice3 lockdown set True com.apple.mobile.wireless_lockdown EnableWifiDebugging`
- * for Wi-Fi). The first time it is used it is registered on the account and the Ad Hoc profiles are made
+ * for Wi-Fi). The first time a device is used it is registered on the account and the Ad Hoc profiles are made
  * again to include it.
  */
 import { $ } from "bun";
@@ -33,24 +34,24 @@ const deviceArgument = process.argv.indexOf("--device");
 const wanted = deviceArgument > 0 ? process.argv[deviceArgument + 1] : undefined;
 const { bundle_id: bundleId } = (await Bun.file(config).json()) as { bundle_id: string };
 
-/** Paired iPhones, the ones reachable right now (by cable or on the network) first. */
-async function pairedIPhones(): Promise<Device[]> {
+/** Paired devices of a type (`iPhone`, `appleWatch`), the ones reachable right now (by cable or on the network) first. */
+async function paired(type: string): Promise<Device[]> {
   const output = `${mkdtempSync(`${tmpdir()}/paigram-devices-`)}/devices.json`;
   await $`xcrun devicectl list devices --json-output ${output}`.quiet();
   const { result } = await Bun.file(output).json();
   return result.devices
-    .filter((d: any) => d.hardwareProperties.deviceType === "iPhone" && d.connectionProperties.pairingState === "paired")
+    .filter((d: any) => d.hardwareProperties.deviceType === type && d.connectionProperties.pairingState === "paired")
     .sort((a: any, b: any) => Number(b.connectionProperties.transportType != null) - Number(a.connectionProperties.transportType != null))
     .map((d: any) => ({ name: d.deviceProperties.name, udid: d.hardwareProperties.udid }));
 }
 
 async function pickDevice(): Promise<Device> {
-  const device = (await pairedIPhones()).find((d) => !wanted || d.name === wanted || d.udid === wanted);
+  const device = (await paired("iPhone")).find((d) => !wanted || d.name === wanted || d.udid === wanted);
   if (device) return device;
   throw new DeviceError(wanted ? `no paired iPhone named ${wanted}` : "no iPhone is paired with this Mac: connect it by cable once and tap Trust");
 }
 
-/** Registers the iPhone on the account when it is new there; Ad Hoc profiles only install on registered devices. */
+/** Registers a device on the account when it is new there; Ad Hoc profiles only install on registered devices. */
 async function ensureRegistered(device: Device): Promise<boolean> {
   if ((await ascGet(`/devices?filter[udid]=${device.udid}`)).data.length) return false;
   await ascPost("/devices", { data: { type: "devices", attributes: { name: device.name, udid: device.udid, platform: "IOS" } } });
@@ -83,7 +84,19 @@ async function copyApp(device: Device, app: string): Promise<boolean> {
   return false;
 }
 
-async function install(device: Device) {
+/** The watch app goes straight onto the watch; without Developer Mode there it is left to the iPhone's Watch app. */
+async function installWatch(watch: Device, app: string) {
+  const watchApp = `${app}/Watch/tgwatch Watch App.app`;
+  if (!(await Bun.file(`${watchApp}/Info.plist`).exists())) return console.log("the build has no watch app");
+  if (!(await covers(`${watchApp}/embedded.mobileprovision`, watch))) return console.log(`the watch app is not signed for ${watch.name}: run without --no-build`);
+  if (await copyApp(watch, watchApp)) return console.log(`watch app installed on ${watch.name}`);
+  console.log(
+    `could not install on ${watch.name}: turn on Developer Mode there (Settings > Privacy & Security), ` +
+      `or install it from the iPhone's Watch app > Available Apps`,
+  );
+}
+
+async function install(device: Device, watch: Device | undefined) {
   const dir = mkdtempSync(`${tmpdir()}/paigram-device-`);
   await $`unzip -q ${root}bazel-bin/Telegram/Telegram.ipa -d ${dir}`;
   const app = `${dir}/Payload/Telegram.app`;
@@ -94,13 +107,17 @@ async function install(device: Device) {
   if (!(await copyApp(device, app))) throw new DeviceError(`install on ${device.name} failed`);
   const launched = await $`xcrun devicectl device process launch --device ${device.udid} --terminate-existing ${bundleId}`.nothrow().quiet();
   console.log(launched.exitCode === 0 ? `Paigram running on ${device.name}` : `Paigram installed on ${device.name}; it is locked, so open it there`);
+  if (watch) await installWatch(watch, app);
 }
 
 const device = await pickDevice();
+const [watch] = await paired("appleWatch");
 if (!skipBuild) {
   await precheck();
-  const registered = await ensureRegistered(device);
-  if (registered || !(await covers(`${adHocCodesigningPath}/profiles/Telegram.mobileprovision`, device))) await provision("adHoc");
-  await releaseBuild(adHocCodesigningPath, buildNumber, false);
+  const registered = (await Promise.all([device, ...(watch ? [watch] : [])].map(ensureRegistered))).some(Boolean);
+  const profiles = `${adHocCodesigningPath}/profiles`;
+  const stale = !(await covers(`${profiles}/Telegram.mobileprovision`, device)) || (watch !== undefined && !(await covers(`${profiles}/WatchApp.mobileprovision`, watch)));
+  if (registered || stale) await provision("adHoc");
+  await releaseBuild(adHocCodesigningPath, buildNumber, watch !== undefined);
 }
-await install(device);
+await install(device, watch);

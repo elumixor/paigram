@@ -3,8 +3,7 @@
  * and the watch app registered with their capabilities, and a fresh provisioning profile for each,
  * written under the names Telegram's build expects. App Store profiles go to
  * `build-input/paigram-codesigning/profiles/` for TestFlight; Ad Hoc ones, which install on the
- * registered iPhones directly, go to `build-input/paigram-codesigning-adhoc/profiles/` and leave the
- * watch app out. Both are signed with the Distribution certificate, so push stays on production APNs.
+ * registered iPhones and Apple Watches directly, go to `build-input/paigram-codesigning-adhoc/profiles/`. Both are signed with the Distribution certificate, so push stays on production APNs.
  * App groups cannot be attached through the API, so each extension's profile is checked for the group
  * and the portal link is printed when it is missing.
  * `bun run scripts/provision.ts` runs it alone; `bun run testflight` and `bun run device` run it first.
@@ -21,7 +20,7 @@ const appGroup = `group.${bundleId}`;
 const communication = "com.apple.developer.usernotifications.communication";
 
 /** Bundle id suffix, the profile file name Telegram's build expects (BuildConfiguration.py), the capabilities. */
-const targets: { suffix: string; file: string; name: string; capabilities: string[]; group: boolean; watch?: boolean }[] = [
+const targets: { suffix: string; file: string; name: string; capabilities: string[]; group: boolean }[] = [
   { suffix: "", file: "Telegram", name: "Paigram", capabilities: ["PUSH_NOTIFICATIONS", "APP_GROUPS", ...(siri ? ["SIRIKIT"] : [])], group: true },
   { suffix: ".Share", file: "Share", name: "Paigram Share", capabilities: ["APP_GROUPS"], group: true },
   { suffix: ".NotificationContent", file: "NotificationContent", name: "Paigram Notification Content", capabilities: ["APP_GROUPS"], group: true },
@@ -29,8 +28,8 @@ const targets: { suffix: string; file: string; name: string; capabilities: strin
   { suffix: ".SiriIntents", file: "Intents", name: "Paigram Intents", capabilities: ["APP_GROUPS"], group: true },
   { suffix: ".Widget", file: "Widget", name: "Paigram Widget", capabilities: ["APP_GROUPS"], group: true },
   { suffix: ".BroadcastUpload", file: "BroadcastUpload", name: "Paigram Broadcast Upload", capabilities: ["APP_GROUPS"], group: true },
-  { suffix: ".watchkitapp", file: "WatchApp", name: "Paigram Watch", capabilities: [], group: false, watch: true },
-  { suffix: ".watchkitapp.widget", file: "WatchWidget", name: "Paigram Watch Complications", capabilities: [], group: false, watch: true },
+  { suffix: ".watchkitapp", file: "WatchApp", name: "Paigram Watch", capabilities: [], group: false },
+  { suffix: ".watchkitapp.widget", file: "WatchWidget", name: "Paigram Watch Complications", capabilities: [], group: false },
 ];
 
 async function ensureBundleId(identifier: string, name: string): Promise<any> {
@@ -67,10 +66,10 @@ const kinds = {
   adHoc: { label: "Ad Hoc", type: "IOS_APP_ADHOC", dir: adHocCodesigningPath },
 } as const;
 
-/** Ad Hoc profiles carry every enabled iPhone and iPad on the account: those are the devices they install on. */
+/** Ad Hoc profiles carry every enabled iPhone, iPad and Apple Watch on the account: those are the devices they install on. */
 async function iosDevices(): Promise<{ type: "devices"; id: string }[]> {
   return (await ascGet("/devices?filter[platform]=IOS&filter[status]=ENABLED&limit=200")).data
-    .filter((d: any) => d.attributes.deviceClass === "IPHONE" || d.attributes.deviceClass === "IPAD")
+    .filter((d: any) => ["IPHONE", "IPAD", "APPLE_WATCH"].includes(d.attributes.deviceClass))
     .map((d: any) => ({ type: "devices", id: d.id }));
 }
 
@@ -110,7 +109,7 @@ export async function provision(kind: ProfileKind = "appStore") {
   const devices = kind === "adHoc" ? await iosDevices() : [];
   const missingGroup: string[] = [];
   let missingCommunication = false;
-  for (const target of targets.filter((t) => kind === "appStore" || !t.watch)) {
+  for (const target of targets) {
     const identifier = bundleId + target.suffix;
     const bundle = await ensureBundleId(identifier, target.name);
     await ensureCapabilities(bundle, target.capabilities);
