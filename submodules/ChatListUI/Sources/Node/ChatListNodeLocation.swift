@@ -415,9 +415,21 @@ public func chatListViewForLocation(chatListLocation: ChatListControllerLocation
                     mediaDraftContentType: nil
                 ))
             }
-            // The list runs in the order given, not by index: the pai bot's topics go by the index given them above.
+            // The list runs in the order given, not by index: the pai bot's topics go by the index given them above,
+            // top row first like `view.items` (pinned, then the highest timestamp), as the list is reversed below.
             if isPaiBot {
-                items.sort(by: { $0.index < $1.index })
+                items.sort(by: { lhs, rhs in
+                    guard case let .forum(lhsPinned, lhsTimestamp, lhsThreadId, _, _) = lhs.index, case let .forum(rhsPinned, rhsTimestamp, rhsThreadId, _, _) = rhs.index else {
+                        return false
+                    }
+                    if lhsPinned != rhsPinned {
+                        return lhsPinned < rhsPinned
+                    }
+                    if lhsTimestamp != rhsTimestamp {
+                        return lhsTimestamp > rhsTimestamp
+                    }
+                    return lhsThreadId > rhsThreadId
+                })
             }
             
             let list = EngineChatList(
