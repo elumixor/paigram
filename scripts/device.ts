@@ -91,7 +91,7 @@ async function installWatch(watch: Device, app: string) {
   if (!(await covers(`${watchApp}/embedded.mobileprovision`, watch))) return console.log(`the watch app is not signed for ${watch.name}: run without --no-build`);
   if (await copyApp(watch, watchApp)) return console.log(`watch app installed on ${watch.name}`);
   console.log(
-    `could not install on ${watch.name}: turn on Developer Mode there (Settings > Privacy & Security), ` +
+    `could not install on ${watch.name}: unlock it, with Developer Mode on (Settings > Privacy & Security), ` +
       `or install it from the iPhone's Watch app > Available Apps`,
   );
 }
