@@ -1,11 +1,20 @@
 import SwiftUI
 import WidgetKit
 
-/// Usage complications: the window that runs out first as a gauge, with today's spend and what waits on the
-/// user in the larger families. Reads what the watch app last stored (`PaiVault`) and, when that is stale and
-/// the box is known, asks the box itself.
+/// Pai on the watch face and in the Smart Stack: usage, the asks waiting on the user, and the agents at work.
+/// Each reads what the watch app last stored (`PaiVault`) and, when that is stale and the box is known, asks
+/// the box itself.
 @main
-struct PaiComplications: Widget {
+struct PaiComplications: WidgetBundle {
+    var body: some Widget {
+        PaiUsageComplication()
+        PaiAsksComplication()
+        PaiAgentsComplication()
+    }
+}
+
+/// The window that runs out first as a gauge, with today's spend and what waits on the user in the larger families.
+struct PaiUsageComplication: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "PaiUsage", provider: PaiComplicationProvider()) { entry in
             PaiComplicationView(entry: entry)
@@ -15,6 +24,34 @@ struct PaiComplications: Widget {
         .configurationDisplayName("Pai usage")
         .description("Plan usage, today's spend and waiting questions.")
         .supportedFamilies([.accessoryCircular, .accessoryCorner, .accessoryRectangular, .accessoryInline])
+    }
+}
+
+/// The oldest ask and how many wait; a tap opens its agent.
+struct PaiAsksComplication: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: "PaiAsks", provider: PaiComplicationProvider()) { entry in
+            PaiAsksView(entry: entry)
+                .containerBackground(.clear, for: .widget)
+                .widgetURL(entry.glance?.oldestNeed?.agent.map(PaiGlanceLink.agent) ?? PaiGlanceLink.usage)
+        }
+        .configurationDisplayName("Pai asks")
+        .description("Questions waiting on you.")
+        .supportedFamilies([.accessoryCircular, .accessoryCorner, .accessoryRectangular, .accessoryInline])
+    }
+}
+
+/// The agents at work and what each is on.
+struct PaiAgentsComplication: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: "PaiAgents", provider: PaiComplicationProvider()) { entry in
+            PaiAgentsView(entry: entry)
+                .containerBackground(.clear, for: .widget)
+                .widgetURL(PaiGlanceLink.usage)
+        }
+        .configurationDisplayName("Pai agents")
+        .description("Who is working and on what.")
+        .supportedFamilies([.accessoryCircular, .accessoryRectangular, .accessoryInline])
     }
 }
 
@@ -125,6 +162,97 @@ struct PaiComplicationView: View {
             .labelStyle(PaiCompactLabel())
         }
         .font(.system(size: 12).monospacedDigit())
+    }
+}
+
+struct PaiAsksView: View {
+    let entry: PaiComplicationEntry
+    @Environment(\.widgetFamily) private var family
+
+    var body: some View {
+        let count = entry.glance?.needsCount ?? 0
+        let need = entry.glance?.oldestNeed
+        switch family {
+        case .accessoryCircular:
+            ZStack {
+                AccessoryWidgetBackground()
+                VStack(spacing: 0) {
+                    Image(systemName: count > 0 ? "questionmark.bubble.fill" : "checkmark.bubble")
+                        .font(.system(size: 14))
+                    Text("\(count)").font(.system(size: 16, weight: .semibold).monospacedDigit())
+                }
+            }
+        case .accessoryCorner:
+            Image(systemName: count > 0 ? "questionmark.bubble.fill" : "checkmark.bubble")
+                .font(.system(size: 20))
+                .widgetLabel { Text(count > 0 ? "\(count) waiting" : "Nothing waiting") }
+        case .accessoryInline:
+            if let need {
+                Text("\(count)? \(need.from): \(need.plainQuestion)")
+            } else {
+                Text(entry.glance == nil ? "Pai" : "No asks")
+            }
+        default:
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 4) {
+                    Image(systemName: "questionmark.bubble.fill")
+                    Text(count > 0 ? "\(count) waiting" : "Nothing waiting").font(.system(size: 13, weight: .semibold))
+                    Spacer(minLength: 0)
+                    if let need { Text(need.createdAt, style: .relative).font(.system(size: 11)).foregroundStyle(.secondary) }
+                }
+                if let need {
+                    Text("\(need.from): \(need.plainQuestion)").font(.system(size: 13)).lineLimit(2)
+                } else if entry.glance == nil {
+                    Text("Open Paigram on iPhone").font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+struct PaiAgentsView: View {
+    let entry: PaiComplicationEntry
+    @Environment(\.widgetFamily) private var family
+
+    var body: some View {
+        let team = entry.glance?.team ?? []
+        let working = team.filter(\.working)
+        let running = max(working.count, entry.glance?.running ?? 0)
+        switch family {
+        case .accessoryCircular:
+            ZStack {
+                AccessoryWidgetBackground()
+                VStack(spacing: 0) {
+                    Image(systemName: "bolt.fill").font(.system(size: 14))
+                    Text("\(running)").font(.system(size: 16, weight: .semibold).monospacedDigit())
+                }
+            }
+        case .accessoryInline:
+            if let first = working.first {
+                Text("\(first.name): \(first.now?.text ?? first.doing ?? "working")")
+            } else {
+                Text(entry.glance == nil ? "Pai" : "\(running) running")
+            }
+        default:
+            // Working agents first; when none work, the ones whose plan has a step under way.
+            let shown = Array((working + team.filter { !$0.working && $0.now != nil }).prefix(2))
+            VStack(alignment: .leading, spacing: 1) {
+                if shown.isEmpty {
+                    Label(entry.glance == nil ? "Open Paigram on iPhone" : "\(running) running", systemImage: "bolt.fill")
+                        .font(.system(size: 13))
+                }
+                ForEach(shown) { member in
+                    HStack(spacing: 3) {
+                        Image(systemName: member.working ? "bolt.fill" : "arrow.right.circle")
+                            .font(.system(size: 10))
+                        Text(member.name).font(.system(size: 13, weight: .semibold))
+                    }
+                    Text(member.now?.text ?? member.doing ?? "").font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(shown.count == 1 ? 2 : 1)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 }
 

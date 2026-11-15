@@ -38,10 +38,9 @@ struct TgwatchApp: App {
 
     var body: some Scene {
         WindowGroup {
-            accountContent
-                .sheet(isPresented: $pai.presented) {
-                    NavigationStack { PaiGlanceView() }
-                }
+            // Pai's dashboard is the app; Telegram's chats and sign-in open over it.
+            PaiHomeView()
+                .sheet(isPresented: $pai.telegramPresented) { accountContent }
                 .onOpenURL { PaiWatch.shared.open($0) }
         }
     }

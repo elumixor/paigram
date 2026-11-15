@@ -42,7 +42,8 @@ struct ChatListView: View {
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         Button {
-                            PaiWatch.shared.presented = true
+                            // Back to Pai's dashboard, which the chats open over.
+                            PaiWatch.shared.telegramPresented = false
                         } label: {
                             Image(systemName: "gauge.with.dots.needle.67percent")
                         }

@@ -3,7 +3,7 @@ import Observation
 import WatchConnectivity
 import WidgetKit
 
-/// Pai on the wrist: the usage glance and the questions waiting on the user. The phone hands over the box's
+/// Pai on the wrist: the usage glance, the questions waiting on the user and the agents with their plans. The phone hands over the box's
 /// address and token (and its latest glance) through WatchConnectivity; after that the watch asks the box
 /// itself, and goes through the phone only when the box cannot be reached.
 @Observable
@@ -16,8 +16,10 @@ final class PaiWatch: NSObject, WCSessionDelegate {
     private(set) var failure: String?
     /// Needs whose answer is on its way.
     private(set) var answering: Set<String> = []
-    /// The glance sheet, opened from the chat list or a complication.
-    var presented = false
+    /// The dashboard's navigation: an agent or an ask a complication opened.
+    var path: [PaiRoute] = []
+    /// Telegram's chats (and its sign-in), over the dashboard.
+    var telegramPresented = false
 
     private var started = false
 
@@ -32,8 +34,12 @@ final class PaiWatch: NSObject, WCSessionDelegate {
 
     /// The `paigram://` links complications open.
     func open(_ url: URL) {
-        guard url.scheme == PaiGlanceLink.scheme else { return }
-        presented = true
+        guard let target = PaiGlanceLink.parse(url) else { return }
+        telegramPresented = false
+        switch target {
+        case let .agent(slug): path = [.agent(slug)]
+        case .usage: path = []
+        }
         refresh()
     }
 
@@ -162,6 +168,6 @@ extension PaiGlance {
     /// The glance with one need answered.
     func removing(need id: String) -> PaiGlance {
         let left = needs.filter { $0.id != id }
-        return PaiGlance(at: at, todayUsd: todayUsd, usdPerHour: usdPerHour, windows: windows, agents: agents, running: running, needsCount: max(0, needsCount - (needs.count - left.count)), needs: left)
+        return with(needs: left, needsCount: max(0, needsCount - (needs.count - left.count)))
     }
 }

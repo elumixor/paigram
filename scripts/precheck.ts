@@ -2,7 +2,7 @@
  * `bun run precheck`: the compile errors a release build would only report after an hour of Bazel,
  * found in seconds. Paigram's own Swift for the two targets with the oldest deployment floors — the
  * iOS widget (iOS 15, where the shared `PaiGlance` module and `PaiUsageWidget.swift` have to compile)
- * and the watch app's Pai files (watchOS 26) — is type-checked straight with `swiftc` against the
+ * and the watch app's Pai files and complications (watchOS 26) — is type-checked straight with `swiftc` against the
  * installed SDKs, which is where availability mistakes (`'accessoryCircular' is only available in
  * iOS 16.0 or newer`) surface. The rest of the app is upstream Telegram and is not checked here.
  * `bun run testflight` and `bun run device` run it before provisioning; the GitHub workflow runs it
@@ -45,6 +45,7 @@ export async function precheck() {
     await check("widget (iOS 15)", ["-typecheck", "-sdk", iphoneos, "-target", iosTarget, "-I", modules, "-parse-as-library", `${root}Telegram/WidgetKitWidget/PaiUsageWidget.swift`]);
     const watchos = await sdk("watchos");
     await check("watch complications (watchOS 26)", ["-typecheck", "-sdk", watchos, "-target", watchTarget, "-parse-as-library", ...glob("Telegram/WatchApp/PaiComplications/*.swift"), ...glob("Telegram/WatchApp/PaiShared/*.swift"), ...watchGlanceSources]);
+    await check("watch Pai screens (watchOS 26)", ["-typecheck", "-sdk", watchos, "-target", watchTarget, "-parse-as-library", ...glob("Telegram/WatchApp/tgwatch Watch App/Pai/*.swift"), ...glob("Telegram/WatchApp/PaiShared/*.swift"), ...watchGlanceSources]);
   } finally {
     rmSync(modules, { recursive: true, force: true });
   }
