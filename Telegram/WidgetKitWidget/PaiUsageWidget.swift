@@ -31,28 +31,47 @@ struct PaiUsageWidget: Widget {
 struct PaiGlanceEntry: TimelineEntry {
     let date: Date
     let glance: PaiGlance?
-    let signedIn: Bool
+    let state: State
+
+    enum State {
+        case ready
+        case signedOut
+        /// Signed in, but the box could not be read and nothing is stored yet.
+        case unreachable
+    }
 }
 
 @available(iOS 14.0, *)
 struct PaiGlanceProvider: TimelineProvider {
     func placeholder(in context: Context) -> PaiGlanceEntry {
-        PaiGlanceEntry(date: Date(), glance: .sample, signedIn: true)
+        PaiGlanceEntry(date: Date(), glance: .sample, state: .ready)
     }
 
     func getSnapshot(in context: Context, completion: @escaping (PaiGlanceEntry) -> Void) {
         let store = PaiGlanceStore.appGroup()
         if context.isPreview || store?.config == nil {
-            completion(PaiGlanceEntry(date: Date(), glance: store?.glance ?? .sample, signedIn: true))
+            completion(PaiGlanceEntry(date: Date(), glance: store?.glance ?? .sample, state: .ready))
             return
         }
-        completion(PaiGlanceEntry(date: Date(), glance: store?.glance, signedIn: true))
+        if let glance = store?.glance {
+            completion(PaiGlanceEntry(date: Date(), glance: glance, state: .ready))
+            return
+        }
+        fetch { completion($0) }
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<PaiGlanceEntry>) -> Void) {
-        let refresh = Date().addingTimeInterval(15 * 60)
+        fetch { entry in
+            // Retry soon while there is nothing to show; otherwise every 15 minutes (the app reloads sooner).
+            let minutes: Double = entry.glance == nil && entry.state == .unreachable ? 3 : 15
+            completion(Timeline(entries: [entry], policy: .after(Date().addingTimeInterval(minutes * 60))))
+        }
+    }
+
+    /// Reads the box and stores what it returned; falls back to the stored glance.
+    private func fetch(completion: @escaping (PaiGlanceEntry) -> Void) {
         guard let store = PaiGlanceStore.appGroup(), let source = store.source else {
-            completion(Timeline(entries: [PaiGlanceEntry(date: Date(), glance: nil, signedIn: false)], policy: .after(refresh)))
+            completion(PaiGlanceEntry(date: Date(), glance: nil, state: .signedOut))
             return
         }
         source.glance { result in
@@ -62,7 +81,7 @@ struct PaiGlanceProvider: TimelineProvider {
                 PaiUsageAlerts.post(store.crossings(in: saved))
                 glance = saved
             }
-            completion(Timeline(entries: [PaiGlanceEntry(date: Date(), glance: glance, signedIn: true)], policy: .after(refresh)))
+            completion(PaiGlanceEntry(date: Date(), glance: glance, state: glance == nil ? .unreachable : .ready))
         }
     }
 }
@@ -105,7 +124,7 @@ struct PaiGlanceWidgetView: View {
         } else {
             VStack(spacing: 4) {
                 Image(systemName: "sparkles").font(.title3)
-                Text(entry.signedIn ? "Loading…" : "Sign in to pai in Paigram")
+                Text(entry.state == .signedOut ? "Sign in to pai in Paigram" : "Can't reach pai. Retrying…")
                     .font(.caption)
                     .multilineTextAlignment(.center)
                     .foregroundColor(.secondary)

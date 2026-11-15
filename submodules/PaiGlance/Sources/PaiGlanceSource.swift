@@ -53,10 +53,13 @@ public final class PaiGlanceLiveSource: PaiGlanceSource {
     }
 
     public func glance(completion: @escaping (Result<PaiGlance, Error>) -> Void) {
-        // The summary carries only the oldest need; the full list comes from /needs, read alongside.
+        // The summary carries only the oldest need; the full list comes from /needs, and the agents with their
+        // plans from /agents and /agents/<slug>/plan, all read alongside. `self` is held strongly on purpose:
+        // callers make a source just for one call, and a weak capture would drop the result with the source.
         let group = DispatchGroup()
         var summary: Data?
         var needs: Data?
+        var team: [PaiGlance.Member] = []
         group.enter()
         get("/usage/summary") { result in
             summary = try? result.get()
@@ -67,15 +70,77 @@ public final class PaiGlanceLiveSource: PaiGlanceSource {
             needs = try? result.get()
             group.leave()
         }
-        group.notify(queue: .global()) { [weak self] in
-            guard let self else { return }
+        group.enter()
+        self.team { members in
+            team = members
+            group.leave()
+        }
+        group.notify(queue: .global()) {
             if let summary, let glance = Self.decodeSummary(summary, needs: needs) {
-                completion(.success(glance))
+                completion(.success(glance.with(team: team)))
                 return
             }
-            self.compose(completion: completion)
+            self.compose { result in
+                completion(result.map { $0.with(team: team) })
+            }
         }
     }
+
+    /// Every agent and its plan; empty when the box cannot be read.
+    public func team(completion: @escaping ([PaiGlance.Member]) -> Void) {
+        get("/agents") { result in
+            guard let data = try? result.get(), let list = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+                completion([])
+                return
+            }
+            let agents = list.filter { $0["slug"] is String && $0["closedAt"] as? Double == nil && $0["trashedAt"] as? Double == nil }
+            let group = DispatchGroup()
+            let lock = NSLock()
+            var plans: [String: [PaiGlance.Member.Step]] = [:]
+            for agent in agents {
+                guard let slug = agent["slug"] as? String else { continue }
+                group.enter()
+                self.get("/agents/\(slug)/plan") { result in
+                    let steps = (try? result.get()).flatMap(Self.steps) ?? []
+                    lock.lock()
+                    plans[slug] = steps
+                    lock.unlock()
+                    group.leave()
+                }
+            }
+            group.notify(queue: .global()) {
+                completion(agents.compactMap { Self.member($0, steps: plans[$0["slug"] as? String ?? ""] ?? []) })
+            }
+        }
+    }
+
+    static func member(_ raw: [String: Any], steps: [PaiGlance.Member.Step]) -> PaiGlance.Member? {
+        guard let slug = raw["slug"] as? String else { return nil }
+        let doing = (raw["doing"] as? String).map { String($0.prefix(Self.textLimit)) }
+        return PaiGlance.Member(
+            slug: slug,
+            name: raw["name"] as? String ?? slug,
+            role: raw["role"] as? String,
+            status: raw["status"] as? String ?? "idle",
+            doing: doing,
+            depth: raw["depth"] as? Int ?? 1,
+            steps: steps
+        )
+    }
+
+    /// The plan's steps a small screen shows: the open ones (now, then next) and the last two done.
+    static func steps(_ data: Data) -> [PaiGlance.Member.Step]? {
+        guard let raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let list = raw["steps"] as? [[String: Any]] else { return nil }
+        let all = list.compactMap { step -> PaiGlance.Member.Step? in
+            guard let text = step["text"] as? String, let state = step["state"] as? String else { return nil }
+            return PaiGlance.Member.Step(state: state, text: String(text.prefix(textLimit)), eta: step["eta"] as? String)
+        }
+        let open = all.filter { $0.state == "now" } + all.filter { $0.state != "now" && $0.state != "done" }
+        return Array(open.prefix(5)) + Array(all.filter { $0.state == "done" }.prefix(2))
+    }
+
+    /// Longest text a glance keeps per line: it travels to the watch, whose context is small.
+    static let textLimit = 220
 
     public func answer(need id: String, text: String, completion: @escaping (Result<Void, Error>) -> Void) {
         guard let url = URL(string: config.baseURL + "/needs/answer") else {
@@ -223,7 +288,7 @@ public final class PaiGlanceLiveSource: PaiGlanceSource {
     // MARK: - HTTP
 
     private func request(_ url: URL) -> URLRequest {
-        var request = URLRequest(url: url, timeoutInterval: 15)
+        var request = URLRequest(url: url, timeoutInterval: 10)
         request.setValue("Bearer \(config.token)", forHTTPHeaderField: "Authorization")
         return request
     }
