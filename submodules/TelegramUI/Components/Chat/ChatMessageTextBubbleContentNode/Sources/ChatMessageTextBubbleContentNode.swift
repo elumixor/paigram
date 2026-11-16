@@ -465,7 +465,12 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
                     rawText = (rawText as NSString).substring(to: trailer.textEnd)
                     messageEntities = messageEntities?.filter { $0.range.upperBound <= trailer.textEnd }
                     // An ask drawing its options as rows does not also list them in its text.
-                    if trailer.meta.kind == "ask", let rows = PaiAsk.rows(item.message) {
+                    if trailer.meta.kind == "ask", PaiAsk.card(item.message) != nil {
+                        // A card drawing all its questions keeps only the line saying where it comes from.
+                        let (heading, headingEntities) = PaiAsk.cardHeading(text: rawText, entities: messageEntities ?? [])
+                        rawText = heading
+                        messageEntities = headingEntities
+                    } else if trailer.meta.kind == "ask", let rows = PaiAsk.rows(item.message) {
                         let (strippedText, strippedEntities) = PaiAsk.stripOptionLines(text: rawText, entities: messageEntities ?? [], options: rows.map { $0.label })
                         rawText = strippedText
                         messageEntities = strippedEntities

@@ -16,6 +16,15 @@ public enum PaiAsk {
     }
 
     private static let optionData = try! NSRegularExpression(pattern: "^([km]):(\\d+):(\\d+)$")
+    private static let askData = try! NSRegularExpression(pattern: "^[kmM]:(\\d+)(:\\d+)?$")
+
+    /// Whether a keyboard button belongs to the ask: an option, Done or Skip (`k:`, `m:`, `M:`), not a link.
+    public static func isAskButton(_ button: ReplyMarkupButton, askId: Int) -> Bool {
+        guard case let .callback(_, data) = button.action, let string = String(data: data.makeData(), encoding: .utf8) else { return false }
+        let ns = string as NSString
+        guard let match = askData.firstMatch(in: string, range: NSRange(location: 0, length: ns.length)) else { return false }
+        return Int(ns.substring(with: match.range(at: 1))) == askId
+    }
 
     private static func option(_ button: ReplyMarkupButton) -> (multi: Bool, askId: Int, index: Int, data: MemoryBuffer)? {
         guard case let .callback(_, data) = button.action, let string = String(data: data.makeData(), encoding: .utf8) else { return nil }
@@ -69,6 +78,94 @@ public enum PaiAsk {
                 ticked: ticked
             )
         }
+    }
+
+    // MARK: A card with several questions
+
+    /// An open ask holding several questions, drawn whole: every question with its options, answered together.
+    public struct Card {
+        public let askId: Int
+        public let questions: [PaiCardQuestion]
+    }
+
+    /// The card for an ask message with several questions, nil when it has one, is answered (pai edits the message and
+    /// drops its buttons) or the phone is not signed in to pai (the bot's step-by-step buttons stay then).
+    public static func card(_ message: Message) -> Card? {
+        guard let meta = PaiTrailer.find(message)?.meta, meta.kind == "ask", meta.answer == nil, let askId = meta.askId,
+              let questions = meta.questions, questions.count > 1, questions.allSatisfy({ !$0.question.isEmpty }),
+              let markup = message.attributes.first(where: { $0 is ReplyMarkupMessageAttribute }) as? ReplyMarkupMessageAttribute,
+              markup.flags.contains(.inline),
+              markup.rows.contains(where: { $0.buttons.contains(where: { isAskButton($0, askId: askId) }) }),
+              PaiAuth.isSignedIn else { return nil }
+        return Card(askId: askId, questions: questions)
+    }
+
+    /// What is picked and typed on a card not sent yet; kept by ask, so it survives the cell being reused.
+    public struct Draft {
+        public var picked: [Int: Set<Int>] = [:]
+        /// Questions answered in words, and the words; typed words win over picks.
+        public var typed: [Int: String] = [:]
+        public var sending = false
+        public var sent = false
+        public var error: String?
+
+        /// The answer to question `index`, empty when it has none.
+        public func answer(_ question: PaiCardQuestion, _ index: Int) -> String {
+            if let words = typed[index]?.trimmingCharacters(in: .whitespacesAndNewlines), !words.isEmpty, question.freeText || question.options.isEmpty {
+                return words
+            }
+            let picks = picked[index] ?? []
+            return question.options.indices.filter { picks.contains($0) }.map { question.options[$0] }.joined(separator: ", ")
+        }
+
+        public func answered(_ card: Card) -> Int {
+            card.questions.indices.filter { !answer(card.questions[$0], $0).isEmpty }.count
+        }
+
+        /// The card's answer as pai takes it: a JSON object, question → answer; one left blank stays open.
+        public func text(_ card: Card) -> String? {
+            var answers: [String: String] = [:]
+            for (i, question) in card.questions.enumerated() {
+                answers[question.question] = answer(question, i)
+            }
+            guard let data = try? JSONSerialization.data(withJSONObject: answers, options: [.sortedKeys]) else { return nil }
+            return String(data: data, encoding: .utf8)
+        }
+    }
+
+    private static let draftLock = NSLock()
+    private static var drafts: [Int: Draft] = [:]
+
+    /// Read from the layout pass, which runs off the main thread.
+    public static func draft(_ askId: Int) -> Draft {
+        draftLock.lock()
+        defer { draftLock.unlock() }
+        return drafts[askId] ?? Draft()
+    }
+
+    public static func updateDraft(_ askId: Int, _ change: (inout Draft) -> Void) {
+        draftLock.lock()
+        defer { draftLock.unlock() }
+        var draft = drafts[askId] ?? Draft()
+        change(&draft)
+        drafts[askId] = draft
+    }
+
+    /// The first line of a several-question card's text (where it comes from), without the step counter.
+    public static func cardHeading(text: String, entities: [MessageTextEntity]) -> (String, [MessageTextEntity]) {
+        let ns = text as NSString
+        var end = ns.range(of: "\n").location
+        if end == NSNotFound { end = ns.length }
+        var heading = ns.substring(to: end)
+        if let step = heading.range(of: #" · \d+/\d+$"#, options: .regularExpression) {
+            heading.removeSubrange(step)
+        }
+        let length = (heading as NSString).length
+        let kept = entities.compactMap { entity -> MessageTextEntity? in
+            let upper = min(entity.range.upperBound, length)
+            return entity.range.lowerBound < upper ? MessageTextEntity(range: entity.range.lowerBound ..< upper, type: entity.type) : nil
+        }
+        return (heading, kept)
     }
 
     /// "☑ Option" → ("Option", ticked).

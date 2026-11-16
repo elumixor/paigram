@@ -425,8 +425,9 @@ private func contentNodeMessagesAndClassesForItem(_ item: ChatMessageItem) -> ([
             }
         }
         
-        // An ask whose options carry pictures, lines or pages: its options as rows under the question.
-        if paiTrailer?.meta.kind == "ask", PaiAsk.rows(message) != nil {
+        // An ask whose options carry pictures, lines or pages: its options as rows under the question. One with several
+        // questions: all of them, answered together.
+        if paiTrailer?.meta.kind == "ask", PaiAsk.card(message) != nil || PaiAsk.rows(message) != nil {
             result.append((message, ChatMessagePaiAskBubbleContentNode.self, itemAttributes, BubbleItemAttributes(isAttachment: false, neighborType: .text, neighborSpacing: .default)))
         }
         
@@ -2184,6 +2185,15 @@ public class ChatMessageBubbleItemNode: ChatMessageItemView, ChatMessagePreviewI
                         if !updatedButtons.isEmpty {
                             updatedRows.append(ReplyMarkupRow(buttons: updatedButtons))
                         }
+                    }
+                    if !updatedRows.isEmpty {
+                        replyMarkup = ReplyMarkupMessageAttribute(rows: updatedRows, flags: attribute.flags, placeholder: attribute.placeholder)
+                    }
+                } else if let card = PaiAsk.card(firstMessage) {
+                    // The card draws its questions and its Send; only links stay as buttons.
+                    let updatedRows = attribute.rows.compactMap { row -> ReplyMarkupRow? in
+                        let buttons = row.buttons.filter { !PaiAsk.isAskButton($0, askId: card.askId) }
+                        return buttons.isEmpty ? nil : ReplyMarkupRow(buttons: buttons)
                     }
                     if !updatedRows.isEmpty {
                         replyMarkup = ReplyMarkupMessageAttribute(rows: updatedRows, flags: attribute.flags, placeholder: attribute.placeholder)

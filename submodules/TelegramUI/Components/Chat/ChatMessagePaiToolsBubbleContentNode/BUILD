@@ -16,6 +16,7 @@ swift_library(
         "//submodules/Postbox",
         "//submodules/TelegramPresentationData",
         "//submodules/PaiUI:PaiUI",
+        "//submodules/PromptUI",
         "//submodules/TelegramUI/Components/Chat/ChatMessageBubbleContentNode",
         "//submodules/TelegramUI/Components/Chat/ChatMessageItemCommon",
         "//submodules/TelegramUI/Components/ChatControllerInteraction",
