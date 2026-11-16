@@ -299,6 +299,7 @@ private func canContainHoles(_ peerIdAndNamespace: PeerIdAndNamespace, input: Me
     case let .automatic(threadId, _):
         // A thread holds whatever holes its own table has, as an external thread does: Paigram keeps a `Box` hole in
         // each agent's topic of the pai bot for pai's log from before the topic, which no peer's own history has.
+        // (Reworded once to change this file's Bazel cache key: a disk-cache entry held a pre-exemption object.)
         if threadId != nil {
             return true
         }
