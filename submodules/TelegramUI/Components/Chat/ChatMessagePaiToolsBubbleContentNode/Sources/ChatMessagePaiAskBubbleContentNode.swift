@@ -42,9 +42,15 @@ private func checkImage(ticked: Bool, color: UIColor) -> UIImage? {
     symbolImage(ticked ? "checkmark.circle.fill" : "circle", color: ticked ? color : color.withAlphaComponent(0.5))
 }
 
+/// Drawn into a bitmap: a layer-backed image node shows a symbol's raw template, black, not its tint.
 private func symbolImage(_ name: String, color: UIColor) -> UIImage? {
     let configuration = UIImage.SymbolConfiguration(pointSize: checkSize - 2.0, weight: .regular)
-    return UIImage(systemName: name, withConfiguration: configuration)?.withTintColor(color, renderingMode: .alwaysOriginal)
+    guard let symbol = UIImage(systemName: name, withConfiguration: configuration)?.withTintColor(color, renderingMode: .alwaysOriginal) else { return nil }
+    let format = UIGraphicsImageRendererFormat()
+    format.scale = UIScreenScale
+    return UIGraphicsImageRenderer(size: symbol.size, format: format).image { _ in
+        symbol.draw(at: .zero)
+    }
 }
 
 /// An ask's options drawn as rows when they carry details: a picture, the label, a line under it, the page's domain.
