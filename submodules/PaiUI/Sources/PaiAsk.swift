@@ -91,6 +91,8 @@ public enum PaiAsk {
     /// The card for an ask message with several questions, nil when it has one, is answered (pai edits the message and
     /// drops its buttons) or the phone is not signed in to pai (the bot's step-by-step buttons stay then).
     public static func card(_ message: Message) -> Card? {
+        // Sending goes through `PaiClient`, which needs iOS 16.
+        guard #available(iOS 16.0, *) else { return nil }
         guard let meta = PaiTrailer.find(message)?.meta, meta.kind == "ask", meta.answer == nil, let askId = meta.askId,
               let questions = meta.questions, questions.count > 1, questions.allSatisfy({ !$0.question.isEmpty }),
               let markup = message.attributes.first(where: { $0 is ReplyMarkupMessageAttribute }) as? ReplyMarkupMessageAttribute,

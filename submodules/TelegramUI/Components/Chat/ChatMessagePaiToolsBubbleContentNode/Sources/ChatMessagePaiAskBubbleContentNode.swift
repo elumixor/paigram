@@ -82,7 +82,7 @@ public final class ChatMessagePaiAskBubbleContentNode: ChatMessageBubbleContentN
 
     private enum Tap {
         /// The option's own button callback.
-        case callback(MemoryBuffer)
+        case callback(EngineMemoryBuffer)
         case pick(card: PaiAsk.Card, question: Int, option: Int)
         case type(card: PaiAsk.Card, question: Int)
         case send(card: PaiAsk.Card)
@@ -379,6 +379,7 @@ public final class ChatMessagePaiAskBubbleContentNode: ChatMessageBubbleContentN
                 draft.error = nil
             }
             refresh()
+            guard #available(iOS 16.0, *) else { return }
             Task { @MainActor in
                 do {
                     try await PaiClient().answer(ask: card.askId, text: text)
