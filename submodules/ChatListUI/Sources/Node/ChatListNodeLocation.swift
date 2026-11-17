@@ -548,7 +548,7 @@ public func chatListViewForLocation(chatListLocation: ChatListControllerLocation
 }
 
 /// Paigram: a chat or topic of the pai bot with decisions waiting on the user counts them as its unread badge.
-func paiReadCounters(_ base: EngineChatList.Item) -> EnginePeerReadCounters {
+func paiReadCounters(_ base: EngineChatList.Item) -> EnginePeerReadCounters? {
     guard let peer = base.renderedPeer.peer, PaiChat.isBot(peer._asPeer()) else {
         return base.readCounters
     }
