@@ -28,6 +28,8 @@ const buildNumber = 1;
 const day = 86_400_000;
 const connectAttempts = 4;
 const connectRetryMs = 3_000;
+const waitRetryMs = 5_000;
+const waitLimitMs = 10 * 60_000;
 
 const skipBuild = process.argv.includes("--no-build");
 const deviceArgument = process.argv.indexOf("--device");
@@ -66,22 +68,60 @@ async function covers(profilePath: string, device: Device): Promise<boolean> {
   return Boolean(profile.ProvisionedDevices?.includes(device.udid)) && new Date(profile.ExpirationDate).getTime() > Date.now() + day;
 }
 
+interface Attempt {
+  readonly ok: boolean;
+  readonly output: string;
+}
+
 /** A Wi-Fi connection that sat idle is often reset on the first try: the tunnel is opened, retrying, before installing. */
-async function connect(device: Device): Promise<boolean> {
+async function connect(device: Device): Promise<Attempt> {
+  let output = "";
   for (let attempt = 0; attempt < connectAttempts; attempt++) {
-    if ((await $`xcrun devicectl device info details --device ${device.udid}`.nothrow().quiet()).exitCode === 0) return true;
+    const result = await $`xcrun devicectl device info details --device ${device.udid}`.nothrow().quiet();
+    if (result.exitCode === 0) return { ok: true, output: "" };
+    output = `${result.stdout}${result.stderr}`;
     await Bun.sleep(connectRetryMs);
   }
-  return false;
+  return { ok: false, output };
 }
 
 /** Wi-Fi can drop in the middle of the copy too: the tunnel is opened again and the copy retried. */
-async function copyApp(device: Device, app: string): Promise<boolean> {
+async function copyApp(device: Device, app: string): Promise<Attempt> {
+  let output = "";
   for (let attempt = 0; attempt < connectAttempts; attempt++) {
-    if ((await $`xcrun devicectl device install app --device ${device.udid} ${app}`.nothrow()).exitCode === 0) return true;
-    if (!(await connect(device))) return false;
+    const result = await $`xcrun devicectl device install app --device ${device.udid} ${app}`.nothrow().quiet();
+    if (result.exitCode === 0) return { ok: true, output: "" };
+    output = `${result.stdout}${result.stderr}`;
+    process.stderr.write(output);
+    const connected = await connect(device);
+    if (!connected.ok) return connected;
   }
-  return false;
+  return { ok: false, output };
+}
+
+type Blocker = "locked" | "unreachable";
+
+function blocker(output: string): Blocker | undefined {
+  if (/DeviceLocked|0xe80000e2|device is locked/i.test(output)) return "locked";
+  if (/not reachable|CoreDevice[^\n]*1011|error 1011|Code=1011/i.test(output)) return "unreachable";
+  return undefined;
+}
+
+/** Repeats a step while the device is locked or out of reach, up to ten minutes, saying once what it waits for. */
+async function waitFor(device: Device, step: () => Promise<Attempt>): Promise<Attempt> {
+  const deadline = Date.now() + waitLimitMs;
+  let announced: Blocker | undefined;
+  for (;;) {
+    const attempt = await step();
+    const reason = attempt.ok ? undefined : blocker(attempt.output);
+    if (!reason) return attempt;
+    if (Date.now() > deadline) {
+      throw new DeviceError(reason === "locked" ? `${device.name} stayed locked: unlock it and Retry` : `${device.name} stayed unreachable: plug it in or join this Mac's Wi-Fi, then Retry`);
+    }
+    if (announced !== reason) console.log(reason === "locked" ? `${device.name} is locked: unlock it, waiting…` : `${device.name} is not reachable: plug it in or unlock it on this Mac's Wi-Fi, waiting…`);
+    announced = reason;
+    await Bun.sleep(waitRetryMs);
+  }
 }
 
 /** The watch app goes straight onto the watch; without Developer Mode there it is left to the iPhone's Watch app. */
@@ -89,7 +129,7 @@ async function installWatch(watch: Device, app: string) {
   const watchApp = `${app}/Watch/tgwatch Watch App.app`;
   if (!(await Bun.file(`${watchApp}/Info.plist`).exists())) return console.log("the build has no watch app");
   if (!(await covers(`${watchApp}/embedded.mobileprovision`, watch))) return console.log(`the watch app is not signed for ${watch.name}: run without --no-build`);
-  if (await copyApp(watch, watchApp)) return console.log(`watch app installed on ${watch.name}`);
+  if ((await copyApp(watch, watchApp)).ok) return console.log(`watch app installed on ${watch.name}`);
   console.log(
     `could not install on ${watch.name}: unlock it, with Developer Mode on (Settings > Privacy & Security), ` +
       `or install it from the iPhone's Watch app > Available Apps`,
@@ -103,8 +143,8 @@ async function install(device: Device, watch: Device | undefined) {
   if (!(await covers(`${app}/embedded.mobileprovision`, device))) {
     throw new DeviceError(`the last build is not signed for ${device.name} (a TestFlight build, or before it was registered): run without --no-build`);
   }
-  if (!(await connect(device))) throw new DeviceError(`${device.name} is not reachable: plug it in, or unlock it on this Mac's Wi-Fi, then run with --no-build`);
-  if (!(await copyApp(device, app))) throw new DeviceError(`install on ${device.name} failed`);
+  if (!(await waitFor(device, () => connect(device))).ok) throw new DeviceError(`${device.name} is not reachable: plug it in, or unlock it on this Mac's Wi-Fi, then run with --no-build`);
+  if (!(await waitFor(device, () => copyApp(device, app))).ok) throw new DeviceError(`install on ${device.name} failed`);
   const launched = await $`xcrun devicectl device process launch --device ${device.udid} --terminate-existing ${bundleId}`.nothrow().quiet();
   console.log(launched.exitCode === 0 ? `Paigram running on ${device.name}` : `Paigram installed on ${device.name}; it is locked, so open it there`);
   if (watch) await installWatch(watch, app);
