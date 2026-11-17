@@ -127,6 +127,7 @@ struct ChatListView: View {
             lastMessageId: row.lastMessageId,
             loader: loader,
             selfUserId: client.me?.id,
+            isPremium: client.me?.isPremium ?? false,
             userNames: client.userNames,
             draftText: row.draftText,
             coalesceUpdates: true

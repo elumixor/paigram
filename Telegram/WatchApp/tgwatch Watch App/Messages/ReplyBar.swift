@@ -3,6 +3,7 @@ import SwiftUI
 struct ReplyBar: View {
     let onAttachTap: () -> Void
     let onSend: (String) -> Void
+    let onVoiceTap: () -> Void
 
     // Circular "+" button and reply-field capsule share a single pill
     // diameter so they line up vertically and visually mirror the
@@ -54,6 +55,17 @@ struct ReplyBar: View {
             .buttonStyle(.plain)
             .layoutPriority(1)
             .accessibilityIdentifier("replyBar")
+
+            Button(action: onVoiceTap) {
+                Image(systemName: "mic.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                    .frame(width: Self.pillHeight, height: Self.pillHeight)
+                    .contentShape(Circle())
+                    .glassEffect(in: Circle())
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 11)
+            .accessibilityIdentifier("replyBarVoice")
         }
     }
 }
@@ -78,7 +90,7 @@ private struct ReplyBarGeometryPreviewHost: View {
                 .padding(.top, 6)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
-            ReplyBar(onAttachTap: {}, onSend: { _ in })
+            ReplyBar(onAttachTap: {}, onSend: { _ in }, onVoiceTap: {})
                 .padding(.horizontal, 4)
                 .padding(.bottom, 19)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)

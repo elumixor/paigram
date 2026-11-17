@@ -37,6 +37,32 @@ protocol ChatHistoryLoader: Sendable {
     func sendSticker(chatId: Int64, remoteFileId: String, emoji: String, width: Int, height: Int) async throws -> Message
     /// Sends the given coordinate as a static location message (`livePeriod` 0).
     func sendLocation(chatId: Int64, latitude: Double, longitude: Double) async throws -> Message
+    /// Asks TDLib to transcribe a voice note. The result arrives later as
+    /// `updateMessageContent` carrying `voiceNote.speechRecognitionResult`.
+    func recognizeSpeech(chatId: Int64, messageId: Int64) async throws
+}
+
+extension ChatHistoryLoader {
+    /// Default for preview/test loaders that don't exercise transcription.
+    func recognizeSpeech(chatId: Int64, messageId: Int64) async throws {}
+}
+
+/// `ok` or `error` reply to `RecognizeSpeech`.
+private struct RecognizeSpeechReply: Decodable {
+    let type: String
+    let code: Int?
+    let message: String?
+
+    enum CodingKeys: String, CodingKey {
+        case type = "@type", code, message
+    }
+}
+
+/// TDLib's `recognizeSpeech` request. TDShim's generated subset doesn't carry
+/// it; `DTO` derives the `@type` ("recognizeSpeech") from the type name.
+private struct RecognizeSpeech: Codable {
+    let chatId: Int64
+    let messageId: Int64
 }
 
 struct TDLibChatHistoryLoader: ChatHistoryLoader {
@@ -218,6 +244,21 @@ struct TDLibChatHistoryLoader: ChatHistoryLoader {
             replyTo: nil,
             topicId: nil
         )
+    }
+
+    func recognizeSpeech(chatId: Int64, messageId: Int64) async throws {
+        let dto = DTO(RecognizeSpeech(chatId: chatId, messageId: messageId), encoder: client.encoder)
+        let data: Data = try await withCheckedThrowingContinuation { continuation in
+            do {
+                try client.send(query: dto) { continuation.resume(returning: $0) }
+            } catch {
+                continuation.resume(throwing: error)
+            }
+        }
+        let reply = try client.decoder.decode(RecognizeSpeechReply.self, from: data)
+        if reply.type == "error" {
+            throw TDError(code: reply.code ?? 0, message: reply.message ?? "")
+        }
     }
 
     func sendLocation(chatId: Int64, latitude: Double, longitude: Double) async throws -> Message {

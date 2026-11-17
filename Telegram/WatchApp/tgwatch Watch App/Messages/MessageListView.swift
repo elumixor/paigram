@@ -17,6 +17,7 @@ struct MessageListView: View {
     @State private var presentedVideoNote: VideoNoteVisual?
     @State private var presentedPoll: PollVoteTarget?
     @State private var showAttachment: Bool = false
+    @State private var showVoiceRecorder: Bool = false
     @State private var stickerPickerStore: StickerPickerStore?
     // True when the user is parked within slop of the bottom edge. Updated only on
     // user-driven scrolls (see .onScrollGeometryChange filter), so it reflects intent
@@ -82,6 +83,19 @@ struct MessageListView: View {
                 currentPoll: { store.poll(forMessageId: target.id) },
                 onVote: { await store.setPollAnswer(messageId: target.id, optionIds: $0) }
             )
+        }
+        .sheet(isPresented: $showVoiceRecorder) {
+            NavigationStack {
+                VoiceRecordView(
+                    onSend: { await store.sendVoiceNote($0) },
+                    onPrepare: {
+                        store.voicePlayback.tearDown()
+                        store.audioPlayback.tearDown()
+                    },
+                    onComplete: { showVoiceRecorder = false },
+                    autoStart: true
+                )
+            }
         }
         .sheet(isPresented: $showAttachment) {
             AttachmentSheet(
@@ -228,7 +242,8 @@ struct MessageListView: View {
                                     onAttachTap: { showAttachment = true },
                                     onSend: { snapshot in
                                         Task { await store.sendText(snapshot) }
-                                    }
+                                    },
+                                    onVoiceTap: { showVoiceRecorder = true }
                                 )
                                 .padding(.top, 8)
                             }

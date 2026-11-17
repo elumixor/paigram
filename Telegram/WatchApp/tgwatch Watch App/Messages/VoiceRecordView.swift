@@ -13,6 +13,8 @@ struct VoiceRecordView: View {
     let onPrepare: () -> Void
     /// Collapses the whole attachment sheet after a successful send.
     let onComplete: () -> Void
+    /// Starts recording on appear (one-tap reply-bar mic).
+    let autoStart: Bool
 
     @State private var recorder: VoiceRecorder
     @State private var playback: VoicePlaybackController
@@ -24,8 +26,10 @@ struct VoiceRecordView: View {
     init(
         onSend: @escaping (VoiceRecordingDraft) async -> Bool,
         onPrepare: @escaping () -> Void,
-        onComplete: @escaping () -> Void
+        onComplete: @escaping () -> Void,
+        autoStart: Bool = false
     ) {
+        self.autoStart = autoStart
         self.onSend = onSend
         self.onPrepare = onPrepare
         self.onComplete = onComplete
@@ -51,7 +55,13 @@ struct VoiceRecordView: View {
         .navigationTitle(isRecordingOrReview ? "" : "Voice Message")
         .navigationBarBackButtonHidden(isRecordingOrReview)
         .toolbar { toolbarContent }
-        .onAppear { onPrepare() }
+        .onAppear {
+            onPrepare()
+            if autoStart, case .idle = recorder.state {
+                levels = []
+                Task { await recorder.start() }
+            }
+        }
         .onDisappear {
             recorder.tearDown()
             playback.tearDown()

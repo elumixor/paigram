@@ -30,6 +30,15 @@ final class ChatHistoryStore {
     private let chatTailIdAtOpen: Int64?
     private let loader: ChatHistoryLoader
     private let selfUserId: Int64?
+    /// Current account has Premium: own just-sent voice notes get transcribed
+    /// automatically (non-Premium taps still try; TDLib may grant trial uses).
+    private let isPremium: Bool
+    /// Local transcription request state per message id. The result itself
+    /// lives in the message content (`VoiceNoteVisual.transcription`).
+    private(set) var transcriptionRequests: [Int64: TranscriptionRequest] = [:]
+    /// Temporary ids of voice notes sent from this screen, awaiting
+    /// `updateMessageSendSucceeded` to be auto-transcribed.
+    private var autoTranscribePendingIds: Set<Int64> = []
     private let logger = Logger(subsystem: "org.telegram.TelegramWatch", category: "chathistory")
 
     let voicePlayback: VoicePlaybackController
@@ -62,6 +71,7 @@ final class ChatHistoryStore {
         lastMessageId: Int64?,
         loader: ChatHistoryLoader,
         selfUserId: Int64? = nil,
+        isPremium: Bool = false,
         userNames: UserNamesStore? = nil,
         draftText: String = "",
         coalesceUpdates: Bool = false,
@@ -73,6 +83,7 @@ final class ChatHistoryStore {
         self.chatTailIdAtOpen = lastMessageId
         self.loader = loader
         self.selfUserId = selfUserId
+        self.isPremium = isPremium
         self.userNames = userNames ?? UserNamesStore()
         self.voicePlayback = voicePlayback ?? VoicePlaybackController(
             backend: AVEngineBackend(),
@@ -387,12 +398,13 @@ final class ChatHistoryStore {
         window.markReachesChatTail()
         unseenNewerCount = 0
         do {
-            _ = try await loader.sendVoiceNote(
+            let sent = try await loader.sendVoiceNote(
                 chatId: chatId,
                 fileURL: draft.fileURL,
                 duration: draft.duration,
                 waveform: draft.waveform
             )
+            if isPremium { autoTranscribePendingIds.insert(sent.id) }
             return true
         } catch {
             lastSendError = humanMessage(error)
@@ -465,6 +477,28 @@ final class ChatHistoryStore {
 
     func dismissSendError() { lastSendError = nil }
 
+    enum TranscriptionRequest: Equatable {
+        case inFlight
+        case failed(String)
+    }
+
+    /// Requests a transcription of the voice note in `messageId`. The text
+    /// arrives via `updateMessageContent`; failures are kept per message.
+    func transcribe(messageId: Int64) {
+        guard transcriptionRequests[messageId] != .inFlight else { return }
+        transcriptionRequests[messageId] = .inFlight
+        Task { [weak self, loader, chatId] in
+            do {
+                try await loader.recognizeSpeech(chatId: chatId, messageId: messageId)
+            } catch {
+                guard let self else { return }
+                let message = (error as? TDError)?.message ?? ""
+                self.transcriptionRequests[messageId] = .failed(transcriptionErrorText(message))
+                self.logger.warning("recognizeSpeech chatId=\(chatId, privacy: .public) messageId=\(messageId, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+            }
+        }
+    }
+
     func saveDraft(_ text: String) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed == draftText { return }
@@ -532,11 +566,15 @@ final class ChatHistoryStore {
                 unseenNewerCount += 1
             }
         case .updateMessageSendSucceeded(let upd) where upd.message.chatId == chatId:
+            if autoTranscribePendingIds.remove(upd.oldMessageId) != nil {
+                transcribe(messageId: upd.message.id)
+            }
             guard window.cache[upd.oldMessageId] != nil else { return }
             window.applySendSucceeded(oldId: upd.oldMessageId, message: CachedMessage(upd.message))
             primeFiles(from: upd.message.content)
             scheduleReproject()
         case .updateMessageSendFailed(let upd) where upd.message.chatId == chatId:
+            autoTranscribePendingIds.remove(upd.oldMessageId)
             guard window.cache[upd.oldMessageId] != nil else { return }
             window.applySendFailed(oldId: upd.oldMessageId, message: CachedMessage(upd.message))
             scheduleReproject()

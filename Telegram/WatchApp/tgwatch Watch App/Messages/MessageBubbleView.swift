@@ -52,6 +52,7 @@ struct MessageBubbleView: View {
                     )
                 } else if let voice = bubble.voiceNote {
                     VoiceNoteBubbleView(
+                        messageId: bubble.messageId,
                         note: voice,
                         caption: bubble.body,
                         isOutgoing: bubble.isOutgoing,
