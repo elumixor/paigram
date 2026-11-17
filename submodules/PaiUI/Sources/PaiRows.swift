@@ -167,9 +167,10 @@ public struct PaiRowMeta: Equatable {
 }
 
 /// The bot's messages carry the row's kind and agent but not its artifacts or card, which pai keeps on the log row
-/// (`GET /messages?agent=`). A message finds its row by the trailer's `logId` (a topic's history from before the
-/// topic), else among the agent's latest rows by its words and time. Each agent's rows are read at most every 30 s
-/// while a message of theirs is drawn; a change to an artifact list or a card posts `changed` so the chat redraws.
+/// (`GET /messages`). A message with the trailer's `logId` (the row's id, on every message from a log row) reads that
+/// row itself (`GET /messages/<id>`); one without it, from a box older than `logId`, is matched among the agent's latest
+/// rows (`GET /messages?agent=`) by its words and time. Rows are read at most every 30 s while a message of theirs is
+/// drawn; a change to an artifact list or a card posts `changed` so the chat redraws.
 public enum PaiRows {
     public static let changed = Notification.Name("pai.rowsChanged")
 
@@ -238,8 +239,14 @@ public enum PaiRows {
     public static func meta(_ message: Message) -> PaiRowMeta? {
         guard let trailer = PaiTrailer.find(message), kinds.contains(trailer.meta.kind), let slug = trailer.meta.agent ?? trailer.meta.session.paiNonEmpty else { return nil }
         let text = (message.text as NSString).substring(to: min(trailer.textEnd, (message.text as NSString).length))
-        let found = find(slug: slug, logId: trailer.meta.logId, kind: trailer.meta.kind, text: text, at: Double(message.timestamp) * 1000)
-        refresh(slug, logId: found == nil ? trailer.meta.logId : nil)
+        let found: PaiRowMeta?
+        if let logId = trailer.meta.logId {
+            found = find(logId: logId)
+            refreshRow(logId, slug: slug)
+        } else {
+            found = find(slug: slug, kind: trailer.meta.kind, text: text, at: Double(message.timestamp) * 1000)
+            refresh(slug)
+        }
         guard let found, !found.artifacts.isEmpty || found.card != nil else { return nil }
         return found
     }
@@ -248,8 +255,11 @@ public enum PaiRows {
     public static func reload(slug: String) {
         lock.lock()
         readAt[slug] = nil
+        let ids = Array((rows[slug] ?? [:]).keys).filter { readAt[rowKey($0)] != nil }
+        for id in ids { readAt[rowKey(id)] = nil }
         lock.unlock()
-        refresh(slug, logId: nil)
+        refresh(slug)
+        for id in ids { refreshRow(id, slug: slug) }
     }
 
     /// Presses a card's button (`POST /cards/:id/press`); the redraw follows from the agent's rows. Nil when it went.
@@ -286,11 +296,20 @@ public enum PaiRows {
         return out
     }
 
-    private static func find(slug: String, logId: Int?, kind: String, text: String, at: Double) -> PaiRowMeta? {
+    /// The row by its id, whichever agent's rows it was read with.
+    private static func find(logId: Int) -> PaiRowMeta? {
+        lock.lock()
+        defer { lock.unlock() }
+        for kept in rows.values {
+            if let row = kept[logId] { return row.meta }
+        }
+        return nil
+    }
+
+    private static func find(slug: String, kind: String, text: String, at: Double) -> PaiRowMeta? {
         lock.lock()
         defer { lock.unlock() }
         guard let kept = rows[slug] else { return nil }
-        if let logId { return kept[logId]?.meta }
         let wanted = key(text, length: 96)
         guard wanted.count >= 4 else { return nil }
         let rowKinds: Set<String> = kind == "notice" ? ["notice"] : ["report", "response", "chat"]
@@ -303,28 +322,49 @@ public enum PaiRows {
 
     // MARK: Reading
 
-    private static func refresh(_ slug: String, logId: Int?) {
-        guard PaiAuth.isSignedIn, #available(iOS 16.0, *) else { return }
+    private static func rowKey(_ id: Int) -> String { "#\(id)" }
+
+    /// Whether a read under `key` is due; marks it in flight when it is.
+    private static func begin(_ key: String) -> Bool {
         lock.lock()
-        let stale = readAt[slug].map { Date().timeIntervalSince($0) > fresh } ?? true
-        let start = stale && !inFlight.contains(slug)
-        if start { inFlight.insert(slug) }
-        lock.unlock()
-        guard start else { return }
+        defer { lock.unlock() }
+        let stale = readAt[key].map { Date().timeIntervalSince($0) > fresh } ?? true
+        let start = stale && !inFlight.contains(key)
+        if start { inFlight.insert(key) }
+        return start
+    }
+
+    /// The agent's latest rows, for messages without a `logId`.
+    private static func refresh(_ slug: String) {
+        guard PaiAuth.isSignedIn, #available(iOS 16.0, *), begin(slug) else { return }
         Task {
-            var query = ["agent": slug, "limit": "100"]
-            // A history row older than the latest hundred: read from it down.
-            if let logId { query["before"] = String(logId + 1) }
-            let read = try? await PaiClient().call([Row].self, "/messages", query: query)
-            store(slug, read ?? [], ok: read != nil)
+            let read = try? await PaiClient().call([Row].self, "/messages", query: ["agent": slug, "limit": "100"])
+            store(slug, key: slug, read ?? [], ok: read != nil)
         }
     }
 
-    private static func store(_ slug: String, _ read: [Row], ok: Bool) {
+    /// One row by its id (`GET /messages/<id>`), kept with the agent's rows. A row that is gone is kept as one with
+    /// nothing to draw, so it is not asked for on every draw.
+    private static func refreshRow(_ id: Int, slug: String) {
+        let key = rowKey(id)
+        guard PaiAuth.isSignedIn, #available(iOS 16.0, *), begin(key) else { return }
+        Task {
+            do {
+                let row = try await PaiClient().call(Row.self, "/messages/\(id)")
+                store(slug, key: key, [row], ok: true)
+            } catch let error as PaiClientError where error.message.contains("404") || error.message.contains("no such message") {
+                store(slug, key: key, [], ok: true)
+            } catch {
+                store(slug, key: key, [], ok: false)
+            }
+        }
+    }
+
+    private static func store(_ slug: String, key readKey: String, _ read: [Row], ok: Bool) {
         lock.lock()
-        inFlight.remove(slug)
+        inFlight.remove(readKey)
         // Offline: try again in a while, not on every draw.
-        readAt[slug] = ok ? Date() : Date().addingTimeInterval(-fresh + 10)
+        readAt[readKey] = ok ? Date() : Date().addingTimeInterval(-fresh + 10)
         var kept = rows[slug] ?? [:]
         var dirty = false
         for row in read {

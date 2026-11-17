@@ -69,17 +69,33 @@ public enum EmailChats {
         return userInfo["email"] != nil
     }
     
-    /// The device token, so the box can push new mail here (production APNs unless this is a debug build).
+    /// The APNs gateway this build's token belongs to: sandbox in the simulator and for a build signed with a development
+    /// profile (`aps-environment` = development in its embedded profile), production otherwise (TestFlight and the App
+    /// Store carry no embedded profile; Ad Hoc and Distribution profiles say production).
+    static var apnsEnvironment: String {
+        #if targetEnvironment(simulator)
+        return "sandbox"
+        #else
+        guard let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"), let data = try? Data(contentsOf: url) else {
+            return "production"
+        }
+        // The profile is a signed envelope around a plain XML property list.
+        guard let start = data.range(of: Data("<?xml".utf8)), let end = data.range(of: Data("</plist>".utf8), in: start.lowerBound ..< data.endIndex) else {
+            return "production"
+        }
+        let plist = (try? PropertyListSerialization.propertyList(from: data.subdata(in: start.lowerBound ..< end.upperBound), options: [], format: nil)) as? [String: Any]
+        let entitlements = plist?["Entitlements"] as? [String: Any]
+        return (entitlements?["aps-environment"] as? String) == "development" ? "sandbox" : "production"
+        #endif
+    }
+    
+    /// The device token, so the box can push new mail here, through the gateway it belongs to (`apnsEnvironment`).
     public static func register(pushToken: Data) {
         self.pushToken = pushToken
         guard let token = PaiAuth.token, let url = URL(string: PaiSecrets.baseURL + "/push/devices") else {
             return
         }
-        #if DEBUG
-        let environment = "sandbox"
-        #else
-        let environment = "production"
-        #endif
+        let environment = self.apnsEnvironment
         let body: [String: String] = [
             "token": pushToken.map { String(format: "%02x", $0) }.joined(),
             "bundleId": Bundle.main.bundleIdentifier ?? "",

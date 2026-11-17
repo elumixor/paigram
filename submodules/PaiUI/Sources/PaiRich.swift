@@ -86,6 +86,8 @@ public struct PaiRichMeta: Decodable, Equatable {
         public let text: String
         public let icon: String?
         public let agent: String?
+        /// The message-log row the event came from (`RichEvent.logId`); nil from a box older than it.
+        public let logId: Int?
     }
 
     public let v: Int
