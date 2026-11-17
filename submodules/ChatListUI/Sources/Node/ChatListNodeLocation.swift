@@ -295,8 +295,9 @@ public func chatListViewForLocation(chatListLocation: ChatListControllerLocation
         let readStateKey: PostboxViewKey = .combinedReadState(peerId: peerId, handleThreads: false)
         
         var isFirst = false
-        return account.postbox.combinedView(keys: [viewKey, readStateKey])
-        |> map { views -> ChatListNodeViewUpdate in
+        // Paigram: the pai bot's topics are drawn again when the decisions waiting on the user change.
+        return combineLatest(account.postbox.combinedView(keys: [viewKey, readStateKey]), PaiChat.needsSignal)
+        |> map { views, _ -> ChatListNodeViewUpdate in
             guard let view = views.views[viewKey] as? MessageHistoryThreadIndexView else {
                 preconditionFailure()
             }
@@ -389,7 +390,9 @@ public func chatListViewForLocation(chatListLocation: ChatListControllerLocation
                 
                 var sortTimestamp = item.index.timestamp
                 if isPaiBot, let rank = PaiChat.topicRank(thread: item.id) {
-                    sortTimestamp = Int32.max - 1 - Int32(clamping: rank)
+                    // A topic with a decision waiting on the user goes above the rest.
+                    let waitingBand: Int32 = PaiChat.needs(thread: item.id) > 0 ? 0 : 100_000
+                    sortTimestamp = Int32.max - 1 - waitingBand - Int32(clamping: rank)
                 }
                 items.append(EngineChatList.Item(
                     id: .forum(item.id),
@@ -542,4 +545,20 @@ public func chatListViewForLocation(chatListLocation: ChatListControllerLocation
             return ChatListNodeViewUpdate(list: list, type: type, scrollPosition: nil)
         }
     }
+}
+
+/// Paigram: a chat or topic of the pai bot with decisions waiting on the user counts them as its unread badge.
+func paiReadCounters(_ base: EngineChatList.Item) -> EnginePeerReadCounters {
+    guard let peer = base.renderedPeer.peer, PaiChat.isBot(peer._asPeer()) else {
+        return base.readCounters
+    }
+    var threadId: Int64?
+    if case let .forum(_, _, threadIdValue, _, _) = base.index {
+        threadId = threadIdValue
+    }
+    let waiting = PaiChat.needs(thread: threadId)
+    guard waiting > 0 else {
+        return base.readCounters
+    }
+    return EnginePeerReadCounters(state: CombinedPeerReadState(states: [(Namespaces.Message.Cloud, .idBased(maxIncomingReadId: 1, maxOutgoingReadId: 0, maxKnownId: 1, count: Int32(waiting), markedUnread: false))]), isMuted: false)
 }

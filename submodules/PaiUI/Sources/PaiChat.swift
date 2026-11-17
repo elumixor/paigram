@@ -1,5 +1,6 @@
 import Foundation
 import Postbox
+import SwiftSignalKit
 import TelegramCore
 
 /// What the Telegram screens need to know about the pai bot's chat.
@@ -97,6 +98,31 @@ extension PaiChat {
 
     /// How many decisions an agent waits on.
     public static func needs(of slug: String) -> Int { needs.filter { $0.agent == slug }.count }
+
+    /// The topic a decision is asked in: its agent's, else pai's main one.
+    public static func thread(of need: PaiNeed) -> Int64? {
+        return thread(of: need.agent ?? paiSlug) ?? mainThreadId
+    }
+
+    /// How many decisions wait in the bot's chat: all of them for the chat itself (nil), else those of one topic.
+    public static func needs(thread: Int64?) -> Int {
+        let all = needs
+        guard let thread else { return all.count }
+        return all.filter { self.thread(of: $0) == thread }.count
+    }
+
+    /// `needs` now and on every change, for lists that count them.
+    public static var needsSignal: Signal<[PaiNeed], NoError> {
+        return Signal { subscriber in
+            subscriber.putNext(needs)
+            let observer = NotificationCenter.default.addObserver(forName: needsChanged, object: nil, queue: .main) { _ in
+                subscriber.putNext(needs)
+            }
+            return ActionDisposable {
+                NotificationCenter.default.removeObserver(observer)
+            }
+        }
+    }
 
     /// Posted on the main thread when anything the daemon tracks moved: an agent, a task, an ask, a turn.
     public static let changed = Notification.Name("pai.changed")

@@ -30,6 +30,16 @@ public struct PaiRail: Equatable {
         let needs = PaiChat.needs
         let waiting = members.filter { agent in agent.status == "waiting" || needs.contains { $0.agent == agent.slug } }
         let working = members.filter { agent in agent.isBusy && !waiting.contains(agent) }
+        // An ask whose agent is pai itself, finished or unknown still waits on the user: the strip says so.
+        if waiting.isEmpty, let need = needs.first(where: { need in
+            scopeSlug == PaiChat.paiSlug || need.agent == scopeSlug || need.agent.map { PaiChat.isAncestor(scopeSlug, of: $0) } == true
+        }) {
+            let agent = PaiChat.agent(need.agent)
+            let isSelf = (need.agent ?? PaiChat.paiSlug) == scopeSlug
+            let faces = agent.map { [Face(slug: $0.slug, name: $0.name, avatar: $0.avatar)] } ?? []
+            let title = isSelf ? "Waiting on you" : "\(agent?.name ?? need.from) waits on you"
+            return PaiRail(faces: faces, title: title, subtitle: need.question.paiPlain, isWaiting: true, target: isSelf ? nil : need.agent)
+        }
         guard !waiting.isEmpty || !working.isEmpty else {
             return nil
         }
