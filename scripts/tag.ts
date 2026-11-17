@@ -8,8 +8,7 @@
  * check — the synced tree's submodule links point into the Mac's `.git`.
  *
  * Before tagging it asks GitHub whether the Mac's runner (`paigram-mac`) is online: when it is not, the
- * release goes through the GitHub runner alone, which is slower and lately fails to get a machine at all,
- * so that is said out loud rather than discovered an hour later.
+ * dispatched build waits in the queue until the Mac wakes (no hosted fallback), so that is said out loud.
  */
 import { $ } from "bun";
 import { bumpVersion, readVersions, root } from "./repo.ts";
@@ -18,7 +17,7 @@ const repo = "elumixor/paigram";
 const dryRun = process.argv.includes("--dry-run");
 const git = (args: string[]) => $`git ${args}`.cwd(root).quiet();
 
-/** Where the tag will build: the Mac when its runner is listening, the GitHub runner otherwise. */
+/** Whether the Mac's runner is listening: it is the only machine that builds a tag. */
 async function runnerStatus(): Promise<string> {
   const result = await $`gh api repos/${repo}/actions/runners --jq ${'[.runners[] | select(.labels | any(.name == "paigram-mac"))] | map("\\(.name) \\(.status)\\(if .busy then " (busy)" else "" end)") | join(", ")'}`.cwd(root).nothrow().quiet();
   if (result.exitCode !== 0) return "unknown (gh could not read the runners; is it logged in?)";
@@ -49,7 +48,7 @@ if (ahead > 0) console.log(`${ahead} local commit(s) go out with the tag`);
 
 const runner = await runnerStatus();
 if (runner.includes("online")) console.log(`Mac runner: ${runner} — it builds the tag in about 15–40 minutes`);
-else console.warn(`WARNING: Mac runner: ${runner}. Only the GitHub runner can build this tag (about 1h40, and it may fail to get a macOS machine); wake the Mac to have it build instead.`);
+else console.warn(`WARNING: Mac runner: ${runner}. The build waits in the queue until the Mac wakes; nothing else builds it.`);
 
 if (dryRun) {
   console.log(`ready: the next release is the one after ${(await readVersions()).app}`);
