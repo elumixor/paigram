@@ -19,8 +19,21 @@ async function boxUrl(): Promise<string> {
 }
 
 /** The box knows which bot it talks through; `/m/telegram/info` is public. */
+/** Retries a network error or a 5xx up to 5 tries (2s, 4s, 8s, 16s apart); the last answer or error goes to the caller. */
+async function fetchWithRetry(url: string, tries = 5): Promise<Response> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const response = await fetch(url);
+      if (response.status < 500 || attempt === tries) return response;
+    } catch (error) {
+      if (attempt === tries) throw error;
+    }
+    await Bun.sleep(1000 * 2 ** attempt);
+  }
+}
+
 export async function fetchBotUsername(url: string): Promise<string> {
-  const info = await fetch(`${url}/m/telegram/info`);
+  const info = await fetchWithRetry(`${url}/m/telegram/info`);
   if (!info.ok) throw new Error(`${url}/m/telegram/info answered HTTP ${info.status}: is the telegram module running?`);
   const { botUsername } = (await info.json()) as { botUsername?: string };
   if (!botUsername) throw new Error("the box does not know its bot username yet");
