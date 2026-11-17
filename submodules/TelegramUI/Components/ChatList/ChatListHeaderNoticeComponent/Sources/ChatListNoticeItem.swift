@@ -347,7 +347,7 @@ final class ChatListNoticeItemNode: ItemListRevealOptionsItemNode {
                 titleString = NSAttributedString(string: item.strings.ChatList_FrozenAccount_Title, font: titleFont, textColor: item.theme.list.itemDestructiveColor)
                 textString = NSAttributedString(string: item.strings.ChatList_FrozenAccount_Text, font: smallTextFont, textColor: item.theme.rootController.navigationBar.secondaryTextColor)
             case let .paiNeeds(count, text):
-                titleString = NSAttributedString(string: count == 1 ? "1 decision waiting" : "\(count) decisions waiting", font: titleFont, textColor: item.theme.rootController.navigationBar.accentTextColor)
+                titleString = NSAttributedString(string: count == 1 ? "1 decision waiting" : "\(count) decisions waiting", font: titleFont, textColor: item.theme.list.itemAccentColor.cgColor.alpha >= 0.5 ? item.theme.list.itemAccentColor : item.theme.list.itemPrimaryTextColor)
                 textString = NSAttributedString(string: text, font: smallTextFont, textColor: item.theme.rootController.navigationBar.secondaryTextColor)
             case let .link(_, _, title, subtitle):
                 titleString = stringWithAppliedEntities(title.string, entities: title.entities, baseColor: item.theme.list.itemPrimaryTextColor, linkColor: item.theme.list.itemAccentColor, baseFont: titleFont, linkFont: titleFont, boldFont: titleBoldFont, italicFont: titleItalicFont, boldItalicFont: titleBoldItalicFont, fixedFont: titleFont, blockQuoteFont: titleFont, message: nil)
