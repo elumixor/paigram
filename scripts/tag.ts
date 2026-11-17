@@ -8,7 +8,7 @@
  * check — the synced tree's submodule links point into the Mac's `.git`.
  *
  * Before tagging it asks GitHub whether the Mac's runner (`paigram-mac`) is online: when it is not, the
- * dispatched build waits in the queue until the Mac wakes (no hosted fallback), so that is said out loud.
+ * dispatched build waits in the queue until the Mac wakes (the hosted workflow runs only by hand), so that is said out loud.
  */
 import { $ } from "bun";
 import { bumpVersion, readVersions, root } from "./repo.ts";
@@ -48,7 +48,7 @@ if (ahead > 0) console.log(`${ahead} local commit(s) go out with the tag`);
 
 const runner = await runnerStatus();
 if (runner.includes("online")) console.log(`Mac runner: ${runner} — it builds the tag in about 15–40 minutes`);
-else console.warn(`WARNING: Mac runner: ${runner}. The build waits in the queue until the Mac wakes; nothing else builds it.`);
+else console.warn(`WARNING: Mac runner: ${runner}. The build waits in the queue until the Mac wakes, or dispatch testflight-hosted.yml by hand (about 1h40).`);
 
 if (dryRun) {
   console.log(`ready: the next release is the one after ${(await readVersions()).app}`);

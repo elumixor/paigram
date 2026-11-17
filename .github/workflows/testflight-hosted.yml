@@ -1,0 +1,56 @@
+name: TestFlight (GitHub runner)
+
+# The same release on a GitHub macOS runner (free for this public repo, about 1h40 with the queue).
+# Dispatched by hand only, on an `ios-v*` tag, when the Mac is asleep or its build failed; nothing starts it.
+# GitHub's macOS pool often refuses the job outright ("not acquired by Runner of type hosted" after 15
+# minutes), so a build that never got a machine is tried once more on the macOS 15 image, which has the
+# same Xcode and a shorter queue.
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: testflight-hosted
+  cancel-in-progress: false
+
+jobs:
+  build:
+    uses: ./.github/workflows/testflight-hosted-build.yml
+    with:
+      runner: macos-26
+    secrets: inherit
+
+  # Only a job that never reached a machine is retried: a build that failed on its own would fail again.
+  retry-check:
+    needs: build
+    if: always() && needs.build.result != 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      retry: ${{ steps.decide.outputs.retry }}
+    steps:
+      - id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          job=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs" --paginate --jq '[.jobs[] | select(.name | startswith("build / "))] | first')
+          echo "$job" | jq '{name, conclusion, runner_name, steps: (.steps | length)}'
+          if [ "$(echo "$job" | jq -r '.runner_name // ""')" = "" ] && [ "$(echo "$job" | jq '.steps | length')" = 0 ]; then
+            echo "retry=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::No macOS 26 runner took the build; trying the macOS 15 image."
+          else
+            echo "retry=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # `always()`: without a status function the condition also asks that `build` succeeded, further up the chain.
+  build-retry:
+    needs: retry-check
+    if: always() && needs.retry-check.outputs.retry == 'true'
+    uses: ./.github/workflows/testflight-hosted-build.yml
+    with:
+      runner: macos-15
+    secrets: inherit

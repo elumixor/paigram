@@ -3,8 +3,8 @@ name: TestFlight
 # Dispatched only, on an `ios-v*` tag cut by `bun run tag`: pai's build card runs
 # `gh workflow run testflight.yml --ref ios-vX.Y.Z`. It runs on the developer's Mac as a self-hosted runner
 # (label `paigram-mac`): free, and fast from its warm Bazel cache. While the Mac sleeps the job waits in
-# the queue. No GitHub-hosted fallback: macOS runners bill at ten times the Linux rate. A failed run is
-# dispatched again once the Mac is fixed. A version already on TestFlight uploads nothing (`--once`).
+# the queue. No automatic fallback: when the Mac is asleep or failed, dispatch `testflight-hosted.yml` by
+# hand on the same tag (free, this repo is public). A version already on TestFlight uploads nothing (`--once`).
 on:
   workflow_dispatch:
     inputs:

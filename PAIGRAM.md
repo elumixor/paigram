@@ -88,7 +88,7 @@ Upstream pins Xcode 26.2; `--overrideXcodeVersion` lets the installed Xcode buil
 
 ### Releasing
 
-The TestFlight workflow never runs by itself: it is `workflow_dispatch` only. A build ready for the owner is offered with `offer_build` (pai's build card), never by tagging a release or asking him to open dev. The card's TestFlight action runs `gh workflow run testflight.yml --ref ios-vX.Y.Z`, so a release first needs its tag: `bun run tag` bumps `versions.json`, commits, tags `ios-vX.Y.Z` and pushes, and starts no build. The workflow builds with `--no-bump --once`, so dispatching on a version already on TestFlight uploads nothing; cut a new tag for a new build. Paigram uses no GitHub-hosted runner (macOS minutes bill at ten times the Linux rate; removed 17 Nov 2026): every build runs on the Mac, through this workflow or dev's `install_on_device`/`run_target`. A failed run is dispatched again on the same tag once the Mac is fixed.
+The TestFlight workflow never runs by itself: it is `workflow_dispatch` only. A build ready for the owner is offered with `offer_build` (pai's build card), never by tagging a release or asking him to open dev. The card's TestFlight action runs `gh workflow run testflight.yml --ref ios-vX.Y.Z`, so a release first needs its tag: `bun run tag` bumps `versions.json`, commits, tags `ios-vX.Y.Z` and pushes, and starts no build. The workflow builds with `--no-bump --once`, so dispatching on a version already on TestFlight uploads nothing; cut a new tag for a new build. Nothing starts a GitHub-hosted build on its own: no push, PR or automatic fallback runs a macOS runner. When the Mac is asleep or its run failed, dispatch `testflight-hosted.yml` by hand on the same tag (free: the repo is public).
 
 | Workflow | Runs on | A warm build | Fails when |
 | --- | --- | --- | --- |
@@ -102,7 +102,7 @@ The runner is `~/.local/share/actions-runner/paigram/`, a LaunchAgent (`~/Librar
 
 **Precheck.** `bun run precheck` (`scripts/precheck.ts`) type-checks with `swiftc` the Paigram Swift of the two targets with the oldest deployment floors: `submodules/PaiGlance` and the widget against the iOS 15 SDK, the watch app's `PaiComplications` and `PaiShared` against watchOS 26. It takes three seconds and catches what cost the 0.4.1 hosted build 50 minutes (a `WidgetFamily` case that is iOS 16 only). `bun run testflight` and `bun run device` run it before provisioning.
 
-**What else was weighed.** A queue on the box that waits for the Mac and builds through the dev agent adds nothing: GitHub's queue already holds the job while the Mac sleeps. A GitHub-hosted twin (`testflight-hosted.yml`) existed until 17 Nov 2026: 1h40 per build, often refused by the macOS pool, and the biggest Actions cost; removed with upstream's `build.yml`.
+**What else was weighed.** A queue on the box that waits for the Mac and builds through the dev agent adds nothing: GitHub's queue already holds the job while the Mac sleeps. The hosted twin (`testflight-hosted.yml`, reusable `testflight-hosted-build.yml` on `macos-26`, retried once on `macos-15` when the pool gives no machine) is manual only: 1h40 per build, often refused by the macOS pool.
 
 Once, from the Mac that holds the Apple material:
 
@@ -127,4 +127,4 @@ The secrets it sets, for setting them by hand under Settings → Secrets and var
 | `PAI_BOX_URL` | the box the app talks to |
 | `PAI_BOT_USERNAME` | the box's bot username, without the `@` (set so the build does not have to reach the box) |
 
-Upstream Telegram's CI (`.github/workflows/build.yml`, a macOS Bazel build of an unsigned ipa) is deleted: no GitHub-hosted job runs for Paigram.
+Upstream Telegram's CI (`.github/workflows/build.yml`, a macOS Bazel build of an unsigned ipa) is deleted.

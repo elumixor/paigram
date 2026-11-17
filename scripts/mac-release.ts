@@ -6,7 +6,7 @@
  * workflow has already run `scripts/ci.ts`, so signing comes from its throwaway keychain and the App Store
  * Connect key from the repo secrets. The build runs under `caffeinate`, so the Mac does not doze off halfway.
  *
- * When this script fails the run fails; nothing builds elsewhere (no GitHub-hosted fallback), so it fails loudly.
+ * When this script fails the run fails; nothing builds elsewhere unless `testflight-hosted.yml` is dispatched by hand, so it fails loudly.
  */
 import { $ } from "bun";
 import { root } from "./repo.ts";
