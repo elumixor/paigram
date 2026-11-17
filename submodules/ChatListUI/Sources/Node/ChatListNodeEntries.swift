@@ -687,7 +687,7 @@ func chatListNodeEntriesForView(view: EngineChatList, state: ChatListNodeState, 
             continue loop
         }
         var updatedMessages = entry.messages
-        var updatedCombinedReadState = entry.readCounters
+        var updatedCombinedReadState = paiReadCounters(entry)
         if let peerId = peerId, state.pendingClearHistoryPeerIds.contains(ChatListNodeState.ItemId(peerId: peerId, threadId: threadId)) {
             updatedMessages = []
             updatedCombinedReadState = nil
