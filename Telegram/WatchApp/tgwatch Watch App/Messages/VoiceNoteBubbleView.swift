@@ -10,6 +10,7 @@ import SwiftUI
 /// a priority-2 download if the file isn't ready and routes the toggle to
 /// the active `VoicePlaybackController`.
 struct VoiceNoteBubbleView: View {
+    let messageId: Int64
     let note: VoiceNoteVisual
     let caption: String
     let isOutgoing: Bool
@@ -50,6 +51,7 @@ struct VoiceNoteBubbleView: View {
                 WaveformBarsView(amplitudes: amplitudes, progress: progress, isOutgoing: isOutgoing)
                 trailing
             }
+            transcriptionView
             if !caption.isEmpty {
                 Text(caption)
                     .font(.caption)
@@ -91,6 +93,58 @@ struct VoiceNoteBubbleView: View {
             }
             .frame(width: 32, height: 32)
         }
+    }
+
+    /// Transcription under the waveform. TDLib's result wins over the local
+    /// request state; with neither, a "Transcribe" button asks for one.
+    @ViewBuilder
+    private var transcriptionView: some View {
+        switch note.transcription {
+        case .text(let text):
+            Text(text)
+                .font(.caption)
+                .fixedSize(horizontal: false, vertical: true)
+        case .pending(let partial):
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                ProgressView().controlSize(.mini).scaleEffect(0.6).tint(style.secondary)
+                Text(partial.isEmpty ? "Transcribing…" : partial)
+                    .font(.caption)
+                    .foregroundStyle(partial.isEmpty ? style.secondary : style.content)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        case .failed(let message):
+            transcriptionFailure(message)
+        case nil:
+            switch store.transcriptionRequests[messageId] {
+            case .inFlight:
+                HStack(spacing: 4) {
+                    ProgressView().controlSize(.mini).scaleEffect(0.6).tint(style.secondary)
+                    Text("Transcribing…").font(.caption2).foregroundStyle(style.secondary)
+                }
+            case .failed(let message):
+                transcriptionFailure(message)
+            case nil:
+                transcribeButton(label: "Transcribe", systemImage: "text.bubble")
+            }
+        }
+    }
+
+    private func transcriptionFailure(_ message: String) -> some View {
+        HStack(spacing: 6) {
+            Text(message).font(.caption2).foregroundStyle(style.secondary)
+            transcribeButton(label: "Retry", systemImage: "arrow.clockwise")
+        }
+    }
+
+    // Plain style so the button wins over the bubble's playback tap.
+    private func transcribeButton(label: String, systemImage: String) -> some View {
+        Button { store.transcribe(messageId: messageId) } label: {
+            Label(label, systemImage: systemImage)
+                .font(.caption2)
+                .foregroundStyle(style.secondary)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("voiceTranscribe.\(messageId)")
     }
 
     @ViewBuilder
@@ -151,6 +205,7 @@ private func previewVoice(id: Int = 1) -> VoiceNoteVisual {
 
 #Preview("Voice — incoming, idle") {
     VoiceNoteBubbleView(
+        messageId: 1,
         note: previewVoice(), caption: "",
         isOutgoing: false,
         replyHeader: nil
@@ -161,6 +216,7 @@ private func previewVoice(id: Int = 1) -> VoiceNoteVisual {
 
 #Preview("Voice — outgoing, idle") {
     VoiceNoteBubbleView(
+        messageId: 1,
         note: previewVoice(id: 2), caption: "",
         isOutgoing: true,
         replyHeader: nil
@@ -171,6 +227,7 @@ private func previewVoice(id: Int = 1) -> VoiceNoteVisual {
 
 #Preview("Voice — incoming with reply") {
     VoiceNoteBubbleView(
+        messageId: 1,
         note: previewVoice(id: 3), caption: "",
         isOutgoing: false,
         replyHeader: ReplyHeader(
@@ -185,6 +242,7 @@ private func previewVoice(id: Int = 1) -> VoiceNoteVisual {
 
 #Preview("Voice — incoming with caption") {
     VoiceNoteBubbleView(
+        messageId: 1,
         note: previewVoice(id: 4),
         caption: "Listen to this part carefully",
         isOutgoing: false,
@@ -196,6 +254,7 @@ private func previewVoice(id: Int = 1) -> VoiceNoteVisual {
 
 #Preview("Voice — incoming, empty waveform") {
     VoiceNoteBubbleView(
+        messageId: 1,
         note: VoiceNoteVisual(
             voiceFileId: 5, duration: 5, mimeType: "audio/ogg",
             waveform: Data(), caption: "", localPath: nil

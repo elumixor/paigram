@@ -1,4 +1,5 @@
 import Foundation
+import TDShim
 
 /// Per-voice-note data the bubble + playback controller consume. Built from
 /// a `MessageVoiceNote` plus the latest `files[fileId]` snapshot for the voice
@@ -16,6 +17,34 @@ struct VoiceNoteVisual: Identifiable, Equatable, Hashable {
     let caption: String
     /// Filesystem path of the voice file once downloaded; nil otherwise.
     let localPath: String?
+    /// TDLib's `VoiceNote.speechRecognitionResult`; nil until someone asked
+    /// for (or the server produced) a transcription.
+    var transcription: VoiceTranscription? = nil
+}
+
+/// Projection of TDLib's `SpeechRecognitionResult` for the bubble.
+enum VoiceTranscription: Equatable, Hashable {
+    /// Recognition in progress; `partialText` may be empty.
+    case pending(partialText: String)
+    case text(String)
+    case failed(String)
+
+    init(_ result: SpeechRecognitionResult) {
+        switch result {
+        case .speechRecognitionResultPending(let r): self = .pending(partialText: r.partialText)
+        case .speechRecognitionResultText(let r):    self = .text(r.text)
+        case .speechRecognitionResultError(let r):   self = .failed(transcriptionErrorText(r.error.message))
+        }
+    }
+}
+
+/// User-facing text for a speech-recognition error message from TDLib.
+func transcriptionErrorText(_ message: String) -> String {
+    switch message {
+    case "MSG_VOICE_TOO_LONG": return "Too long to transcribe"
+    case "PREMIUM_ACCOUNT_REQUIRED": return "Transcription needs Premium"
+    default: return "Couldn't transcribe"
+    }
 }
 
 extension VoiceNoteVisual {
