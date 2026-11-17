@@ -34,10 +34,19 @@ private struct PaiNeedsEntry: ItemListNodeEntry {
         let arguments = arguments as! PaiNeedsArguments
         let agent = PaiChat.agent(need.agent)
         let need = self.need
-        return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: agent.map { PaiAgentList.portrait(agent: $0, size: 29.0) }, title: agent?.name ?? need.from, label: need.question.paiPlain, labelStyle: .multilineDetailText, sectionId: self.section, style: .blocks, action: {
+        return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: agent.map { PaiAgentList.portrait(agent: $0, size: 29.0) }, title: agent?.name ?? need.from, label: paiNeedExcerpt(need.question.paiPlain), labelStyle: .multilineDetailText, sectionId: self.section, style: .blocks, action: {
             arguments.open(need)
         })
     }
+}
+
+/// Questions arrive cut at a fixed length (often mid-word) or unbounded: show at most ~100 characters, ending on a word with an ellipsis.
+private func paiNeedExcerpt(_ text: String) -> String {
+    let flat = text.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+    guard flat.count > 100 else { return flat }
+    let head = String(flat.prefix(100))
+    let cut = head.lastIndex(of: " ").map { String(head[..<$0]) } ?? head
+    return cut.trimmingCharacters(in: CharacterSet(charactersIn: " ,.:;-")) + "…"
 }
 
 public func paiNeedsController(context: AccountContext, navigationController: NavigationController) -> ViewController {
