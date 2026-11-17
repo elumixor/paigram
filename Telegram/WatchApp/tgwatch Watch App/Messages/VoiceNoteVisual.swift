@@ -29,11 +29,12 @@ enum VoiceTranscription: Equatable, Hashable {
     case text(String)
     case failed(String)
 
-    init(_ result: SpeechRecognitionResult) {
+    init?(_ result: SpeechRecognitionResult) {
         switch result {
         case .speechRecognitionResultPending(let r): self = .pending(partialText: r.partialText)
         case .speechRecognitionResultText(let r):    self = .text(r.text)
         case .speechRecognitionResultError(let r):   self = .failed(transcriptionErrorText(r.error.message))
+        case .unsupported:                           return nil
         }
     }
 }

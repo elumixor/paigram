@@ -47,6 +47,17 @@ extension ChatHistoryLoader {
     func recognizeSpeech(chatId: Int64, messageId: Int64) async throws {}
 }
 
+/// `ok` or `error` reply to `RecognizeSpeech`.
+private struct RecognizeSpeechReply: Decodable {
+    let type: String
+    let code: Int?
+    let message: String?
+
+    enum CodingKeys: String, CodingKey {
+        case type = "@type", code, message
+    }
+}
+
 /// TDLib's `recognizeSpeech` request. TDShim's generated subset doesn't carry
 /// it; `DTO` derives the `@type` ("recognizeSpeech") from the type name.
 private struct RecognizeSpeech: Codable {
@@ -244,8 +255,9 @@ struct TDLibChatHistoryLoader: ChatHistoryLoader {
                 continuation.resume(throwing: error)
             }
         }
-        if let error = try? client.decoder.decode(DTO<TDError>.self, from: data) {
-            throw error.payload
+        let reply = try client.decoder.decode(RecognizeSpeechReply.self, from: data)
+        if reply.type == "error" {
+            throw TDError(code: reply.code ?? 0, message: reply.message ?? "")
         }
     }
 

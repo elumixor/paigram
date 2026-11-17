@@ -310,7 +310,7 @@ func voiceNoteVisual(for content: MessageContent, fileLocals: [Int: File]) -> Vo
         waveform: m.voiceNote.waveform,
         caption: m.caption.text,
         localPath: localPath,
-        transcription: m.voiceNote.speechRecognitionResult.map(VoiceTranscription.init)
+        transcription: m.voiceNote.speechRecognitionResult.flatMap(VoiceTranscription.init)
     )
 }
 
