@@ -356,7 +356,17 @@ private func contentNodeMessagesAndClassesForItem(_ item: ChatMessageItem) -> ([
             needReactions = false
             isAction = paiTrailer.meta.isEvent
             continue
-        } else if let paiTrailer, paiTrailer.meta.isStatus || !(paiTrailer.meta.tools ?? []).isEmpty || paiTrailer.meta.durationMs != nil {
+        }
+        // What pai's log row adds to an agent's reply or a notice: a notice drawing a connector card is nothing but the
+        // card; a reply's HTML pages go under its words.
+        let paiRow = paiTrailer != nil ? PaiRows.meta(message) : nil
+        if paiRow?.card != nil {
+            result.removeAll(where: { $0.0.id == message.id })
+            result.append((message, ChatMessagePaiConnectorCardBubbleContentNode.self, itemAttributes, BubbleItemAttributes(isAttachment: false, neighborType: .text, neighborSpacing: .default)))
+            needReactions = false
+            continue
+        }
+        if let paiTrailer, paiTrailer.meta.isStatus || !(paiTrailer.meta.tools ?? []).isEmpty || paiTrailer.meta.durationMs != nil {
             result.append((message, ChatMessagePaiToolsBubbleContentNode.self, itemAttributes, BubbleItemAttributes(isAttachment: false, neighborType: .text, neighborSpacing: .default)))
             needReactions = false
             if paiTrailer.meta.isStatus {
@@ -433,6 +443,11 @@ private func contentNodeMessagesAndClassesForItem(_ item: ChatMessageItem) -> ([
         
         if richText != nil && !skipText {
             result.append((message, ChatMessageRichDataBubbleContentNode.self, itemAttributes, BubbleItemAttributes(isAttachment: false, neighborType: .text, neighborSpacing: .default)))
+            needReactions = false
+        }
+        
+        if let paiRow, !paiRow.artifacts.isEmpty {
+            result.append((message, ChatMessagePaiArtifactBubbleContentNode.self, itemAttributes, BubbleItemAttributes(isAttachment: false, neighborType: .text, neighborSpacing: .default)))
             needReactions = false
         }
         

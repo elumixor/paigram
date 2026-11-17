@@ -67,7 +67,7 @@ public struct PaiCardQuestion: Codable, Equatable {
 }
 
 extension String {
-    var paiNonEmpty: String? {
+    public var paiNonEmpty: String? {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
@@ -119,9 +119,11 @@ public struct PaiRichMeta: Decodable, Equatable {
     public let priority: String?
     /// The forum topic the agent's chat is in.
     public let thread: Int64?
+    /// The message-log row this message draws, when the trailer names it (a topic's history from before the topic).
+    public let logId: Int?
 
     private enum CodingKeys: String, CodingKey {
-        case v, kind, session, project, tools, durationMs, state, tool, startedAt, agent, agentName, breadcrumb, event, icon, items, status, askId, options, optionDetails, multiSelect, questions, answer, priority, thread
+        case v, kind, session, project, tools, durationMs, state, tool, startedAt, agent, agentName, breadcrumb, event, icon, items, status, askId, options, optionDetails, multiSelect, questions, answer, priority, thread, logId
     }
 
     /// Only the version and kind are required: pai adds fields over time, and one that does not parse is left out,
@@ -152,6 +154,7 @@ public struct PaiRichMeta: Decodable, Equatable {
         answer = try? c.decodeIfPresent(String.self, forKey: .answer)
         priority = try? c.decodeIfPresent(String.self, forKey: .priority)
         thread = try? c.decodeIfPresent(Int64.self, forKey: .thread)
+        logId = try? c.decodeIfPresent(Int.self, forKey: .logId)
     }
 
     public static let version = 1

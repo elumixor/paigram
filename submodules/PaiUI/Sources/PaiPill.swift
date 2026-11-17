@@ -8,7 +8,7 @@ import TelegramCore
 /// entry in `kinds`; the first whose pattern matches the whole reference wins.
 public enum PaiPill {
     public enum Kind: String {
-        case balanceBlock, keepPage, person, thread, agent, commit, issue, hash, card, devSession
+        case balanceBlock, keepPage, person, message, thread, agent, commit, issue, hash, card, devSession
     }
 
     /// The picture at the pill's start, tinted by the look's colour.
@@ -79,6 +79,10 @@ public enum PaiPill {
     static let keepBase = "https://keep.desk.atmagaming.com"
     static let devBase = "https://dev.desk.atmagaming.com"
     static let balanceBase = "https://balance.desk.atmagaming.com"
+    static let paiBase = "https://pai.desk.atmagaming.com"
+
+    /// A message's session: `[0-9A-Za-z]` with inner `-` (`pai/src/protocol/message-links.ts`).
+    private static let threadSource = "[0-9A-Za-z](?:[0-9A-Za-z-]*[0-9A-Za-z])?"
 
     private struct Spec {
         let kind: Kind
@@ -107,6 +111,8 @@ public enum PaiPill {
              name: { _ in "Keep page" }, href: { "\(keepBase)/p/\(tail($0))" }, plainUntilFound: false),
         Spec(kind: .person, pattern: regex("people:person/[0-9A-Za-z-]+"), mark: .symbol("person.crop.circle"), external: false,
              name: { _ in "Person" }, href: { _ in nil }, plainUntilFound: false),
+        Spec(kind: .message, pattern: regex("pai:thread/\(threadSource)#(?:msg|at)/\\d{1,15}"), mark: .symbol("text.bubble"), external: false,
+             name: { _ in "Message" }, href: { messagePath($0).map { paiBase + $0 } }, plainUntilFound: false),
         Spec(kind: .thread, pattern: regex("pai:thread/[0-9A-Za-z_-]+"), mark: .symbol("bubble.left.and.bubble.right"), external: false,
              name: { _ in "Thread" }, href: { _ in nil }, plainUntilFound: false),
         Spec(kind: .agent, pattern: regex("pai:agent/[0-9A-Za-z_-]+"), mark: .symbol("person.crop.circle"), external: false,
@@ -135,11 +141,27 @@ public enum PaiPill {
     // MARK: Finding references
 
     private static let barePattern = try! NSRegularExpression(pattern:
-        "(?<![\\w/:.#@-])(balance:block/[A-Za-z0-9_-]+|keep:page/[0-9A-Za-z-]{6,36}|dev:session/[0-9A-Za-z-]{6,36}|people:person/[0-9A-Za-z-]+|pai:(?:thread|agent)/[0-9A-Za-z_-]+|pai:(?:draft|ask|card)/\\d{1,6}|git:@?[\\w-]+(?:\\.[\\w-]+)*(?:/[\\w-]+(?:\\.[\\w-]+)*)?(?:@[0-9a-f]{7,40}|#\\d{1,7}))(?![\\w/-])")
+        "(?<![\\w/:.#@-])(balance:block/[A-Za-z0-9_-]+|keep:page/[0-9A-Za-z-]{6,36}|dev:session/[0-9A-Za-z-]{6,36}|people:person/[0-9A-Za-z-]+|pai:thread/\(threadSource)#(?:msg|at)/\\d{1,15}|pai:(?:thread|agent)/[0-9A-Za-z_-]+|pai:(?:draft|ask|card)/\\d{1,6}|git:@?[\\w-]+(?:\\.[\\w-]+)*(?:/[\\w-]+(?:\\.[\\w-]+)*)?(?:@[0-9a-f]{7,40}|#\\d{1,7}))(?![\\w/-])")
     private static let hashPattern = try! NSRegularExpression(pattern: "(?<![\\w/:.#@-])([0-9a-f]{7,40})(?![\\w/-])")
     private static let keepLink = try! NSRegularExpression(pattern: "^https://keep\\.desk\\.atmagaming\\.com/p/([0-9a-f-]{36})(?:[/?#].*)?$")
     private static let devLink = try! NSRegularExpression(pattern: "^https://[^/]*dev[^/]*/.*[?&]session=([0-9a-f-]{36})")
     private static let cardLink = try! NSRegularExpression(pattern: "/#/(draft|ask)/(\\d{1,6})$")
+    private static let messageLink = try! NSRegularExpression(pattern: "^https://pai\\.desk\\.atmagaming\\.com/t/(\(threadSource))/?\\?(?:[^#]*&)?(msg|at)=(\\d{1,15})(?:[&#]|$)")
+    private static let oldMessageLink = try! NSRegularExpression(pattern: "^https://pai\\.desk\\.atmagaming\\.com/?#/msg/(\(threadSource))/(msg|at)/(\\d{1,15})$")
+    private static let messageUrn = try! NSRegularExpression(pattern: "^pai:thread/(\(threadSource))#(msg|at)/(\\d{1,15})$")
+
+    /// A message link as pai's web client writes it (`/t/<session>?msg=<id>`, or the old hash address) as its URN.
+    public static func messageRef(fromLink url: String) -> Ref? {
+        let url = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let groups = capture(messageLink, url) ?? capture(oldMessageLink, url), groups.count == 3 else { return nil }
+        return Ref(kind: .message, urn: "pai:thread/\(groups[0])#\(groups[1])/\(groups[2])")
+    }
+
+    /// The web client's path for a message URN.
+    private static func messagePath(_ urn: String) -> String? {
+        guard let groups = capture(messageUrn, urn), groups.count == 3 else { return nil }
+        return "/t/\(groups[0])?\(groups[1])=\(groups[2])"
+    }
 
     private static func capture(_ regex: NSRegularExpression, _ text: String, group: Int = 1) -> [String]? {
         let ns = text as NSString
@@ -149,6 +171,7 @@ public enum PaiPill {
 
     /// The reference a link points at: a Keep page, a dev session, a draft or ask in pai, or a URN as the target.
     private static func ref(fromLink url: String) -> Ref? {
+        if let message = messageRef(fromLink: url) { return message }
         if let id = capture(keepLink, url)?.first { return Ref(kind: .keepPage, urn: "keep:page/\(id)") }
         if let id = capture(devLink, url)?.first { return Ref(kind: .devSession, urn: "dev:session/\(id)") }
         if let groups = capture(cardLink, url), groups.count == 2 { return Ref(kind: .card, urn: "pai:\(groups[0])/\(groups[1])") }
@@ -170,7 +193,14 @@ public enum PaiPill {
                 if let linked = ref(fromLink: url) {
                     found.append(Match(ref: linked, range: range, label: ns.substring(with: range), url: url))
                 }
-            case .Url, .Email, .Pre, .Mention, .TextMention, .Hashtag:
+            case .Url:
+                blocked.append(range)
+                // A pasted message link draws as the message's pill.
+                let url = ns.substring(with: range)
+                if let linked = messageRef(fromLink: url) {
+                    found.append(Match(ref: linked, range: range, label: nil, url: url))
+                }
+            case .Email, .Pre, .Mention, .TextMention, .Hashtag:
                 blocked.append(range)
             default:
                 break
@@ -205,6 +235,17 @@ public enum PaiPill {
     private static let lock = NSLock()
     private static var entries: [String: Entry] = [:]
     private static var inFlight: Set<String> = []
+    /// The agent whose chat shows a resolved message (`pai` = General's), by the message's URN.
+    private static var messageChats: [String: String] = [:]
+
+    /// The agent chat a message link opens in the app: known once the link has resolved; nil for a plain thread's
+    /// turn or a link not resolved yet, which opens in the browser.
+    public static func messageChat(link url: String) -> String? {
+        guard let ref = messageRef(fromLink: url) else { return nil }
+        lock.lock()
+        defer { lock.unlock() }
+        return messageChats[ref.urn]
+    }
 
     /// The record's look as known now; asks for it when unknown or older than a minute.
     public static func state(_ ref: Ref) -> State {
@@ -237,7 +278,8 @@ public enum PaiPill {
         case .pending:
             return spec(match.ref.kind).plainUntilFound ? nil : (fallback(match, missing: false), true)
         case .missing:
-            return spec(match.ref.kind).plainUntilFound ? nil : (fallback(match, missing: true), true)
+            // A message link whose message is gone is plain text, as the web client shows it.
+            return spec(match.ref.kind).plainUntilFound || match.ref.kind == .message ? nil : (fallback(match, missing: true), true)
         }
     }
 
@@ -325,6 +367,12 @@ public enum PaiPill {
             let project: String?
         }
 
+        struct Message: Decodable {
+            let thread: String?
+            let chat: String?
+            let avatar: String?
+        }
+
         struct Block: Decodable {
             struct Sphere: Decodable {
                 let name: String?
@@ -352,6 +400,7 @@ public enum PaiPill {
         let card: Card?
         let commit: Commit?
         let block: Block?
+        let message: Message?
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -365,9 +414,10 @@ public enum PaiPill {
             card = try? c.decodeIfPresent(Card.self, forKey: .card)
             commit = try? c.decodeIfPresent(Commit.self, forKey: .commit)
             block = try? c.decodeIfPresent(Block.self, forKey: .block)
+            message = try? c.decodeIfPresent(Message.self, forKey: .message)
         }
 
-        private enum CodingKeys: String, CodingKey { case urn, kind, id, label, url, avatar, state, card, commit, block }
+        private enum CodingKeys: String, CodingKey { case urn, kind, id, label, url, avatar, state, card, commit, block, message }
     }
 
     /// The resolver takes a card as `#N`, `draft #N` or `ask #N`.
@@ -412,6 +462,11 @@ public enum PaiPill {
             look.mark = .symbol(isAsk ? "hand.raised" : channelSymbol(r.card?.channel))
             look.done = (r.card?.state ?? r.state) == "done"
             look.external = false
+        case "pai:message":
+            if let avatar = PaiAvatars.address(r.message?.avatar ?? r.avatar) { look.mark = .avatar(avatar) }
+            lock.lock()
+            messageChats[ref.urn] = r.message?.chat?.paiNonEmpty
+            lock.unlock()
         case "dev:session":
             if label == nil || label == "dev session" { look.title = "Dev session \(tail(r.urn ?? ref.urn).prefix(6))" }
         default:

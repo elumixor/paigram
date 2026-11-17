@@ -307,6 +307,7 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
     var paiUsageObserver: NSObjectProtocol?
     var paiNeedsObserver: NSObjectProtocol?
     var paiURNObserver: NSObjectProtocol?
+    var paiRowsObserver: NSObjectProtocol?
     let paiUsageNode = PaiUsageRingNode()
     var paiUsageNavigationButton: ChatNavigationButton?
 
@@ -7041,6 +7042,9 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
         if let paiURNObserver = self.paiURNObserver {
             NotificationCenter.default.removeObserver(paiURNObserver)
         }
+        if let paiRowsObserver = self.paiRowsObserver {
+            NotificationCenter.default.removeObserver(paiRowsObserver)
+        }
         if let paiAgentsObserver = self.paiAgentsObserver {
             NotificationCenter.default.removeObserver(paiAgentsObserver)
         }
@@ -7775,6 +7779,19 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
                 var ids: [MessageId] = []
                 self.chatDisplayNode.historyNode.forEachVisibleMessageItemNode { itemNode in
                     if let message = itemNode.item?.message, !PaiPill.matches(text: message.text, entities: message.textEntitiesAttribute?.entities ?? []).isEmpty {
+                        ids.append(message.id)
+                    }
+                }
+                for id in ids {
+                    self.chatDisplayNode.historyNode.requestMessageUpdate(id)
+                }
+            })
+            // An agent's log rows arrived or changed: replies and notices redraw their pages and cards.
+            self.paiRowsObserver = NotificationCenter.default.addObserver(forName: PaiRows.changed, object: nil, queue: .main, using: { [weak self] _ in
+                guard let self else { return }
+                var ids: [MessageId] = []
+                self.chatDisplayNode.historyNode.forEachVisibleMessageItemNode { itemNode in
+                    if let message = itemNode.item?.message, PaiRows.wants(message) {
                         ids.append(message.id)
                     }
                 }
@@ -10021,7 +10038,15 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
             navigationController.pushViewController(BrowserScreen(context: self.context, subject: .webPage(url: url)))
             return
         }
-        
+
+        // A link to a message of an agent's chat opens that chat here; a plain thread's turn stays the web client's.
+        if PaiChat.isBot(self.presentationInterfaceState.renderedPeer?.peer), let chat = PaiPill.messageChat(link: url), PaiChat.thread(of: chat) != nil {
+            progress?.set(.single(false))
+            self.chatDisplayNode.dismissInput()
+            self.openPaiAgent(slug: chat, thread: nil)
+            return
+        }
+
         if allowInlineWebpageResolution, let message, let webpage = message.media.first(where: { $0 is TelegramMediaWebpage }) as? TelegramMediaWebpage, case let .Loaded(content) = webpage.content, content.url == url {
             if content.instantPage != nil {
                 if let navigationController = self.navigationController as? NavigationController {

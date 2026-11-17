@@ -143,7 +143,7 @@ private func firstLine(_ text: String) -> String {
 /// an agent's answer as a reply (`result`), and events, cards, asks and notices as they do in the chat.
 func paiHistoryContent(row: PaiLogRow, slug: String, thread: Int64, agents: [PaiAgentInfo]) -> (String, [MessageTextEntity]) {
     let name = { (slug: String) -> String in agents.first(where: { $0.slug == slug })?.name ?? slug }
-    var trailer: [String: Any] = ["v": 1, "session": slug, "agent": slug, "agentName": name(slug), "thread": thread, "author": row.from, "authorName": name(row.from)]
+    var trailer: [String: Any] = ["v": 1, "session": slug, "agent": slug, "agentName": name(slug), "thread": thread, "author": row.from, "authorName": name(row.from), "logId": Int(row.id)]
     for key in ["breadcrumb", "event", "icon", "priority"] {
         if let value = row.meta[key] {
             trailer[key] = value

@@ -61,6 +61,16 @@ public final class PaiClient {
         return try JSONDecoder().decode(T.self, from: data)
     }
 
+    /// A file's bytes as the box keeps it (an attachment, an artifact), with the same auth as every call.
+    public func data(_ path: String) async throws -> Data {
+        let request = try request(path)
+        let (data, response) = try await session.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if status == 401, let token = PaiAuth.token { PaiAuth.rejected(token) }
+        guard (200..<300).contains(status) else { throw PaiClientError(message: "\(path) failed with HTTP \(status)") }
+        return data
+    }
+
     // MARK: Threads
 
     public func tasks() async throws -> PaiTasks { try await call(PaiTasks.self, "/tasks") }
