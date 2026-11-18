@@ -343,9 +343,10 @@ func chatHistoryEntriesForView(
     
     var addBotForumHeader = false
     // The pai bot's chat outside a topic is where a thread starts: nothing but the card, no other topics' messages.
-    let isPaiBot = PaiChat.isBot(chatPeer)
-    if isPaiBot {
-        PaiChat.botPeerId = chatPeer?.id
+    // A topic's view may carry no peer entry: the bot's id, learned at launch, still names its chat.
+    let isPaiBot = PaiChat.isBot(chatPeer) || (location.peerId != nil && location.peerId == PaiChat.botPeerId)
+    if isPaiBot, let chatPeer {
+        PaiChat.botPeerId = chatPeer.id
     }
     if isPaiBot, location.threadId == nil, !view.isLoading {
         entries.removeAll()

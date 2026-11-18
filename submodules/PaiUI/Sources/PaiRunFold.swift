@@ -45,7 +45,11 @@ public enum PaiRunFold {
         }
         switch meta.kind {
         case "turn", "result":
-            if meta.durationMs != nil || meta.logId != nil || message.id.namespace == Namespaces.Message.Box || text.hasPrefix("🔴") {
+            // A log row's report says whether the turn ended (`done`) or was an interim note (`progress`).
+            if meta.status == "progress" {
+                return .folded
+            }
+            if meta.durationMs != nil || message.id.namespace == Namespaces.Message.Box || text.hasPrefix("🔴") {
                 return .shown
             }
             return .folded
