@@ -12,6 +12,12 @@ public enum PaiRunFold {
         public let runKey: MessageId
         public let count: Int
         public let expanded: Bool
+
+        public init(runKey: MessageId, count: Int, expanded: Bool) {
+            self.runKey = runKey
+            self.count = count
+            self.expanded = expanded
+        }
     }
 
     public enum Role {
