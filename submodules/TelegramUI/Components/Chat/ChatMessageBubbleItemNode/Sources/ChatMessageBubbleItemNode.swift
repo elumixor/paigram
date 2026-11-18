@@ -349,6 +349,14 @@ private func contentNodeMessagesAndClassesForItem(_ item: ChatMessageItem) -> ([
                 
         // A pai bot message: its tool metadata gets a node of its own above the text, and a status card is nothing but that node.
         // Rows from pai's message log are nothing but their own node: an event is a service row, a delegation or report a card.
+        // The "N steps" row the history builder puts after a folded run of an agent's topic.
+        if PaiRunFold.row(message) != nil {
+            result.removeAll(where: { $0.0.id == message.id })
+            result.append((message, ChatMessagePaiEventBubbleContentNode.self, itemAttributes, BubbleItemAttributes(isAttachment: false, neighborType: .text, neighborSpacing: .default)))
+            needReactions = false
+            isAction = true
+            continue
+        }
         let paiTrailer = PaiTrailer.find(message)
         if let paiTrailer, paiTrailer.meta.isEvent || paiTrailer.meta.isCard {
             result.removeAll(where: { $0.0.id == message.id })

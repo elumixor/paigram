@@ -376,6 +376,81 @@ func chatHistoryEntriesForView(
         }
     }
     
+    // An agent's topic shows only what is addressed to the user; the rest of each run folds into one "N steps" row
+    // after it, which opens the run in place (PaiRunFold).
+    if isPaiBot && location.threadId != nil {
+        var folds = [Bool](repeating: false, count: entries.count)
+        var nextFolds = false
+        for index in (0 ..< entries.count).reversed() {
+            guard case let .MessageEntry(message, _, _, _, _, _) = entries[index] else {
+                nextFolds = false
+                continue
+            }
+            switch PaiRunFold.role(message) {
+            case .shown: nextFolds = false
+            case .folded: nextFolds = true
+            case .continuation: break
+            }
+            folds[index] = nextFolds
+        }
+        var result: [ChatHistoryEntry] = []
+        result.reserveCapacity(entries.count)
+        var run: [(entry: ChatHistoryEntry, message: Message)] = []
+        let closeRun = {
+            defer { run.removeAll() }
+            guard let first = run.first?.message, let last = run.last?.message else { return }
+            let onlyEvent = run.count == 1 && (PaiTrailer.find(last)?.meta.isEvent ?? false)
+            if onlyEvent {
+                result.append(run[0].entry)
+                return
+            }
+            let runKey = first.id
+            let expanded = PaiRunFold.isExpanded(runKey)
+            if expanded {
+                result.append(contentsOf: run.map(\.entry))
+            }
+            let stableId = UInt32.max - first.stableId
+            PaiRunFold.register(stableId: stableId, row: PaiRunFold.Row(runKey: runKey, count: run.count, expanded: expanded))
+            let rowMessage = Message(
+                stableId: stableId,
+                stableVersion: UInt32(run.count << 1) | (expanded ? 1 : 0),
+                id: last.id,
+                globallyUniqueId: nil,
+                groupingKey: nil,
+                groupInfo: nil,
+                threadId: last.threadId,
+                timestamp: last.timestamp,
+                flags: [.Incoming],
+                tags: [],
+                globalTags: [],
+                localTags: [],
+                customTags: [],
+                forwardInfo: nil,
+                author: last.author,
+                text: PaiRunFold.label(run.count),
+                attributes: [],
+                media: [],
+                peers: last.peers,
+                associatedMessages: SimpleDictionary<MessageId, Message>(),
+                associatedMessageIds: [],
+                associatedMedia: [:],
+                associatedThreadInfo: last.associatedThreadInfo,
+                associatedStories: [:]
+            )
+            result.append(.MessageEntry(rowMessage, presentationData, true, nil, .none, ChatMessageEntryAttributes(rank: nil, isContact: false, contentTypeHint: .generic, updatingMedia: nil, isPlaying: false, isCentered: false, authorStoryStats: nil, displayContinueThreadFooter: false, pinToTop: false)))
+        }
+        for (index, entry) in entries.enumerated() {
+            if folds[index], case let .MessageEntry(message, _, _, _, _, _) = entry {
+                run.append((entry, message))
+            } else {
+                closeRun()
+                result.append(entry)
+            }
+        }
+        closeRun()
+        entries = result
+    }
+
     // pai's service rows in a topic: a run of consecutive events shows as one row, the run's last, folded.
     if isPaiBot && location.threadId != nil {
         var folded: [MessageId: [PaiEventLine]] = [:]
