@@ -82,6 +82,8 @@ public final class GlobalControlPanelsContext {
         case setupPhoto(EnginePeer)
         case accountFreeze
         case link(id: String, url: String, title: ServerSuggestionInfo.Item.Text, subtitle: ServerSuggestionInfo.Item.Text)
+        /// Paigram: decisions the user's agents wait on; `text` names the agents.
+        case paiNeeds(count: Int, text: String)
     }
     
     public final class GroupCall: Equatable {
