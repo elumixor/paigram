@@ -2,6 +2,7 @@ import AccountContext
 import Display
 import Foundation
 import SwiftUI
+import UIKit
 import TelegramCore
 
 /// What an agent's profile (Telegram's profile screen on its peer, `PeerInfoPaiItems.swift`) shows of it, and the lists
@@ -40,6 +41,12 @@ public enum PaiProfile {
             return nil
         }
         return "\(PaiPill.keepBase)/p/\(urn.dropFirst("keep:page/".count))"
+    }
+
+    /// The Keep mark with its external ↗, as a Keep pill draws it, for a row's icon.
+    public static func keepMark(size: CGFloat, color: UIColor) -> UIImage? {
+        let look = PaiPill.Look(title: "Keep", meta: nil, color: color, status: nil, mark: .keep, href: nil, hint: nil, done: false, external: true)
+        return PaiPill.markImage(look, size: size, textColor: color)
     }
 
     /// A list as a screen to push from the profile; nil before iOS 16.
