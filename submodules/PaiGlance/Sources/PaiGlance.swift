@@ -97,9 +97,11 @@ public struct PaiGlance: Codable, Equatable {
         public let depth: Int
         /// The plan's open steps (now first, then next), and the last few done.
         public let steps: [Step]
+        /// When the agent last did something (its last turn or output). Nil from a box or glance without it.
+        public let activeAt: Date?
         public var id: String { slug }
 
-        public init(slug: String, name: String, role: String?, status: String, doing: String?, depth: Int, steps: [Step]) {
+        public init(slug: String, name: String, role: String?, status: String, doing: String?, depth: Int, steps: [Step], activeAt: Date? = nil) {
             self.slug = slug
             self.name = name
             self.role = role
@@ -107,10 +109,26 @@ public struct PaiGlance: Codable, Equatable {
             self.doing = doing
             self.depth = depth
             self.steps = steps
+            self.activeAt = activeAt
         }
 
         public var working: Bool { status == "working" }
         public var now: Step? { steps.first { $0.state == "now" } }
+    }
+
+    /// A weekly hold in force on the box: background work waits until the weekly window resets.
+    public struct Hold: Codable, Equatable {
+        /// The weekly percent the hold starts at (90, 95).
+        public let level: Int
+        public let until: Date?
+        /// Turns held and dev calls refused this window.
+        public let held: Int
+
+        public init(level: Int, until: Date?, held: Int) {
+            self.level = level
+            self.until = until
+            self.held = held
+        }
     }
 
     public let at: Date
@@ -125,8 +143,10 @@ public struct PaiGlance: Codable, Equatable {
     public let needs: [Need]
     /// Every agent with its plan, in the tree's order (pai first). Empty from a glance stored before agents were read.
     public let team: [Member]
+    /// The weekly hold, when one is in force.
+    public let hold: Hold?
 
-    public init(at: Date, todayUsd: Double, usdPerHour: Double?, windows: [Window], agents: [AgentSpend], running: Int, needsCount: Int, needs: [Need], team: [Member] = []) {
+    public init(at: Date, todayUsd: Double, usdPerHour: Double?, windows: [Window], agents: [AgentSpend], running: Int, needsCount: Int, needs: [Need], team: [Member] = [], hold: Hold? = nil) {
         self.at = at
         self.todayUsd = todayUsd
         self.usdPerHour = usdPerHour
@@ -136,6 +156,7 @@ public struct PaiGlance: Codable, Equatable {
         self.needsCount = needsCount
         self.needs = needs
         self.team = team
+        self.hold = hold
     }
 
     public init(from decoder: Decoder) throws {
@@ -149,11 +170,12 @@ public struct PaiGlance: Codable, Equatable {
         needsCount = try container.decode(Int.self, forKey: .needsCount)
         needs = try container.decode([Need].self, forKey: .needs)
         team = try container.decodeIfPresent([Member].self, forKey: .team) ?? []
+        hold = try container.decodeIfPresent(Hold.self, forKey: .hold)
     }
 
     /// The glance with another list of needs (one answered) or agents.
     public func with(needs: [Need]? = nil, needsCount: Int? = nil, team: [Member]? = nil) -> PaiGlance {
-        PaiGlance(at: at, todayUsd: todayUsd, usdPerHour: usdPerHour, windows: windows, agents: agents, running: running, needsCount: needsCount ?? self.needsCount, needs: needs ?? self.needs, team: team ?? self.team)
+        PaiGlance(at: at, todayUsd: todayUsd, usdPerHour: usdPerHour, windows: windows, agents: agents, running: running, needsCount: needsCount ?? self.needsCount, needs: needs ?? self.needs, team: team ?? self.team, hold: hold)
     }
 
     public var session: Window? { windows.first { $0.name == "Session" } ?? windows.first }
@@ -169,7 +191,7 @@ public struct PaiGlance: Codable, Equatable {
     public func keepingWindows(of previous: PaiGlance?, now: Date = Date()) -> PaiGlance {
         guard let previous else { return self }
         let held = windows.isEmpty ? previous.windows.filter { ($0.resetsAt ?? .distantFuture) > now } : windows
-        return PaiGlance(at: at, todayUsd: todayUsd, usdPerHour: usdPerHour, windows: held, agents: agents, running: running, needsCount: needsCount, needs: needs, team: team.isEmpty ? previous.team : team)
+        return PaiGlance(at: at, todayUsd: todayUsd, usdPerHour: usdPerHour, windows: held, agents: agents, running: running, needsCount: needsCount, needs: needs, team: team.isEmpty ? previous.team : team, hold: hold)
     }
 }
 
@@ -197,12 +219,12 @@ public extension PaiGlance {
         team: [
             Member(slug: "pai", name: "Ari", role: "Chief of staff", status: "working", doing: "Sorting this week's asks · 2m ago", depth: 1, steps: [
                 Member.Step(state: "now", text: "Weekly review", eta: nil)
-            ]),
+            ], activeAt: Date().addingTimeInterval(-120)),
             Member(slug: "tomas", name: "Tomas", role: "Dev", status: "working", doing: "Release build running · 5m ago", depth: 2, steps: [
                 Member.Step(state: "now", text: "Ship 0.4.1", eta: "16 Nov"),
                 Member.Step(state: "next", text: "Watch dashboard", eta: nil)
-            ]),
-            Member(slug: "lena", name: "Lena", role: "Career", status: "idle", doing: "Invoice drafted · 1h ago", depth: 2, steps: [])
+            ], activeAt: Date().addingTimeInterval(-300)),
+            Member(slug: "lena", name: "Lena", role: "Career", status: "idle", doing: "Invoice drafted · 1h ago", depth: 2, steps: [], activeAt: Date().addingTimeInterval(-3600))
         ]
     )
 }

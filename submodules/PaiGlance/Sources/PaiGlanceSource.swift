@@ -124,7 +124,8 @@ public final class PaiGlanceLiveSource: PaiGlanceSource {
             status: raw["status"] as? String ?? "idle",
             doing: doing,
             depth: raw["depth"] as? Int ?? 1,
-            steps: steps
+            steps: steps,
+            activeAt: [date(raw["lastOutputAt"]), date(raw["lastActive"])].compactMap { $0 }.max()
         )
     }
 
@@ -260,6 +261,10 @@ public final class PaiGlanceLiveSource: PaiGlanceSource {
             guard let slug = agent["slug"] as? String, let usd = agent["usd"] as? Double else { return nil }
             return PaiGlance.AgentSpend(slug: slug, name: agent["name"] as? String ?? slug, usd: usd)
         }
+        let hold = (raw["hold"] as? [String: Any]).flatMap { hold -> PaiGlance.Hold? in
+            guard let level = (hold["level"] as? NSNumber)?.intValue else { return nil }
+            return PaiGlance.Hold(level: level, until: date(hold["until"]), held: (hold["held"] as? NSNumber)?.intValue ?? 0)
+        }
         let listed = needsData.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [[String: Any]] }
         let needs = (listed ?? raw["needsList"] as? [[String: Any]] ?? (raw["oldestNeed"] as? [String: Any]).map { [$0] } ?? []).compactMap(need)
         return PaiGlance(
@@ -270,7 +275,8 @@ public final class PaiGlanceLiveSource: PaiGlanceSource {
             agents: agents,
             running: raw["running"] as? Int ?? 0,
             needsCount: listed?.count ?? raw["needs"] as? Int ?? needs.count,
-            needs: Array(needs.sorted { $0.createdAt < $1.createdAt }.prefix(needsLimit))
+            needs: Array(needs.sorted { $0.createdAt < $1.createdAt }.prefix(needsLimit)),
+            hold: hold
         )
     }
 
