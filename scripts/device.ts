@@ -11,6 +11,7 @@ import { $ } from "bun";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { ascGet, ascPost } from "./asc.ts";
+import { missingEntitlements } from "./entitlements.ts";
 import { precheck } from "./precheck.ts";
 import { provision, readProfile } from "./provision.ts";
 import { releaseBuild } from "./release-build.ts";
@@ -157,8 +158,8 @@ if (!skipBuild) {
   const registered = (await Promise.all([device, ...(watch ? [watch] : [])].map(ensureRegistered))).some(Boolean);
   const profiles = `${adHocCodesigningPath}/profiles`;
   const stale = !(await covers(`${profiles}/Telegram.mobileprovision`, device)) || (watch !== undefined && !(await covers(`${profiles}/WatchApp.mobileprovision`, watch)));
-  const wifiInfo = (await readProfile(`${profiles}/Telegram.mobileprovision`).catch(() => undefined))?.Entitlements?.["com.apple.developer.networking.wifi-info"];
-  if (registered || stale || !wifiInfo) await provision("adHoc");
+  const granted = (await readProfile(`${profiles}/Telegram.mobileprovision`).catch(() => undefined))?.Entitlements;
+  if (registered || stale || missingEntitlements(granted).length) await provision("adHoc");
   await releaseBuild(adHocCodesigningPath, buildNumber, watch !== undefined);
 }
 await install(device, watch);

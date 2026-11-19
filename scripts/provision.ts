@@ -9,6 +9,7 @@
  * `bun run scripts/provision.ts` runs it alone; `bun run testflight` and `bun run device` run it first.
  */
 import { mkdirSync } from "node:fs";
+import { missingEntitlements } from "./entitlements.ts";
 import { asc, ascDelete, ascGet, ascPost } from "./asc.ts";
 import { adHocCodesigningPath, codesigningPath, configPath as config } from "./repo.ts";
 
@@ -21,7 +22,7 @@ const communication = "com.apple.developer.usernotifications.communication";
 
 /** Bundle id suffix, the profile file name Telegram's build expects (BuildConfiguration.py), the capabilities. */
 const targets: { suffix: string; file: string; name: string; capabilities: string[]; group: boolean }[] = [
-  { suffix: "", file: "Telegram", name: "Paigram", capabilities: ["PUSH_NOTIFICATIONS", "APP_GROUPS", "ACCESS_WIFI_INFORMATION", ...(siri ? ["SIRIKIT"] : [])], group: true },
+  { suffix: "", file: "Telegram", name: "Paigram", capabilities: ["PUSH_NOTIFICATIONS", "APP_GROUPS", "ACCESS_WIFI_INFORMATION", "ASSOCIATED_DOMAINS", ...(siri ? ["SIRIKIT"] : [])], group: true },
   { suffix: ".Share", file: "Share", name: "Paigram Share", capabilities: ["APP_GROUPS"], group: true },
   { suffix: ".NotificationContent", file: "NotificationContent", name: "Paigram Notification Content", capabilities: ["APP_GROUPS"], group: true },
   { suffix: ".NotificationService", file: "NotificationService", name: "Paigram Notification Service", capabilities: ["APP_GROUPS"], group: true },
@@ -119,6 +120,8 @@ export async function provision(kind: ProfileKind = "appStore") {
     const groups = granted["com.apple.security.application-groups"] as string[] | undefined;
     if (target.group && !groups?.includes(appGroup)) missingGroup.push(identifier);
     if (target.suffix === "" && !granted[communication]) missingCommunication = true;
+    const lacking = target.suffix === "" ? missingEntitlements(granted) : [];
+    if (lacking.length) throw new Error(`profile ${target.file} lacks ${lacking.join(", ")}: enable its capability on ${identifier}`);
     console.log(`profile ${target.file} (${identifier}) written`);
   }
   if (missingGroup.length) {
