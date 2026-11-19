@@ -1,0 +1,198 @@
+import Foundation
+import XCTest
+@testable import PaiPasskeyCore
+
+final class Base64URLTests: XCTestCase {
+    func testEncodeUsesURLAlphabetWithoutPadding() {
+        XCTAssertEqual(Base64URL.encode(Data([0xfb, 0xff, 0xfe])), "-__-")
+        XCTAssertEqual(Base64URL.encode(Data([0x01])), "AQ")
+        XCTAssertEqual(Base64URL.encode(Data([0x01, 0x02])), "AQI")
+        XCTAssertEqual(Base64URL.encode(Data()), "")
+    }
+
+    func testDecodeAcceptsMissingAndPresentPadding() {
+        XCTAssertEqual(Base64URL.decode("AQ"), Data([0x01]))
+        XCTAssertEqual(Base64URL.decode("AQ=="), Data([0x01]))
+        XCTAssertEqual(Base64URL.decode("AQI"), Data([0x01, 0x02]))
+        XCTAssertEqual(Base64URL.decode("-__-"), Data([0xfb, 0xff, 0xfe]))
+    }
+
+    func testDecodeRejectsInvalidInput() {
+        XCTAssertNil(Base64URL.decode("+/+/"))
+        XCTAssertNil(Base64URL.decode("A"))
+        XCTAssertNil(Base64URL.decode("AQ I"))
+    }
+
+    func testRoundTrip() {
+        for length in 0..<64 {
+            let data = PKCE.randomBytes(length)
+            let encoded = Base64URL.encode(data)
+            XCTAssertFalse(encoded.contains("="))
+            XCTAssertEqual(Base64URL.decode(encoded), data)
+        }
+    }
+}
+
+final class PKCETests: XCTestCase {
+    func testRFC7636AppendixBVector() {
+        XCTAssertEqual(
+            PKCE.challenge(for: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
+            "E9Melhoofx3jjZ8TEXzMfdG_YBpDlQ1rCnXK1hn-Np0"
+        )
+    }
+
+    func testVerifierIsValidAndChallengeIs43Characters() {
+        let verifier = PKCE.makeVerifier()
+        XCTAssertEqual(verifier.count, 43)
+        XCTAssertTrue(PKCE.isValidVerifier(verifier))
+        XCTAssertEqual(PKCE.challenge(for: verifier).count, 43)
+        XCTAssertNotEqual(verifier, PKCE.makeVerifier())
+    }
+
+    func testVerifierValidation() {
+        XCTAssertFalse(PKCE.isValidVerifier(String(repeating: "a", count: 42)))
+        XCTAssertTrue(PKCE.isValidVerifier(String(repeating: "a", count: 43)))
+        XCTAssertTrue(PKCE.isValidVerifier(String(repeating: "-._~", count: 32)))
+        XCTAssertFalse(PKCE.isValidVerifier(String(repeating: "a", count: 129)))
+        XCTAssertFalse(PKCE.isValidVerifier(String(repeating: "a", count: 42) + "+"))
+    }
+}
+
+final class EnrolTests: XCTestCase {
+    func testURLCarriesQuery() throws {
+        let url = try XCTUnwrap(PaiPasskeyEnrol.url(base: "https://pai.desk.atmagaming.com", state: "st", challenge: "ch", name: "Pai's iPhone", invite: "inv"))
+        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        XCTAssertEqual(components.host, "pai.desk.atmagaming.com")
+        XCTAssertEqual(components.path, "/link")
+        XCTAssertNil(components.fragment)
+        let items = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+        XCTAssertEqual(items, ["enrol": "1", "state": "st", "code_challenge": "ch", "name": "Pai's iPhone", "invite": "inv"])
+    }
+
+    func testURLOmitsEmptyInvite() throws {
+        let url = try XCTUnwrap(PaiPasskeyEnrol.url(base: "https://pai.desk.atmagaming.com/", state: "s", challenge: "c", name: "n", invite: nil))
+        XCTAssertFalse(url.absoluteString.contains("invite"))
+        XCTAssertTrue(url.absoluteString.hasPrefix("https://pai.desk.atmagaming.com/link?"))
+    }
+
+    func testCallbackWithMatchingState() throws {
+        let url = URL(string: "paigram://pai-auth?ticket=tk&expires=1700000000000&state=abc")!
+        let callback = try PaiPasskeyEnrol.parse(callback: url, expectedState: "abc")
+        XCTAssertEqual(callback.ticket, "tk")
+        XCTAssertEqual(callback.expires, Date(timeIntervalSince1970: 1_700_000_000))
+    }
+
+    func testCallbackRejectsWrongState() {
+        let url = URL(string: "paigram://pai-auth?ticket=tk&state=other")!
+        XCTAssertThrowsError(try PaiPasskeyEnrol.parse(callback: url, expectedState: "abc")) {
+            XCTAssertEqual($0 as? PaiPasskeyEnrolError, .stateMismatch)
+        }
+        let missing = URL(string: "paigram://pai-auth?ticket=tk")!
+        XCTAssertThrowsError(try PaiPasskeyEnrol.parse(callback: missing, expectedState: "abc")) {
+            XCTAssertEqual($0 as? PaiPasskeyEnrolError, .stateMismatch)
+        }
+    }
+
+    func testCallbackRejectsWrongHostAndMissingTicket() {
+        XCTAssertThrowsError(try PaiPasskeyEnrol.parse(callback: URL(string: "paigram://other?ticket=tk&state=abc")!, expectedState: "abc")) {
+            XCTAssertEqual($0 as? PaiPasskeyEnrolError, .wrongCallback)
+        }
+        XCTAssertThrowsError(try PaiPasskeyEnrol.parse(callback: URL(string: "https://pai-auth?ticket=tk&state=abc")!, expectedState: "abc")) {
+            XCTAssertEqual($0 as? PaiPasskeyEnrolError, .wrongCallback)
+        }
+        XCTAssertThrowsError(try PaiPasskeyEnrol.parse(callback: URL(string: "paigram://pai-auth?state=abc&ticket=")!, expectedState: "abc")) {
+            XCTAssertEqual($0 as? PaiPasskeyEnrolError, .missingTicket)
+        }
+    }
+
+    func testStateIsRandom() {
+        XCTAssertNotEqual(PaiPasskeyEnrol.makeState(), PaiPasskeyEnrol.makeState())
+        XCTAssertGreaterThanOrEqual(PaiPasskeyEnrol.makeState().count, 22)
+    }
+}
+
+final class JSONShapeTests: XCTestCase {
+    private func object(_ value: Encodable) throws -> NSDictionary {
+        try XCTUnwrap(try value.jsonObject() as? NSDictionary)
+    }
+
+    func testRegistrationResponseShape() throws {
+        let response = PasskeyRegistrationResponse(credentialID: Data([1, 2, 3]), clientDataJSON: Data("{}".utf8), attestationObject: Data([0xff]))
+        let expected: NSDictionary = [
+            "id": "AQID",
+            "rawId": "AQID",
+            "type": "public-key",
+            "response": ["clientDataJSON": "e30", "attestationObject": "_w", "transports": ["internal", "hybrid"]],
+            "clientExtensionResults": [String: Any](),
+        ]
+        XCTAssertEqual(try object(response), expected)
+    }
+
+    func testAssertionResponseShape() throws {
+        let response = PasskeyAssertionResponse(credentialID: Data([1, 2, 3]), clientDataJSON: Data("{}".utf8), authenticatorData: Data([0xfb]), signature: Data([0x00, 0x01]), userHandle: Data([0x07]))
+        let expected: NSDictionary = [
+            "id": "AQID",
+            "rawId": "AQID",
+            "type": "public-key",
+            "response": ["clientDataJSON": "e30", "authenticatorData": "-w", "signature": "AAE", "userHandle": "Bw"],
+            "clientExtensionResults": [String: Any](),
+        ]
+        XCTAssertEqual(try object(response), expected)
+    }
+
+    func testBodiesUseSnakeCaseKeys() throws {
+        let registration = PasskeyRegistrationResponse(credentialID: Data([1]), clientDataJSON: Data([2]), attestationObject: Data([3]))
+        XCTAssertEqual(try object(PasskeyEnrolOptionsBody(ticket: "t", codeVerifier: "v")), ["ticket": "t", "code_verifier": "v"])
+        let finish = try object(PasskeyEnrolFinishBody(ticket: "t", codeVerifier: "v", response: registration, name: "iPhone"))
+        XCTAssertEqual(Set(finish.allKeys as! [String]), ["ticket", "code_verifier", "response", "name"])
+        XCTAssertEqual(finish["code_verifier"] as? String, "v")
+
+        let assertion = PasskeyAssertionResponse(credentialID: Data([1]), clientDataJSON: Data([2]), authenticatorData: Data([3]), signature: Data([4]), userHandle: nil)
+        let unlock = try object(PasskeyUnlockBody(minutes: 60, response: assertion))
+        XCTAssertEqual(unlock["minutes"] as? Int, 60)
+        XCTAssertNotNil(unlock["response"] as? NSDictionary)
+        let unlockNoMinutes = try object(PasskeyUnlockBody(minutes: nil, response: assertion))
+        XCTAssertNil(unlockNoMinutes["minutes"])
+        XCTAssertEqual(Set(try object(PasskeyApproveBody(response: assertion)).allKeys as! [String]), ["response"])
+    }
+
+    func testDecodesCreationOptions() throws {
+        let json = """
+        {"challenge":"Y2hhbGxlbmdl","rp":{"name":"pai","id":"pai.desk.atmagaming.com"},
+         "user":{"id":"dXNlcg","name":"pai","displayName":"pai"},
+         "pubKeyCredParams":[{"type":"public-key","alg":-7},{"type":"public-key","alg":-257}],
+         "timeout":60000,"attestation":"none",
+         "excludeCredentials":[{"id":"AQID","type":"public-key","transports":["internal"]}],
+         "authenticatorSelection":{"residentKey":"required","userVerification":"required"},
+         "extensions":{"credProps":true},"hints":[]}
+        """
+        let options = try JSONDecoder().decode(PasskeyCreationOptions.self, from: Data(json.utf8))
+        XCTAssertEqual(options.rp.id, "pai.desk.atmagaming.com")
+        XCTAssertEqual(Base64URL.decode(options.challenge), Data("challenge".utf8))
+        XCTAssertEqual(Base64URL.decode(options.user.id), Data("user".utf8))
+        XCTAssertEqual(options.excludeCredentials?.first?.idData, Data([1, 2, 3]))
+        XCTAssertEqual(options.pubKeyCredParams?.map(\.alg), [-7, -257])
+    }
+
+    func testDecodesRequestOptions() throws {
+        let json = """
+        {"challenge":"Y2hhbGxlbmdl","rpId":"pai.desk.atmagaming.com","timeout":60000,
+         "allowCredentials":[{"id":"AQID","type":"public-key"}],"userVerification":"required"}
+        """
+        let options = try JSONDecoder().decode(PasskeyRequestOptions.self, from: Data(json.utf8))
+        XCTAssertEqual(options.rpId, "pai.desk.atmagaming.com")
+        XCTAssertEqual(options.allowCredentials?.first?.idData, Data([1, 2, 3]))
+        XCTAssertEqual(options.userVerification, "required")
+
+        let minimal = try JSONDecoder().decode(PasskeyRequestOptions.self, from: Data(#"{"challenge":"AQ"}"#.utf8))
+        XCTAssertNil(minimal.allowCredentials)
+    }
+
+    func testDecodesUnlockState() throws {
+        let state = try JSONDecoder().decode(PaiUnlockState.self, from: Data(#"{"unlocked":true,"until":1700000000000,"by":"iPhone","machines":["box"],"paused":false,"passkeys":1}"#.utf8))
+        XCTAssertTrue(state.unlocked)
+        XCTAssertEqual(state.untilDate, Date(timeIntervalSince1970: 1_700_000_000))
+        let locked = try JSONDecoder().decode(PaiUnlockState.self, from: Data(#"{"unlocked":false,"until":null,"by":null,"machines":[],"paused":false,"passkeys":0}"#.utf8))
+        XCTAssertNil(locked.untilDate)
+    }
+}

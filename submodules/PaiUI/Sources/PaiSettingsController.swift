@@ -91,6 +91,7 @@ struct SettingsView: View {
                 header
                 statusSection
                 usageSection
+                PaiPasskeySection()
                 PaiSignOutSection()
             }
             .listStyle(.insetGrouped)

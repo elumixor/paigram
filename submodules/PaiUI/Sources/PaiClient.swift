@@ -49,11 +49,12 @@ public final class PaiClient {
     }
 
     /// `body` is anything `JSONSerialization` takes: an object, or an array for the box's batch routes.
-    public func call<T: Decodable>(_ type: T.Type, _ path: String, method: String = "GET", body: Any? = nil, query: [String: String] = [:]) async throws -> T {
+    /// `keepTokenOn401`: the passkey routes answer 401 when the passkey (not the token) is missing, so the token stays.
+    public func call<T: Decodable>(_ type: T.Type, _ path: String, method: String = "GET", body: Any? = nil, query: [String: String] = [:], keepTokenOn401: Bool = false) async throws -> T {
         let request = try request(path, method: method, body: body, query: query)
         let (data, response) = try await session.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        if status == 401, let token = PaiAuth.token { PaiAuth.rejected(token) }
+        if status == 401, !keepTokenOn401, let token = PaiAuth.token { PaiAuth.rejected(token) }
         guard (200..<300).contains(status) else {
             let detail = (try? JSONDecoder().decode([String: String].self, from: data))?["error"]
             throw PaiClientError(message: detail ?? "\(path) failed with HTTP \(status)")
