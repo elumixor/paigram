@@ -126,7 +126,7 @@ private func generateMessageSyntaxHighlight(spec: CachedMessageSyntaxHighlight.S
     return MessageSyntaxHighlight(entities: entities)
 }
 
-public func stringWithAppliedEntities(_ text: String, entities: [MessageTextEntity], strings: PresentationStrings? = nil, dateTimeFormat: PresentationDateTimeFormat? = nil, baseColor: UIColor, linkColor: UIColor, baseQuoteTintColor: UIColor? = nil, baseQuoteSecondaryTintColor: UIColor? = nil, baseQuoteTertiaryTintColor: UIColor? = nil, codeBlockTitleColor: UIColor? = nil, codeBlockAccentColor: UIColor? = nil, codeBlockBackgroundColor: UIColor? = nil, baseFont: UIFont, linkFont: UIFont, boldFont: UIFont, italicFont: UIFont, boldItalicFont: UIFont, fixedFont: UIFont, blockQuoteFont: UIFont, underlineLinks: Bool = true, external: Bool = false, message: EngineRawMessage?, entityFiles: [EngineMedia.Id: TelegramMediaFile] = [:], adjustQuoteFontSize: Bool = false, cachedMessageSyntaxHighlight: CachedMessageSyntaxHighlight? = nil, paragraphAlignment: NSTextAlignment? = nil) -> NSAttributedString {
+public func stringWithAppliedEntities(_ text: String, entities: [MessageTextEntity], strings: PresentationStrings? = nil, dateTimeFormat: PresentationDateTimeFormat? = nil, baseColor: UIColor, linkColor: UIColor, baseQuoteTintColor: UIColor? = nil, baseQuoteSecondaryTintColor: UIColor? = nil, baseQuoteTertiaryTintColor: UIColor? = nil, codeBlockTitleColor: UIColor? = nil, codeBlockAccentColor: UIColor? = nil, codeBlockBackgroundColor: UIColor? = nil, codeBlockCopyTitle: String? = nil, baseFont: UIFont, linkFont: UIFont, boldFont: UIFont, italicFont: UIFont, boldItalicFont: UIFont, fixedFont: UIFont, blockQuoteFont: UIFont, underlineLinks: Bool = true, external: Bool = false, message: EngineRawMessage?, entityFiles: [EngineMedia.Id: TelegramMediaFile] = [:], adjustQuoteFontSize: Bool = false, cachedMessageSyntaxHighlight: CachedMessageSyntaxHighlight? = nil, paragraphAlignment: NSTextAlignment? = nil) -> NSAttributedString {
     let baseQuoteTintColor = baseQuoteTintColor ?? baseColor
     
     var nsString: NSString?
@@ -330,11 +330,20 @@ public func stringWithAppliedEntities(_ text: String, entities: [MessageTextEnti
                     nsString = string.string as NSString
                 }
                 if let codeBlockTitleColor, let codeBlockAccentColor, let codeBlockBackgroundColor {
+                    let titleFont = boldFont.withSize(round(boldFont.pointSize * 0.8235294117647058))
                     var title: NSAttributedString?
                     if let language, !language.isEmpty {
-                        title = NSAttributedString(string: language.capitalized, font: boldFont.withSize(round(boldFont.pointSize * 0.8235294117647058)), textColor: codeBlockTitleColor)
+                        title = NSAttributedString(string: language.capitalized, font: titleFont, textColor: codeBlockTitleColor)
                     }
-                    string.addAttribute(NSAttributedString.Key(rawValue: "Attribute__Blockquote"), value: TextNodeBlockQuoteData(kind: .code(language: language), title: title, color: codeBlockAccentColor, secondaryColor: nil, tertiaryColor: nil, backgroundColor: codeBlockBackgroundColor, isCollapsible: false), range: range)
+                    var copyButtonTitle: NSAttributedString?
+                    if let codeBlockCopyTitle {
+                        copyButtonTitle = NSAttributedString(string: codeBlockCopyTitle, font: titleFont, textColor: codeBlockTitleColor)
+                        if title == nil {
+                            // A block without a language still gets a header row to hold the copy button.
+                            title = NSAttributedString(string: " ", font: titleFont, textColor: codeBlockTitleColor)
+                        }
+                    }
+                    string.addAttribute(NSAttributedString.Key(rawValue: "Attribute__Blockquote"), value: TextNodeBlockQuoteData(kind: .code(language: language), title: title, color: codeBlockAccentColor, secondaryColor: nil, tertiaryColor: nil, backgroundColor: codeBlockBackgroundColor, isCollapsible: false, copyButtonTitle: copyButtonTitle), range: range)
                 }
             case let .BlockQuote(isCollapsed):
                 addFontAttributes(range, .blockQuote)

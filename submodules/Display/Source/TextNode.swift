@@ -93,9 +93,12 @@ public final class TextNodeBlockQuoteData: NSObject {
     public let tertiaryColor: UIColor?
     public let backgroundColor: UIColor
     public let isCollapsible: Bool
+    /// Label of the copy button shown in a code block header; nil hides the button.
+    public let copyButtonTitle: NSAttributedString?
     
-    public init(kind: Kind, title: NSAttributedString?, color: UIColor, secondaryColor: UIColor?, tertiaryColor: UIColor?, backgroundColor: UIColor, isCollapsible: Bool) {
+    public init(kind: Kind, title: NSAttributedString?, color: UIColor, secondaryColor: UIColor?, tertiaryColor: UIColor?, backgroundColor: UIColor, isCollapsible: Bool, copyButtonTitle: NSAttributedString? = nil) {
         self.kind = kind
+        self.copyButtonTitle = copyButtonTitle
         self.title = title
         self.color = color
         self.secondaryColor = secondaryColor
@@ -112,6 +115,13 @@ public final class TextNodeBlockQuoteData: NSObject {
         }
         
         if self.kind != other.kind {
+            return false
+        }
+        if let lhsCopyTitle = self.copyButtonTitle, let rhsCopyTitle = other.copyButtonTitle {
+            if !lhsCopyTitle.isEqual(to: rhsCopyTitle) {
+                return false
+            }
+        } else if (self.copyButtonTitle == nil) != (other.copyButtonTitle == nil) {
             return false
         }
         if let lhsTitle = self.title, let rhsTitle = other.title {

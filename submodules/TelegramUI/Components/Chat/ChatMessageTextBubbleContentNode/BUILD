@@ -14,6 +14,7 @@ swift_library(
         "//submodules/TelegramCore",
         "//submodules/PaiUI:PaiUI",
         "//submodules/TextFormat",
+        "//submodules/UndoUI:UndoUI",
         "//submodules/UrlEscaping",
         "//submodules/TelegramUniversalVideoContent",
         "//submodules/TextSelectionNode",
