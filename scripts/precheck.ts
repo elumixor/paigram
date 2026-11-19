@@ -17,9 +17,9 @@ import { root } from "./repo.ts";
 const iosTarget = "arm64-apple-ios15.0";
 const watchTarget = "arm64_32-apple-watchos26.0";
 
-const glanceSources = ["PaiGlance.swift", "PaiGlanceSource.swift", "PaiGlanceStore.swift", "PaiUsageAlerts.swift"].map((file) => `${root}submodules/PaiGlance/Sources/${file}`);
+const glanceSources = ["PaiGlance.swift", "PaiGlanceSource.swift", "PaiGlanceStore.swift", "PaiUsageAlerts.swift", "PaiWidgetModel.swift"].map((file) => `${root}submodules/PaiGlance/Sources/${file}`);
 /** The three files prebuilt_watchos_build.sh copies into the watch snapshot's PaiShared/. */
-const watchGlanceSources = glanceSources.filter((path) => !path.endsWith("PaiUsageAlerts.swift"));
+const watchGlanceSources = glanceSources.filter((path) => !path.endsWith("PaiUsageAlerts.swift") && !path.endsWith("PaiWidgetModel.swift"));
 
 const sdk = async (name: string) => (await $`xcrun --sdk ${name} --show-sdk-path`.quiet().text()).trim();
 const glob = (pattern: string) => Array.from(new Bun.Glob(pattern).scanSync({ cwd: root, absolute: true })).sort();

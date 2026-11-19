@@ -1,4 +1,6 @@
 import Foundation
+import PaiUI
+import GlobalControlPanelsContext
 import UIKit
 import AsyncDisplayKit
 import Display
@@ -1416,6 +1418,27 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
         let headerContent = self.controller?.updateHeaderContent()
         
         var panels: [HeaderPanelContainerComponent.Panel] = []
+        // Paigram: decisions waiting on the user, above the chat list like Telegram's own notices.
+        if case .chatList(groupId: .root) = self.location, let paiNotice = paiNeedsNotice() {
+            panels.append(HeaderPanelContainerComponent.Panel(
+                key: "paiNeeds",
+                orderIndex: -1,
+                component: AnyComponent(ChatListHeaderNoticeComponent(
+                    context: self.context,
+                    theme: self.presentationData.theme,
+                    strings: self.presentationData.strings,
+                    data: paiNotice,
+                    activateAction: { [weak self] _ in
+                        guard let self, let navigationController = self.controller?.navigationController as? NavigationController else {
+                            return
+                        }
+                        navigationController.pushViewController(paiNeedsController(context: self.context, navigationController: navigationController))
+                    },
+                    dismissAction: { _ in },
+                    selectAction: { _, _ in }
+                )))
+            )
+        }
         if let chatListNotice = self.controller?.globalControlPanelsContextState?.chatListNotice {
             panels.append(HeaderPanelContainerComponent.Panel(
                 key: "chatListNotice",
@@ -1456,6 +1479,10 @@ final class ChatListControllerNode: ASDisplayNode, ASGestureRecognizerDelegate {
                             self.effectiveContainerNode.currentItemNode.interaction?.openAccountFreezeInfo()
                         case let .link(_, url, _, _):
                             self.effectiveContainerNode.currentItemNode.interaction?.openUrl(url)
+                        case .paiNeeds:
+                            if let navigationController = self.controller?.navigationController as? NavigationController {
+                                navigationController.pushViewController(paiNeedsController(context: self.context, navigationController: navigationController))
+                            }
                         }
                     },
                     dismissAction: { [weak self] notice in
@@ -2474,4 +2501,20 @@ func shouldDisplayStoriesInChatListHeader(storySubscriptions: EngineStorySubscri
         }
     }
     return false
+}
+
+/// Paigram: the top notice while decisions wait on the user, nil when none do.
+private func paiNeedsNotice() -> GlobalControlPanelsContext.ChatListNotice? {
+    let needs = PaiChat.needs
+    guard !needs.isEmpty else {
+        return nil
+    }
+    var names: [String] = []
+    for need in needs {
+        let name = PaiChat.agent(need.agent)?.name ?? need.from
+        if !names.contains(name) {
+            names.append(name)
+        }
+    }
+    return .paiNeeds(count: needs.count, text: names.joined(separator: ", "))
 }

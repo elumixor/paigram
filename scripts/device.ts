@@ -157,7 +157,8 @@ if (!skipBuild) {
   const registered = (await Promise.all([device, ...(watch ? [watch] : [])].map(ensureRegistered))).some(Boolean);
   const profiles = `${adHocCodesigningPath}/profiles`;
   const stale = !(await covers(`${profiles}/Telegram.mobileprovision`, device)) || (watch !== undefined && !(await covers(`${profiles}/WatchApp.mobileprovision`, watch)));
-  if (registered || stale) await provision("adHoc");
+  const wifiInfo = (await readProfile(`${profiles}/Telegram.mobileprovision`).catch(() => undefined))?.Entitlements?.["com.apple.developer.networking.wifi-info"];
+  if (registered || stale || !wifiInfo) await provision("adHoc");
   await releaseBuild(adHocCodesigningPath, buildNumber, watch !== undefined);
 }
 await install(device, watch);

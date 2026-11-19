@@ -61,7 +61,7 @@ async function waitProcessed(version: string, number: number) {
 
 /** `--no-build` uploads the ipa as it is: its build number is read back, and the profiles it embeds stay untouched. */
 const version = skipBump ? (await readVersions()).app : await bumpVersion(process.argv.includes("--minor"));
-// A tag builds on two machines at once (this Mac and a GitHub runner); whichever comes second finds it done.
+// A tag dispatched twice finds the version already uploaded.
 if (process.argv.includes("--once") && (await buildNumber(version)) > 1) {
   console.log(`v${version} is already on TestFlight; nothing to do`);
   process.exit(0);

@@ -2569,29 +2569,29 @@ final class NotificationService: UNNotificationServiceExtension {
         self.impl = nil
 
         // A question pushed by pai's box: its answers as buttons, on the phone and the watch.
-        if PaiNotification.isBoxNeed(request.content.userInfo) {
-            PaiNotification.decorateBoxNeed(request.content, completion: { [weak self] content in
+        // Whatever pai's box pushed gets its first drawn block (`paiBlocks`) as its picture before it is shown.
+        let paiDeliver: (UNNotificationContent) -> Void = { [weak self] content in
+            PaiNotification.attachBlock(content, appGroupPath: paiAppGroupPath(), completion: { content in
                 guard let self, let contentHandler = self.contentHandler else { return }
                 self.contentHandler = nil
                 contentHandler(content)
             })
+        }
+
+        if PaiNotification.isBoxNeed(request.content.userInfo) {
+            PaiNotification.decorateBoxNeed(request.content, completion: paiDeliver)
             return
         }
 
         // A usage threshold pushed by pai's box.
         if PaiNotification.isBoxUsage(request.content.userInfo) {
-            self.contentHandler = nil
-            contentHandler(PaiNotification.decorateBoxUsage(request.content))
+            paiDeliver(PaiNotification.decorateBoxUsage(request.content))
             return
         }
 
         // Mail and WhatsApp pushed by pai's box have nothing for Telegram's handler to decrypt.
         if PaiNotification.isBoxPush(request.content.userInfo) {
-            PaiNotification.decorateBoxPush(request.content, appGroupPath: paiAppGroupPath(), completion: { [weak self] content in
-                guard let self, let contentHandler = self.contentHandler else { return }
-                self.contentHandler = nil
-                contentHandler(content)
-            })
+            PaiNotification.decorateBoxPush(request.content, appGroupPath: paiAppGroupPath(), completion: paiDeliver)
             return
         }
 

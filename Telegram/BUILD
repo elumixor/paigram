@@ -594,6 +594,12 @@ official_background_gpu_fragment = """
 """
 background_gpu_fragment = official_background_gpu_fragment if telegram_bundle_id == "ph.telegra.Telegraph" else ""
 
+# Paigram: NEHotspotNetwork.fetchCurrent for place arrivals (PaiPlaces); the app id needs Access WiFi Information.
+wifi_info_fragment = """
+<key>com.apple.developer.networking.wifi-info</key>
+<true/>
+"""
+
 plist_fragment(
     name = "TelegramEntitlements",
     extension = "entitlements",
@@ -610,6 +616,7 @@ plist_fragment(
         notification_filtering_fragment,
         signin_fragment,
         background_gpu_fragment,
+        wifi_info_fragment,
     ])
 )
 
@@ -1654,9 +1661,9 @@ plist_fragment(
     <key>NSLocationAlwaysUsageDescription</key>
     <string>When you send your location to your friends, Telegram needs access to show them a map. You also need this to send locations from an Apple Watch.</string>
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-    <string>When you send your location to your friends, Telegram needs access to show them a map. You also need this to send locations from an Apple Watch.</string>
+    <string>Paigram tells your assistant when you arrive at your saved places, like the office, so it can remind you of tasks there. It also shows a map when you share your location in a chat.</string>
     <key>NSLocationWhenInUseUsageDescription</key>
-    <string>When you send your location to your friends, Telegram needs access to show them a map.</string>
+    <string>Paigram tells your assistant when you arrive at your saved places, like the office, so it can remind you of tasks there. It also shows a map when you share your location in a chat.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>We need this so that you can talk to your agents on calls, and record and share voice messages and videos with sound.</string>
     <key>NSMotionUsageDescription</key>

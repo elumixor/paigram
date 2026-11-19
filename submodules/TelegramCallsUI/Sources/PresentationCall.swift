@@ -13,6 +13,7 @@ import UniversalMediaPlayer
 import AccountContext
 import DeviceProximity
 import PhoneNumberFormat
+import PaiCallRecording
 
 public final class PresentationCallImpl: PresentationCall {
     public let context: AccountContext
@@ -173,6 +174,15 @@ public final class PresentationCallImpl: PresentationCall {
     private var remoteVideoEndpointId: String?
     
     private var isMovedToConference: Bool = false
+    
+    private var transcriptRecorder: CallRecorder?
+    private let isRecordingTranscriptPromise = ValuePromise<Bool>(false)
+    public var isRecordingTranscript: Signal<Bool, NoError> {
+        return self.isRecordingTranscriptPromise.get()
+    }
+    public var canRecordTranscript: Bool {
+        return self.sharedAudioContext?.audioDevice != nil && !self.isMovedToConference
+    }
     
     init(
         context: AccountContext,
@@ -476,6 +486,7 @@ public final class PresentationCallImpl: PresentationCall {
         if self.isMovedToConference {
             return
         }
+        self.stopTranscriptRecording()
         self.isMovedToConference = true
         
         self.sharedAudioContext = nil
@@ -1314,6 +1325,7 @@ public final class PresentationCallImpl: PresentationCall {
         }
         
         if terminating, !wasTerminated {
+            self.stopTranscriptRecording()
             if !self.didSetCanBeRemoved {
                 self.didSetCanBeRemoved = true
                 self.canBeRemovedPromise.set(.single(true) |> delay(2.0, queue: Queue.mainQueue()))
@@ -1550,12 +1562,67 @@ public final class PresentationCallImpl: PresentationCall {
         self.setIsMuted(!self.isMutedValue)
     }
     
+    public func toggleTranscriptRecording() {
+        Queue.mainQueue().async { [weak self] in
+            guard let self else {
+                return
+            }
+            if self.transcriptRecorder != nil {
+                self.stopTranscriptRecording()
+                return
+            }
+            guard self.canRecordTranscript, let audioDevice = self.sharedAudioContext?.audioDevice else {
+                return
+            }
+            var number: String?
+            if case let .user(user) = self.peer {
+                number = user.phone
+            }
+            let meta = CallRecordingMeta(
+                startedAt: Date(),
+                direction: self.isOutgoing ? .outgoing : .incoming,
+                peer: CallRecordingPeer(name: self.peer?.debugDisplayTitle, number: number, telegramId: "\(self.peerId.id._internalGetInt64Value())")
+            )
+            guard let recorder = try? CallRecorder(store: .shared, meta: meta) else {
+                Logger.shared.log("PresentationCall", "transcript recorder failed to start")
+                return
+            }
+            recorder.setMicMuted(self.isMutedValue)
+            self.transcriptRecorder = recorder
+            audioDevice.startRecording(handler: { mic, micRate, remote, remoteRate in
+                recorder.append(mic: mic, micRate: micRate, remote: remote, remoteRate: remoteRate)
+            })
+            self.isRecordingTranscriptPromise.set(true)
+            
+            let _ = enqueueMessages(account: self.context.account, peerId: self.peerId, messages: [.message(text: "This call is recorded for a transcript.", attributes: [], inlineStickers: [:], mediaReference: nil, threadId: nil, replyToMessageId: nil, replyToStoryId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: [])]).startStandalone()
+        }
+    }
+    
+    private func stopTranscriptRecording() {
+        guard let recorder = self.transcriptRecorder else {
+            return
+        }
+        self.transcriptRecorder = nil
+        self.isRecordingTranscriptPromise.set(false)
+        let finish: () -> Void = {
+            recorder.finish(endedAt: Date(), completion: { _ in
+                CallRecordingUploader.shared.retryPending()
+            })
+        }
+        if let audioDevice = self.sharedAudioContext?.audioDevice {
+            audioDevice.stopRecording(completion: finish)
+        } else {
+            finish()
+        }
+    }
+    
     public func setIsMuted(_ value: Bool) {
         if self.isMovedToConference {
             return
         }
         self.isMutedValue = value
         self.isMutedPromise.set(self.isMutedValue)
+        self.transcriptRecorder?.setMicMuted(value)
         if let conferenceCallContext = self.conferenceCallContext {
             conferenceCallContext.setIsMuted(action: value ? .muted(isPushToTalkActive: false) : .unmuted)
         } else {

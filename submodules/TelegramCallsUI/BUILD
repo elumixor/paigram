@@ -53,6 +53,7 @@ swift_library(
     ],
     deps = [
         "//submodules/SSignalKit/SSignalKit",
+        "//submodules/PaiCallRecording:PaiCallRecording",
     	"//submodules/SSignalKit/SwiftSignalKit:SwiftSignalKit",
         "//submodules/Display:Display",
         "//submodules/TelegramPresentationData:TelegramPresentationData",

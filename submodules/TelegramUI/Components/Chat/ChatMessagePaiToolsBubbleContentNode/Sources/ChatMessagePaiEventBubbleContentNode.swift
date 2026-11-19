@@ -69,11 +69,14 @@ public final class ChatMessagePaiEventBubbleContentNode: ChatMessageBubbleConten
                 let font = Font.regular(floor(item.presentationData.messageFont.pointSize * 13.0 / 17.0))
                 let maxWidth = max(1.0, constrainedSize.width - 40.0 - pillInsets.left - pillInsets.right)
 
-                let lines = PaiEventFold.run(item.message)
+                let runRow = PaiRunFold.row(item.message)
+                let lines = runRow == nil ? PaiEventFold.run(item.message) : []
                 let folded = lines.count > 1
                 let expanded = folded && PaiEventFold.isExpanded(item.message.id)
                 var drawn: [(UIImage?, PaiEventLine?)] = []
-                if folded {
+                if let runRow {
+                    drawn.append((paiLineImage(symbol: nil, trailingSymbol: runRow.expanded ? "chevron.up" : "chevron.down", text: PaiRunFold.label(runRow.count), font: font, color: service.primaryText, maxWidth: maxWidth), nil))
+                } else if folded {
                     drawn.append((paiLineImage(symbol: "square.stack", trailingSymbol: expanded ? "chevron.up" : "chevron.down", text: PaiEventFold.summary(lines), font: font, color: service.primaryText, maxWidth: maxWidth), nil))
                 }
                 if !folded || expanded {
@@ -128,6 +131,11 @@ public final class ChatMessagePaiEventBubbleContentNode: ChatMessageBubbleConten
     override public func tapActionAtPoint(_ point: CGPoint, gesture: TapLongTapOrDoubleTapGesture, isEstimating: Bool) -> ChatMessageBubbleContentTapAction {
         guard let item = self.item, let hit = self.hitLines.first(where: { $0.0.contains(point) }) else {
             return ChatMessageBubbleContentTapAction(content: .none)
+        }
+        if let runRow = PaiRunFold.row(item.message) {
+            return ChatMessageBubbleContentTapAction(content: .custom({
+                PaiRunFold.toggle(runRow.runKey)
+            }))
         }
         let isFold = self.hitLines.count > 1 || PaiEventFold.run(item.message).count > 1
         guard let line = hit.1 else {

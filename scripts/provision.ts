@@ -21,7 +21,7 @@ const communication = "com.apple.developer.usernotifications.communication";
 
 /** Bundle id suffix, the profile file name Telegram's build expects (BuildConfiguration.py), the capabilities. */
 const targets: { suffix: string; file: string; name: string; capabilities: string[]; group: boolean }[] = [
-  { suffix: "", file: "Telegram", name: "Paigram", capabilities: ["PUSH_NOTIFICATIONS", "APP_GROUPS", ...(siri ? ["SIRIKIT"] : [])], group: true },
+  { suffix: "", file: "Telegram", name: "Paigram", capabilities: ["PUSH_NOTIFICATIONS", "APP_GROUPS", "ACCESS_WIFI_INFORMATION", ...(siri ? ["SIRIKIT"] : [])], group: true },
   { suffix: ".Share", file: "Share", name: "Paigram Share", capabilities: ["APP_GROUPS"], group: true },
   { suffix: ".NotificationContent", file: "NotificationContent", name: "Paigram Notification Content", capabilities: ["APP_GROUPS"], group: true },
   { suffix: ".NotificationService", file: "NotificationService", name: "Paigram Notification Service", capabilities: ["APP_GROUPS"], group: true },

@@ -6,8 +6,13 @@
  * the api keys already live there. CI gets them as repo secrets instead, so this script checks every
  * one of them up front — a missing secret fails in seconds instead of an hour into Bazel — then
  * writes the key and `build-system/paigram.json`, and imports the distribution certificate into a
- * throwaway keychain that `codesign` can read. The build itself writes `PaiSecrets.swift` from the
- * `PAI_*` secrets, which is why they are checked here too.
+ * throwaway keychain that `codesign` can read, and signs a scratch binary with it so a keychain
+ * `codesign` cannot use fails here rather than at the end of the build. The build itself writes
+ * `PaiSecrets.swift` from the `PAI_*` secrets, which is why they are checked here too.
+ *
+ * The developer's Mac runs this too, as a self-hosted runner: its runner service has no unlocked login
+ * keychain (codesign fails with errSecInternalComponent), so it signs from the same throwaway keychain.
+ * `bun scripts/ci.ts --cleanup` deletes that keychain afterwards, which also takes it off the search list.
  */
 import { $ } from "bun";
 import { mkdirSync, rmSync } from "node:fs";
@@ -82,6 +87,22 @@ async function importCertificate(p12: string, password: string) {
     throw new Error(`DIST_CERT_P12 holds no usable distribution identity (is the private key included, and DIST_CERT_P12_PASSWORD right?):\n${identities}`);
   }
   console.log(identities.trim());
+  await signScratchBinary(identities);
+}
+
+/** errSecInternalComponent and friends surface only when codesign reaches for the private key; no --keychain, so it walks the search list as the build does. */
+async function signScratchBinary(identities: string) {
+  const hash = identities.match(/\b([0-9A-F]{40}) "(?:Apple|iPhone) Distribution/)?.[1];
+  if (!hash) throw new Error(`no distribution identity hash in:\n${identities}`);
+  const scratch = `${tmpdir()}/paigram-codesign-check`;
+  await $`cp /usr/bin/true ${scratch}`;
+  try {
+    await $`codesign --force --timestamp=none --sign ${hash} ${scratch}`;
+    await $`codesign --verify ${scratch}`;
+  } finally {
+    rmSync(scratch, { force: true });
+  }
+  console.log(`codesign works with ${hash}`);
 }
 
 /** A tag is a promise about which version is being built; versions.json is what the build actually reads. */
@@ -91,6 +112,11 @@ async function checkTag() {
   const tagged = ref.slice("ios-v".length);
   const { app } = await readVersions();
   if (tagged !== app) throw new Error(`tag ${ref} does not match versions.json (${app}): tag the commit that bumped the version, or use \`bun run tag\``);
+}
+
+if (process.argv.includes("--cleanup")) {
+  await $`security delete-keychain ${keychain}`.nothrow();
+  process.exit(0);
 }
 
 const secrets = env();

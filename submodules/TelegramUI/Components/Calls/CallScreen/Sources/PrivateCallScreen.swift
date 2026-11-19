@@ -83,6 +83,8 @@ public final class PrivateCallScreen: OverlayMaskContainerView, AVPictureInPictu
         public var isEnergySavingEnabled: Bool
         public var isConferencePossible: Bool
         public var enableVideoSharpening: Bool
+        /// Per-call transcript recording; nil hides the record button.
+        public var isTranscriptRecording: Bool?
         
         public init(
             strings: PresentationStrings,
@@ -99,7 +101,8 @@ public final class PrivateCallScreen: OverlayMaskContainerView, AVPictureInPictu
             isRemoteBatteryLow: Bool,
             isEnergySavingEnabled: Bool,
             isConferencePossible: Bool,
-            enableVideoSharpening: Bool
+            enableVideoSharpening: Bool,
+            isTranscriptRecording: Bool? = nil
         ) {
             self.strings = strings
             self.lifecycleState = lifecycleState
@@ -116,6 +119,7 @@ public final class PrivateCallScreen: OverlayMaskContainerView, AVPictureInPictu
             self.isEnergySavingEnabled = isEnergySavingEnabled
             self.isConferencePossible = isConferencePossible
             self.enableVideoSharpening = enableVideoSharpening
+            self.isTranscriptRecording = isTranscriptRecording
         }
         
         public static func ==(lhs: State, rhs: State) -> Bool {
@@ -162,6 +166,9 @@ public final class PrivateCallScreen: OverlayMaskContainerView, AVPictureInPictu
                 return false
             }
             if lhs.enableVideoSharpening != rhs.enableVideoSharpening {
+                return false
+            }
+            if lhs.isTranscriptRecording != rhs.isTranscriptRecording {
                 return false
             }
             return true
@@ -245,6 +252,7 @@ public final class PrivateCallScreen: OverlayMaskContainerView, AVPictureInPictu
     public var videoAction: (() -> Void)?
     public var microhoneMuteAction: (() -> Void)?
     public var endCallAction: (() -> Void)?
+    public var recordTranscriptAction: (() -> Void)?
     public var backAction: (() -> Void)?
     public var closeAction: (() -> Void)?
     public var restoreUIForPictureInPicture: ((@escaping (Bool) -> Void) -> Void)?
@@ -820,6 +828,14 @@ public final class PrivateCallScreen: OverlayMaskContainerView, AVPictureInPictu
                 self.endCallAction?()
             })
         ]
+        if let isTranscriptRecording = params.state.isTranscriptRecording {
+            buttons.insert(ButtonGroupView.Button(content: .record(isActive: isTranscriptRecording), isEnabled: !isTerminated, action: { [weak self] in
+                guard let self else {
+                    return
+                }
+                self.recordTranscriptAction?()
+            }), at: buttons.count - 1)
+        }
         if self.activeLocalVideoSource != nil {
             buttons.insert(ButtonGroupView.Button(content: .flipCamera, isEnabled: !isTerminated, action: { [weak self] in
                 guard let self else {
@@ -838,6 +854,9 @@ public final class PrivateCallScreen: OverlayMaskContainerView, AVPictureInPictu
         
         var notices: [ButtonGroupView.Notice] = []
         if !isTerminated {
+            if params.state.isTranscriptRecording == true {
+                notices.append(ButtonGroupView.Notice(id: AnyHashable(4 as Int), icon: "record.circle.fill", text: "Recording for transcript"))
+            }
             if params.state.isLocalAudioMuted {
                 notices.append(ButtonGroupView.Notice(id: AnyHashable(0 as Int), icon: "Call/CallToastMicrophone", text: params.state.strings.Call_YourMicrophoneOff))
             }
