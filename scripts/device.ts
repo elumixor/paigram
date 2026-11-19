@@ -9,20 +9,16 @@
  */
 import { $ } from "bun";
 import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { ascGet, ascPost } from "./asc.ts";
 import { missingEntitlements } from "./entitlements.ts";
+import { type Device, matches, pairedDevices } from "./devices.ts";
 import { precheck } from "./precheck.ts";
 import { provision, readProfile } from "./provision.ts";
 import { releaseBuild } from "./release-build.ts";
 import { adHocCodesigningPath, configPath as config, root } from "./repo.ts";
 
 class DeviceError extends Error {}
-
-interface Device {
-  readonly name: string;
-  readonly udid: string;
-}
 
 /** TestFlight's first build of a version has number 1 too, so the two builds share Bazel's cache. */
 const buildNumber = 1;
@@ -37,21 +33,27 @@ const deviceArgument = process.argv.indexOf("--device");
 const wanted = deviceArgument > 0 ? process.argv[deviceArgument + 1] : undefined;
 const { bundle_id: bundleId } = (await Bun.file(config).json()) as { bundle_id: string };
 
-/** Paired devices of a type (`iPhone`, `appleWatch`), the ones reachable right now (by cable or on the network) first. */
 async function paired(type: string): Promise<Device[]> {
   const output = `${mkdtempSync(`${tmpdir()}/paigram-devices-`)}/devices.json`;
   await $`xcrun devicectl list devices --json-output ${output}`.quiet();
-  const { result } = await Bun.file(output).json();
-  return result.devices
-    .filter((d: any) => d.hardwareProperties.deviceType === type && d.connectionProperties.pairingState === "paired")
-    .sort((a: any, b: any) => Number(b.connectionProperties.transportType != null) - Number(a.connectionProperties.transportType != null))
-    .map((d: any) => ({ name: d.deviceProperties.name, udid: d.hardwareProperties.udid }));
+  return pairedDevices(await Bun.file(output).json(), type);
 }
 
 async function pickDevice(): Promise<Device> {
-  const device = (await paired("iPhone")).find((d) => !wanted || d.name === wanted || d.udid === wanted);
+  const device = (await paired("iPhone")).find((d) => matches(d, wanted));
   if (device) return device;
   throw new DeviceError(wanted ? `no paired iPhone named ${wanted}` : "no iPhone is paired with this Mac: connect it by cable once and tap Trust");
+}
+
+/**
+ * Stops before the long build when the iPhone is connected to another Mac: paired with several Macs, it shows up
+ * here too, but only the one it is next to can install. A locked iPhone that answers is still here.
+ */
+async function ensureHere(device: Device) {
+  if (device.reachable) return;
+  const attempt = await connect(device);
+  if (attempt.ok || blocker(attempt.output) === "locked") return;
+  throw new DeviceError(`${device.name} is not connected to this Mac (${hostname()}): run on the Mac it is next to, or plug it in here`);
 }
 
 /** Registers a device on the account when it is new there; Ad Hoc profiles only install on registered devices. */
@@ -152,6 +154,7 @@ async function install(device: Device, watch: Device | undefined) {
 }
 
 const device = await pickDevice();
+await ensureHere(device);
 const [watch] = await paired("appleWatch");
 if (!skipBuild) {
   await precheck();
