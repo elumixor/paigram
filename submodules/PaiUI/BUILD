@@ -22,6 +22,7 @@ swift_library(
         "//submodules/PromptUI:PromptUI",
         "//submodules/PaiGlance:PaiGlance",
         "//submodules/PaiPlaces:PaiPlaces",
+        "//submodules/PaiCallRecording:PaiCallRecording",
     ],
     visibility = [
         "//visibility:public",
