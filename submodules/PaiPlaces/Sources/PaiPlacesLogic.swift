@@ -134,6 +134,10 @@ public struct PaiPlacesRequest: Equatable {
 
 public struct PaiPlacesHTTPError: Error {
     public let status: Int
+
+    public init(status: Int) {
+        self.status = status
+    }
 }
 
 /// Sends a request to the box and answers its body; throws `PaiPlacesHTTPError` for a non-2xx answer.
