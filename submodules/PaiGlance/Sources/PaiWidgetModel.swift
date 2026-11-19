@@ -63,7 +63,7 @@ public struct PaiWidgetModel: Equatable {
     /// The agents with something to say, the most recently active first.
     public let agents: [Agent]
     public let bar: Bar
-    /// "Background held · weekly ≥90% · until 3d" while a weekly hold is in force.
+    /// The hold's muted line ("Background held until Mon 14:00 · 3 held") while a weekly hold is in force.
     public let holdLine: String?
 
     public var oldestAsk: Ask? { asks.first }
@@ -76,13 +76,7 @@ public struct PaiWidgetModel: Equatable {
         agents = PaiWidgetModel.recentAgents(glance.team, now: now)
         // Names are exact: the glance's `session` falls back to any first window, which would show the weekly twice.
         bar = Bar(weekly: glance.windows.first { $0.name == "Weekly" }, session: glance.windows.first { $0.name == "Session" }, now: now)
-        holdLine = glance.hold.map { hold in
-            var parts = ["Background held", "weekly ≥\(hold.level)%"]
-            if let until = hold.until {
-                parts.append("until \(PaiGlance.Window(name: "", percent: 0, resetsAt: until).resetsIn(now: now) ?? "")")
-            }
-            return parts.joined(separator: " · ")
-        }
+        holdLine = glance.hold?.line(now: now)
     }
 
     /// The agents that have a line, the most recently active first. Agents without a known time follow, working

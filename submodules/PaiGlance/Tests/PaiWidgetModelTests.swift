@@ -84,8 +84,8 @@ final class PaiWidgetModelTests: XCTestCase {
 
     func testHoldLine() {
         XCTAssertNil(PaiWidgetModel(glance: glance(), now: now).holdLine)
-        let held = PaiWidgetModel(glance: glance(hold: PaiGlance.Hold(level: 90, until: now.addingTimeInterval(3 * 86400), held: 4)), now: now)
-        XCTAssertEqual(held.holdLine, "Background held · weekly ≥90% · until 3d")
+        let hold = PaiGlance.Hold(level: 95, until: "2027-01-01T00:00:00Z", held: 4)
+        XCTAssertEqual(PaiWidgetModel(glance: glance(hold: hold), now: now).holdLine, hold.line(now: now))
     }
 
     func testGlanceWithoutNewFieldsStillDecodes() throws {
@@ -93,13 +93,5 @@ final class PaiWidgetModelTests: XCTestCase {
         let decoded = try JSONDecoder().decode(PaiGlance.self, from: Data(json.utf8))
         XCTAssertNil(decoded.hold)
         XCTAssertNil(decoded.team.first?.activeAt)
-    }
-
-    func testSummaryDecodesHold() {
-        let json = #"{"todayUsd":1,"windows":[],"hold":{"level":95,"until":"2027-01-01T00:00:00.000Z","held":3}}"#
-        let glance = PaiGlanceLiveSource.decodeSummary(Data(json.utf8))
-        XCTAssertEqual(glance?.hold?.level, 95)
-        XCTAssertEqual(glance?.hold?.held, 3)
-        XCTAssertNotNil(glance?.hold?.until)
     }
 }

@@ -71,6 +71,8 @@ final class CallControllerNodeV2: ViewControllerTracingNode, CallControllerNodeP
     private var availableAudioOutputs: [AudioSessionOutput]?
     private var currentAudioOutput: AudioSessionOutput?
     private var isMicrophoneMutedDisposable: Disposable?
+    private var isRecordingTranscriptDisposable: Disposable?
+    private var isRecordingTranscript = false
     private var audioLevelDisposable: Disposable?
     private var audioOutputCheckTimer: Foundation.Timer?
     
@@ -131,6 +133,12 @@ final class CallControllerNodeV2: ViewControllerTracingNode, CallControllerNodeP
             
             self.call.toggleIsMuted()
         }
+        self.callScreen.recordTranscriptAction = { [weak self] in
+            guard let self, let call = self.call as? PresentationCallImpl else {
+                return
+            }
+            call.toggleTranscriptRecording()
+        }
         self.callScreen.endCallAction = { [weak self] in
             guard let self else {
                 return
@@ -184,8 +192,25 @@ final class CallControllerNodeV2: ViewControllerTracingNode, CallControllerNodeP
             isRemoteBatteryLow: false,
             isEnergySavingEnabled: !self.sharedContext.energyUsageSettings.fullTranslucency,
             isConferencePossible: false,
-            enableVideoSharpening: enableVideoSharpening
+            enableVideoSharpening: enableVideoSharpening,
+            isTranscriptRecording: (call as? PresentationCallImpl)?.canRecordTranscript == true ? false : nil
         )
+        
+        if let callImpl = call as? PresentationCallImpl {
+            self.isRecordingTranscriptDisposable = (callImpl.isRecordingTranscript
+            |> deliverOnMainQueue).startStrict(next: { [weak self, weak callImpl] isRecording in
+                guard let self, var callScreenState = self.callScreenState else {
+                    return
+                }
+                self.isRecordingTranscript = isRecording
+                let value: Bool? = (callImpl?.canRecordTranscript ?? false) ? isRecording : nil
+                if callScreenState.isTranscriptRecording != value {
+                    callScreenState.isTranscriptRecording = value
+                    self.callScreenState = callScreenState
+                    self.update(transition: .animated(duration: 0.3, curve: .spring))
+                }
+            })
+        }
         
         self.isMicrophoneMutedDisposable = (call.isMuted
         |> deliverOnMainQueue).startStrict(next: { [weak self] isMuted in
@@ -261,6 +286,7 @@ final class CallControllerNodeV2: ViewControllerTracingNode, CallControllerNodeP
     deinit {
         self.peerAvatarDisposable?.dispose()
         self.isMicrophoneMutedDisposable?.dispose()
+        self.isRecordingTranscriptDisposable?.dispose()
         self.audioLevelDisposable?.dispose()
         self.audioOutputCheckTimer?.invalidate()
         self.signalQualityTimer?.invalidate()
@@ -555,6 +581,12 @@ final class CallControllerNodeV2: ViewControllerTracingNode, CallControllerNodeP
             }
 
             callScreenState.isConferencePossible = callState.supportsConferenceCalls
+            
+            if let callImpl = self.call as? PresentationCallImpl, callImpl.canRecordTranscript {
+                callScreenState.isTranscriptRecording = self.isRecordingTranscript
+            } else {
+                callScreenState.isTranscriptRecording = nil
+            }
             
             if self.callScreenState != callScreenState {
                 self.callScreenState = callScreenState

@@ -2393,7 +2393,9 @@ public class ChatListItemNode: ItemListRevealOptionsItemNode {
                     contentPeer = .chat(peerValue)
                     combinedReadState = combinedReadStateValue
                     if let combinedReadState = combinedReadState, promoInfoValue == nil && !ignoreUnreadBadge {
-                        unreadCount = (combinedReadState.count, combinedReadState.isUnread, isRemovedFromTotalUnreadCountValue || combinedReadState.isMuted, nil, !combinedReadState.hasEverRead)
+                        // Paigram: decisions waiting on the user (`paiReadCounters`) never count as muted.
+                        let isPaiWaiting = PaiChat.isBot(peerValue.peer?._asPeer()) && PaiChat.needs(thread: threadInfoValue?.id) > 0
+                        unreadCount = (combinedReadState.count, combinedReadState.isUnread, !isPaiWaiting && (isRemovedFromTotalUnreadCountValue || combinedReadState.isMuted), nil, !combinedReadState.hasEverRead)
                     } else {
                         unreadCount = (0, false, false, nil, false)
                     }

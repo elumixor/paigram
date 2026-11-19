@@ -261,10 +261,6 @@ public final class PaiGlanceLiveSource: PaiGlanceSource {
             guard let slug = agent["slug"] as? String, let usd = agent["usd"] as? Double else { return nil }
             return PaiGlance.AgentSpend(slug: slug, name: agent["name"] as? String ?? slug, usd: usd)
         }
-        let hold = (raw["hold"] as? [String: Any]).flatMap { hold -> PaiGlance.Hold? in
-            guard let level = (hold["level"] as? NSNumber)?.intValue else { return nil }
-            return PaiGlance.Hold(level: level, until: date(hold["until"]), held: (hold["held"] as? NSNumber)?.intValue ?? 0)
-        }
         let listed = needsData.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [[String: Any]] }
         let needs = (listed ?? raw["needsList"] as? [[String: Any]] ?? (raw["oldestNeed"] as? [String: Any]).map { [$0] } ?? []).compactMap(need)
         return PaiGlance(
@@ -276,7 +272,7 @@ public final class PaiGlanceLiveSource: PaiGlanceSource {
             running: raw["running"] as? Int ?? 0,
             needsCount: listed?.count ?? raw["needs"] as? Int ?? needs.count,
             needs: Array(needs.sorted { $0.createdAt < $1.createdAt }.prefix(needsLimit)),
-            hold: hold
+            hold: PaiGlance.Hold.decode(raw["hold"])
         )
     }
 

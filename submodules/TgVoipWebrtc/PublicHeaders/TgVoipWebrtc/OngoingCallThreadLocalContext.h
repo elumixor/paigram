@@ -61,6 +61,12 @@
 
 - (void)setTone:(CallAudioTone * _Nullable)tone;
 
+/// Taps the mic (post-processing capture) and remote (playout) int16 mono streams. The handler runs every ~100 ms on a private serial queue.
+- (void)startRecordingWithHandler:(void (^ _Nonnull)(NSData * _Nonnull mic, int32_t micSampleRate, NSData * _Nonnull remote, int32_t remoteSampleRate))handler;
+
+/// Removes the tap; the completion runs on the recording queue after the final drain.
+- (void)stopRecording:(void (^ _Nullable)(void))completion;
+
 @end
 
 @interface OngoingCallConnectionDescriptionWebrtc : NSObject

@@ -116,18 +116,59 @@ public struct PaiGlance: Codable, Equatable {
         public var now: Step? { steps.first { $0.state == "now" } }
     }
 
-    /// A weekly hold in force on the box: background work waits until the weekly window resets.
+    /// The box holding work back near the weekly limit: at 90% background work waits for the reset, at 95% agents
+    /// cannot start dev sessions. nil when nothing is held or the box is too old to say.
     public struct Hold: Codable, Equatable {
-        /// The weekly percent the hold starts at (90, 95).
+        /// 90 or 95.
         public let level: Int
-        public let until: Date?
-        /// Turns held and dev calls refused this window.
+        /// When the hold lifts (the weekly reset), ISO as the box sends it.
+        public let until: String
+        /// How much work waits on it.
         public let held: Int
 
-        public init(level: Int, until: Date?, held: Int) {
+        public init(level: Int, until: String, held: Int) {
             self.level = level
             self.until = until
             self.held = held
+        }
+
+        private enum CodingKeys: String, CodingKey { case level, until, held }
+
+        /// `held` may be missing from an older box; it reads as 0 rather than failing the whole usage.
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            level = try container.decode(Int.self, forKey: .level)
+            until = try container.decode(String.self, forKey: .until)
+            held = try container.decodeIfPresent(Int.self, forKey: .held) ?? 0
+        }
+
+        /// The box passes milliseconds ("…:00.351Z"), which ISO8601DateFormatter does not read; they go first.
+        public var untilDate: Date? {
+            let trimmed = until.replacingOccurrences(of: #"\.\d+"#, with: "", options: .regularExpression)
+            return ISO8601DateFormatter().date(from: trimmed)
+        }
+
+        /// The muted line under the meter: "Background held until Mon 14:00 · 3 held" at 90,
+        /// "Agents can't start dev sessions; yours still run · 3 held" at 95.
+        public func line(now: Date = Date(), timeZone: TimeZone = .current, locale: Locale = .current) -> String {
+            let count = "\(held) held"
+            if level >= 95 {
+                return "Agents can't start dev sessions; yours still run · \(count)"
+            }
+            guard let date = untilDate else { return "Background held · \(count)" }
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = timeZone
+            let formatter = DateFormatter()
+            formatter.locale = locale
+            formatter.timeZone = timeZone
+            formatter.dateFormat = calendar.isDate(date, inSameDayAs: now) ? "HH:mm" : "EEE HH:mm"
+            return "Background held until \(formatter.string(from: date)) · \(count)"
+        }
+
+        /// From the box's JSON (`hold` of `/usage/summary` or `/usage`); nil for null, a missing key or a bad shape.
+        public static func decode(_ value: Any?) -> Hold? {
+            guard let raw = value as? [String: Any], let level = raw["level"] as? Int, let until = raw["until"] as? String else { return nil }
+            return Hold(level: level, until: until, held: raw["held"] as? Int ?? 0)
         }
     }
 
@@ -143,7 +184,6 @@ public struct PaiGlance: Codable, Equatable {
     public let needs: [Need]
     /// Every agent with its plan, in the tree's order (pai first). Empty from a glance stored before agents were read.
     public let team: [Member]
-    /// The weekly hold, when one is in force.
     public let hold: Hold?
 
     public init(at: Date, todayUsd: Double, usdPerHour: Double?, windows: [Window], agents: [AgentSpend], running: Int, needsCount: Int, needs: [Need], team: [Member] = [], hold: Hold? = nil) {
@@ -185,6 +225,12 @@ public struct PaiGlance: Codable, Equatable {
     public var limiting: Window? { windows.max { $0.percent < $1.percent } }
 
     public var oldestNeed: Need? { needs.first }
+
+    /// What a meter shows for a window: "46%", or "—" when the plan could not be read (no windows at all).
+    public static func percentText(_ window: Window?) -> String {
+        guard let window else { return "—" }
+        return "\(Int(window.percent.rounded()))%"
+    }
 
     /// A glance without windows means the box could not read the plan, not that nothing is used: the previous
     /// glance's windows stay until they reset. Likewise a glance whose agents could not be read keeps the last team.

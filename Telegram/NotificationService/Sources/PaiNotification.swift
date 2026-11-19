@@ -1,5 +1,6 @@
 import Foundation
 import Intents
+import PaiGlance
 import UserNotifications
 
 /// pai's questions answered from the notification itself — and from the watch, which mirrors its buttons. A
@@ -237,11 +238,35 @@ enum PaiNotification {
         return result
     }
 
+    // MARK: Drawn blocks
+
+    /// A box push that names drawn blocks (`paiBlocks`) shows the first as its picture. Anything that fails or comes
+    /// late (5 s) leaves the push as it was; a push that already has a picture keeps it.
+    static func attachBlock(_ content: UNNotificationContent, appGroupPath: String?, completion: @escaping (UNNotificationContent) -> Void) {
+        guard content.attachments.isEmpty,
+              let hash = PaiBlockPush.hashes(content.userInfo).first,
+              let config = appGroupPath
+                .flatMap({ try? Data(contentsOf: URL(fileURLWithPath: $0 + "/pai.json")) })
+                .flatMap({ try? JSONDecoder().decode(BoxConfig.self, from: $0) }),
+              let url = PaiBlockPush.url(baseURL: config.baseURL, hash: hash) else {
+            completion(content)
+            return
+        }
+        var request = URLRequest(url: url, timeoutInterval: 5.0)
+        request.setValue("Bearer \(config.token)", forHTTPHeaderField: "Authorization")
+        URLSession.shared.dataTask(with: request) { data, response, _ in
+            let ok = (response as? HTTPURLResponse)?.statusCode == 200
+            DispatchQueue.main.async {
+                completion(withPicture(content, ok ? data : nil, ext: "png", identifier: "block"))
+            }
+        }.resume()
+    }
+
     /// The picture a mail's summary picked, shown in the notification's preview.
-    private static func withPicture(_ content: UNNotificationContent, _ data: Data?) -> UNNotificationContent {
-        guard let data, let mutable = content.mutableCopy() as? UNMutableNotificationContent else { return content }
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jpg")
-        guard (try? data.write(to: url)) != nil, let attachment = try? UNNotificationAttachment(identifier: "picture", url: url, options: nil) else { return content }
+    private static func withPicture(_ content: UNNotificationContent, _ data: Data?, ext: String = "jpg", identifier: String = "picture") -> UNNotificationContent {
+        guard let data, !data.isEmpty, let mutable = content.mutableCopy() as? UNMutableNotificationContent else { return content }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + "." + ext)
+        guard (try? data.write(to: url)) != nil, let attachment = try? UNNotificationAttachment(identifier: identifier, url: url, options: nil) else { return content }
         mutable.attachments = [attachment]
         return mutable
     }

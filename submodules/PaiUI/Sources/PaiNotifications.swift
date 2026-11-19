@@ -1,4 +1,5 @@
 import Foundation
+import UserNotifications
 
 /// The other half of the notification extension's quick answers (`PaiNotification` there): what it needs to
 /// reach the box, and sending the answer a tap on a notification's button picked.
@@ -70,6 +71,21 @@ public enum PaiNotificationAnswer {
         Task {
             try? await PaiClient().answer(need: id, text: text)
             completion()
+        }
+    }
+
+    /// Takes away delivered notifications of asks no longer open: answered elsewhere (the web, another device) or closed.
+    static func withdrawAnswered(open: [PaiNeed]) {
+        let openIds = Set(open.map(\.id))
+        let center = UNUserNotificationCenter.current()
+        center.getDeliveredNotifications { delivered in
+            let stale = delivered.filter { notification in
+                guard let need = notification.request.content.userInfo["paiNeed"] as? [String: Any], let id = need["id"] as? String else { return false }
+                return !openIds.contains(id)
+            }.map(\.request.identifier)
+            if !stale.isEmpty {
+                center.removeDeliveredNotifications(withIdentifiers: stale)
+            }
         }
     }
 }

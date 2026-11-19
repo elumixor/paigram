@@ -849,6 +849,17 @@ public final class OngoingCallContext {
                 CallAudioTone(samples: tone.samples, sampleRate: tone.sampleRate, loopCount: tone.loopCount)
             })
         }
+        
+        /// Mono int16 chunks of the mic and remote tracks with their sample rates, delivered on a private serial queue.
+        public func startRecording(handler: @escaping (Data, Int, Data, Int) -> Void) {
+            self.impl.startRecording(handler: { mic, micSampleRate, remote, remoteSampleRate in
+                handler(mic, Int(micSampleRate), remote, Int(remoteSampleRate))
+            })
+        }
+        
+        public func stopRecording(completion: (() -> Void)? = nil) {
+            self.impl.stopRecording(completion)
+        }
     }
     
     public static func setupAudioSession() {

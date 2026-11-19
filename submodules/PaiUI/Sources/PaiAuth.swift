@@ -1,5 +1,6 @@
 import AuthenticationServices
 import Foundation
+import PaiCallRecording
 import Security
 import TelegramCore
 import UIKit
@@ -40,9 +41,12 @@ public enum PaiAuth {
     public static func apply() {
         if let token {
             PaiBox.configure(baseURL: PaiSecrets.baseURL, token: token)
+            CallRecordingUploader.shared.configure(baseURL: PaiSecrets.baseURL, token: token, onUnauthorized: { PaiAuth.rejected(token) })
         } else {
             PaiBox.clear()
+            CallRecordingUploader.shared.configure(baseURL: PaiSecrets.baseURL, token: nil, onUnauthorized: nil)
         }
+        CallRecordingUploader.shared.retryPending()
         PaiNotificationAnswer.refreshConfig()
         PaiGlanceSync.shared.start()
     }

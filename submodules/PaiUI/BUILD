@@ -21,6 +21,8 @@ swift_library(
         "//submodules/AlertUI:AlertUI",
         "//submodules/PromptUI:PromptUI",
         "//submodules/PaiGlance:PaiGlance",
+        "//submodules/PaiPlaces:PaiPlaces",
+        "//submodules/PaiCallRecording:PaiCallRecording",
     ],
     visibility = [
         "//visibility:public",
