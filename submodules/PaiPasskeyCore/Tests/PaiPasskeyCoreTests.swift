@@ -37,7 +37,7 @@ final class PKCETests: XCTestCase {
     func testRFC7636AppendixBVector() {
         XCTAssertEqual(
             PKCE.challenge(for: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
-            "E9Melhoofx3jjZ8TEXzMfdG_YBpDlQ1rCnXK1hn-Np0"
+            "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
         )
     }
 
