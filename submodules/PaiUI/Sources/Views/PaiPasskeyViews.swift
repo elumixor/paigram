@@ -59,7 +59,7 @@ final class PaiPasskeyModel: ObservableObject {
 struct PaiPasskeySection: View {
     @StateObject private var model = PaiPasskeyModel()
     @State private var scanning = false
-    /// The scanned code, enrolled once the scanner sheet is gone so the sign-in sheet has a window to present on.
+    /// The scanned code the user confirmed, enrolled once the scanner sheet is gone so the sign-in sheet has a window to present on.
     @State private var scannedInvite: String?
 
     private static let windows: [(String, Int)] = [("15 minutes", 15), ("1 hour", 60), ("4 hours", 240)]

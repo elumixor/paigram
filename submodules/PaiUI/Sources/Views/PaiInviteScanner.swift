@@ -5,13 +5,16 @@ import UIKit
 import VisionKit
 
 /// Reads the add-device QR pai's web Settings shows on a device that already has a passkey
-/// (Settings › Account › Add another device), so this phone can enrol its own. A typed code works too.
+/// (Settings › Account › Add another device), so this phone can enrol its own. A typed code works too. A code never
+/// enrols by itself: it opens a confirm screen first, and `onCode` fires only on its Add passkey.
 @available(iOS 16.0, *)
 struct PaiInviteScannerView: View {
     let onCode: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var typed = ""
     @State private var hint: String?
+    /// The code read, waiting on the confirm screen.
+    @State private var pending: String?
     @State private var done = false
 
     var body: some View {
@@ -30,7 +33,7 @@ struct PaiInviteScannerView: View {
                             .textFieldStyle(.roundedBorder)
                             .submitLabel(.done)
                             .onSubmit { submitTyped() }
-                        Button("Add") { submitTyped() }
+                        Button("Next") { submitTyped() }
                             .disabled(typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                 }
@@ -41,30 +44,91 @@ struct PaiInviteScannerView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             }
+            .navigationDestination(isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } })) {
+                PaiInviteConfirmView(add: confirm, cancel: { dismiss() })
+            }
         }
     }
 
     private func submitTyped() {
-        if let code = PaiPasskeyEnrol.invite(fromScanned: typed) {
-            finish(code)
+        if let code = PaiPasskeyEnrol.invite(fromScanned: typed, host: PaiPasskeys.relyingParty) {
+            review(code)
         } else {
             hint = "That isn't an add-device code: copy it from pai's Add another device, or scan its QR."
         }
     }
 
     private func scanned(_ text: String) {
-        if let code = PaiPasskeyEnrol.invite(fromScanned: text) {
-            finish(code)
+        if let code = PaiPasskeyEnrol.invite(fromScanned: text, host: PaiPasskeys.relyingParty) {
+            review(code)
         } else {
             hint = "That QR isn't pai's add-device code."
         }
     }
 
-    private func finish(_ code: String) {
-        guard !done else { return }
+    private func review(_ code: String) {
+        guard pending == nil, !done else { return }
+        hint = nil
+        pending = code
+    }
+
+    private func confirm() {
+        guard let code = pending, !done else { return }
         done = true
         dismiss()
         onCode(code)
+    }
+}
+
+/// What adding a passkey from a scanned code would do, shown before anything happens: whose pai, which site, and
+/// this phone's name as the box will list it.
+@available(iOS 16.0, *)
+private struct PaiInviteConfirmView: View {
+    let add: () -> Void
+    let cancel: () -> Void
+
+    var body: some View {
+        List {
+            Section {
+                VStack(spacing: 10) {
+                    Image(systemName: "person.badge.key.fill")
+                        .font(.system(size: 30, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 64, height: 64)
+                        .background(Color.blue, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                    Text("Add a passkey on this phone?")
+                        .font(.headline)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .listRowBackground(Color.clear)
+            }
+            Section {
+                row("Account", "pai account")
+                row("Site", PaiPasskeys.relyingParty)
+                row("This device", UIDevice.current.name)
+            } footer: {
+                Text("Add it only if you just opened Add another device in pai on your own Mac. This passkey will unlock pai and approve its changes.")
+            }
+            Section {
+                Button(action: add) {
+                    Label("Add passkey", systemImage: "person.badge.key.fill")
+                }
+                Button("Cancel", role: .cancel, action: cancel)
+            }
+        }
+        .listStyle(.insetGrouped)
+        .navigationTitle("Add passkey")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func row(_ title: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title)
+            Spacer(minLength: 16)
+            Text(value).foregroundStyle(.secondary).multilineTextAlignment(.trailing)
+        }
     }
 }
 

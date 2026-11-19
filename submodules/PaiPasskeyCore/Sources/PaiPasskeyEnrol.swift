@@ -39,12 +39,23 @@ public enum PaiPasskeyEnrol {
         return components.url
     }
 
+    /// The path of pai's web Settings page whose add-device QR carries `?enrol=<code>`.
+    public static let invitePath = "/settings/account"
+
     /// The add-device code in what the camera read off pai's web Settings: its QR is
-    /// `https://<pai>/settings/account?enrol=<code>`; a bare code typed or scanned counts too. Anything else = nil.
-    public static func invite(fromScanned text: String) -> String? {
+    /// `https://<host>/settings/account?enrol=<code>`, `host` being the pinned relying party; a bare code typed or
+    /// scanned counts too. Any other address (another host or scheme, a port, userinfo, another path) = nil, so a QR
+    /// from someone else's page can't hand this phone their code.
+    public static func invite(fromScanned text: String, host: String) -> String? {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if let components = URLComponents(string: text), components.scheme != nil {
-            guard let code = components.queryItems?.first(where: { $0.name == "enrol" })?.value else { return nil }
+            guard components.scheme == "https",
+                  components.percentEncodedHost == host,
+                  components.port == nil,
+                  components.percentEncodedUser == nil,
+                  components.percentEncodedPassword == nil,
+                  components.percentEncodedPath == invitePath,
+                  let code = components.queryItems?.first(where: { $0.name == "enrol" })?.value else { return nil }
             return isCode(code) ? code : nil
         }
         return isCode(text) ? text : nil

@@ -235,19 +235,55 @@ final class ChangeFormatTests: XCTestCase {
         XCTAssertNil(PaiChangeFormat.text(String?.none))
     }
 
+    let inviteHost = "pai.desk.atmagaming.com"
+    let inviteCode = "Qx3v_9-AbCdEfGhIjKlMnOpQrStUvWx"
+
     func testInviteFromWebQR() {
         let code = "Qx3v_9-AbCdEfGhIjKlMnOpQrStUvWx"
-        XCTAssertEqual(PaiPasskeyEnrol.invite(fromScanned: "https://pai.desk.atmagaming.com/settings/account?enrol=\(code)"), code)
+        XCTAssertEqual(PaiPasskeyEnrol.invite(fromScanned: "https://pai.desk.atmagaming.com/settings/account?enrol=\(code)", host: inviteHost), code)
     }
 
     func testInviteBareCode() {
-        XCTAssertEqual(PaiPasskeyEnrol.invite(fromScanned: "  Qx3v_9-AbCdEfGhIjKlMnOpQrStUvWx\n"), "Qx3v_9-AbCdEfGhIjKlMnOpQrStUvWx")
+        XCTAssertEqual(PaiPasskeyEnrol.invite(fromScanned: "  Qx3v_9-AbCdEfGhIjKlMnOpQrStUvWx\n", host: inviteHost), "Qx3v_9-AbCdEfGhIjKlMnOpQrStUvWx")
     }
 
     func testInviteJunkIsNil() {
-        XCTAssertNil(PaiPasskeyEnrol.invite(fromScanned: "hello world"))
-        XCTAssertNil(PaiPasskeyEnrol.invite(fromScanned: "https://example.com/?q=1"))
-        XCTAssertNil(PaiPasskeyEnrol.invite(fromScanned: "https://pai.desk.atmagaming.com/link?enrol=1"))
-        XCTAssertNil(PaiPasskeyEnrol.invite(fromScanned: ""))
+        XCTAssertNil(PaiPasskeyEnrol.invite(fromScanned: "hello world", host: inviteHost))
+        XCTAssertNil(PaiPasskeyEnrol.invite(fromScanned: "https://example.com/?q=1", host: inviteHost))
+        XCTAssertNil(PaiPasskeyEnrol.invite(fromScanned: "https://pai.desk.atmagaming.com/link?enrol=1", host: inviteHost))
+        XCTAssertNil(PaiPasskeyEnrol.invite(fromScanned: "", host: inviteHost))
+    }
+
+    func testInviteRefusesForeignHost() {
+        for text in [
+            "https://example.com/settings/account?enrol=\(inviteCode)",
+            "https://pai.desk.atmagaming.com.evil.com/settings/account?enrol=\(inviteCode)",
+            "https://evil.com/?enrol=\(inviteCode)",
+            "https://desk.atmagaming.com/settings/account?enrol=\(inviteCode)",
+        ] {
+            XCTAssertNil(PaiPasskeyEnrol.invite(fromScanned: text, host: inviteHost), text)
+        }
+    }
+
+    func testInviteRefusesHttp() {
+        for text in [
+            "http://pai.desk.atmagaming.com/settings/account?enrol=\(inviteCode)",
+            "paigram://pai.desk.atmagaming.com/settings/account?enrol=\(inviteCode)",
+            "HTTPS://pai.desk.atmagaming.com/settings/account?enrol=\(inviteCode)",
+        ] {
+            XCTAssertNil(PaiPasskeyEnrol.invite(fromScanned: text, host: inviteHost), text)
+        }
+    }
+
+    func testInviteRefusesUserinfoOrPort() {
+        for text in [
+            "https://evil.com@pai.desk.atmagaming.com/settings/account?enrol=\(inviteCode)",
+            "https://user:pass@pai.desk.atmagaming.com/settings/account?enrol=\(inviteCode)",
+            "https://pai.desk.atmagaming.com:8443/settings/account?enrol=\(inviteCode)",
+            "https://pai.desk.atmagaming.com:443/settings/account?enrol=\(inviteCode)",
+            "https://pai.desk.atmagaming.com/settings/other?enrol=\(inviteCode)",
+        ] {
+            XCTAssertNil(PaiPasskeyEnrol.invite(fromScanned: text, host: inviteHost), text)
+        }
     }
 }
