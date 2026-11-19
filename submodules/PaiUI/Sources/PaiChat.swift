@@ -137,7 +137,7 @@ extension PaiChat {
             var value = newValue
             if let fresh = newValue, fresh.windows.isEmpty, let held = usageCache.current?.windows {
                 let now = Date()
-                value = PaiUsage(windows: held.filter { ($0.resetDate ?? .distantFuture) > now }, costUsd: fresh.costUsd, error: fresh.error, via: fresh.via)
+                value = PaiUsage(windows: held.filter { ($0.resetDate ?? .distantFuture) > now }, costUsd: fresh.costUsd, error: fresh.error, via: fresh.via, hold: fresh.hold)
             }
             if usageCache.set(value) { DispatchQueue.main.async { NotificationCenter.default.post(name: usageChanged, object: nil) } }
         }

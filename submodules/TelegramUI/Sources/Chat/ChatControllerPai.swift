@@ -301,7 +301,9 @@ final class PaiUsageRingNode: ASDisplayNode {
         self.fill.isHidden = window == nil
 
         let time = window?.resetsIn ?? ""
-        self.percentNode.attributedText = NSAttributedString(string: window == nil ? "" : "\(Int(percent.rounded()))%", font: Font.with(size: 11.0, design: .regular, weight: .bold, traits: .monospacedNumbers), textColor: bar.primaryTextColor)
+        // No windows means the plan could not be read: unknown, not 0%.
+        let percentText = window.map { _ in "\(Int(percent.rounded()))%" } ?? (usage == nil ? "" : "—")
+        self.percentNode.attributedText = NSAttributedString(string: percentText, font: Font.with(size: 11.0, design: .regular, weight: .bold, traits: .monospacedNumbers), textColor: bar.primaryTextColor)
         self.timeNode.attributedText = NSAttributedString(string: time, font: Font.with(size: 7.5, design: .regular, weight: .medium, traits: .monospacedNumbers), textColor: bar.secondaryTextColor)
         let percentSize = self.percentNode.updateLayout(CGSize(width: 30.0, height: 14.0))
         let timeSize = self.timeNode.updateLayout(CGSize(width: 28.0, height: 10.0))
@@ -358,6 +360,8 @@ private final class PaiUsageCard: UIView {
     private let theme: PresentationTheme
     private var rows: [(label: UILabel, value: UILabel, track: UIView, fill: UIView, reset: UILabel)] = []
     private let costLabel = UILabel()
+    private let unknownLabel = UILabel()
+    private let holdLabel = UILabel()
     private let background: UIVisualEffectView
 
     init(usage: PaiUsage, theme: PresentationTheme) {
@@ -406,6 +410,17 @@ private final class PaiUsageCard: UIView {
         self.costLabel.font = Font.medium(12.0)
         self.costLabel.textColor = bar.secondaryTextColor
         self.addSubview(self.costLabel)
+        if usage.windows.isEmpty {
+            self.unknownLabel.text = "Limits —"
+            self.unknownLabel.font = Font.semibold(13.0)
+            self.unknownLabel.textColor = bar.primaryTextColor
+            self.addSubview(self.unknownLabel)
+        }
+        self.holdLabel.text = usage.holdLine
+        self.holdLabel.font = Font.regular(11.0)
+        self.holdLabel.textColor = bar.secondaryTextColor
+        self.holdLabel.numberOfLines = 0
+        self.addSubview(self.holdLabel)
     }
 
     required init?(coder: NSCoder) {
@@ -414,14 +429,24 @@ private final class PaiUsageCard: UIView {
 
     private static let rowHeight: CGFloat = 44.0
 
+    private func holdHeight(width: CGFloat) -> CGFloat {
+        guard self.holdLabel.text != nil else { return 0.0 }
+        return ceil(self.holdLabel.sizeThatFits(CGSize(width: width - 28.0, height: .greatestFiniteMagnitude)).height) + 6.0
+    }
+
     func preferredHeight(width: CGFloat) -> CGFloat {
-        return 12.0 + CGFloat(self.rows.count) * Self.rowHeight + (self.usage.costUsd == nil ? 0.0 : 24.0) + 8.0
+        let unknown: CGFloat = self.usage.windows.isEmpty ? 24.0 : 0.0
+        return 12.0 + unknown + CGFloat(self.rows.count) * Self.rowHeight + (self.usage.costUsd == nil ? 0.0 : 24.0) + self.holdHeight(width: width) + 8.0
     }
 
     func layout(width: CGFloat) {
         self.background.frame = self.bounds
         let inset: CGFloat = 14.0
         var y: CGFloat = 12.0
+        if self.usage.windows.isEmpty {
+            self.unknownLabel.frame = CGRect(x: inset, y: y, width: width - inset * 2.0, height: 17.0)
+            y += 24.0
+        }
         for (index, row) in self.rows.enumerated() {
             let percent = max(0.0, min(100.0, self.usage.windows[index].percent))
             row.label.frame = CGRect(x: inset, y: y, width: width - inset * 2.0 - 50.0, height: 17.0)
@@ -432,5 +457,10 @@ private final class PaiUsageCard: UIView {
             y += Self.rowHeight
         }
         self.costLabel.frame = CGRect(x: inset, y: y + 2.0, width: width - inset * 2.0, height: 16.0)
+        if self.usage.costUsd != nil {
+            y += 24.0
+        }
+        let holdHeight = self.holdHeight(width: width)
+        self.holdLabel.frame = CGRect(x: inset, y: y, width: width - inset * 2.0, height: max(0.0, holdHeight - 6.0))
     }
 }

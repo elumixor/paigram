@@ -243,6 +243,9 @@ private struct PaiSmallView: View {
                         }
                     }
                     .frame(width: 54, height: 54)
+                } else {
+                    Text(PaiGlance.percentText(nil)).font(.system(size: 17, weight: .bold)).foregroundColor(.secondary)
+                        .frame(width: 54, height: 54)
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     Text("today").font(.caption2).foregroundColor(.secondary)
@@ -281,8 +284,14 @@ private struct PaiMediumView: View {
                         Text(PaiGlanceStyle.usd(glance.todayUsd)).font(.system(size: 20, weight: .bold)).monospacedDigitIfAvailable()
                         Text("today").font(.caption2).foregroundColor(.secondary)
                     }
+                    if glance.windows.isEmpty {
+                        Text("Limits \(PaiGlance.percentText(nil))").font(.caption.weight(.bold)).foregroundColor(.secondary)
+                    }
                     ForEach(glance.windows.filter { $0.name == "Session" || $0.name == "Weekly" }) { window in
                         PaiBar(window: window)
+                    }
+                    if let hold = glance.hold {
+                        Text(hold.line()).font(.system(size: 10)).foregroundColor(.secondary).lineLimit(2)
                     }
                     Spacer(minLength: 0)
                 }
@@ -330,15 +339,15 @@ private struct PaiAccessoryView: View {
             Gauge(value: min(window?.percent ?? 0, 100), in: 0 ... 100) {
                 Text(window?.name == "Weekly" ? "W" : "5h")
             } currentValueLabel: {
-                Text("\(Int((window?.percent ?? 0).rounded()))")
+                Text(window.map { "\(Int($0.percent.rounded()))" } ?? "—")
             }
             .gaugeStyle(.accessoryCircular)
         case .accessoryInline:
-            Text("\(PaiGlanceStyle.percent(window?.percent ?? 0)) · \(PaiGlanceStyle.usd(glance.todayUsd)) · \(glance.needsCount)?")
+            Text("\(PaiGlance.percentText(window)) · \(PaiGlanceStyle.usd(glance.todayUsd)) · \(glance.needsCount)?")
         default:
             VStack(alignment: .leading, spacing: 1) {
                 Text("pai \(PaiGlanceStyle.usd(glance.todayUsd))").font(.headline)
-                Text(glance.windows.prefix(2).map { "\($0.name == "Weekly" ? "W" : "5h") \(PaiGlanceStyle.percent($0.percent))" }.joined(separator: "  "))
+                Text(glance.windows.isEmpty ? "Limits —" : glance.windows.prefix(2).map { "\($0.name == "Weekly" ? "W" : "5h") \(PaiGlanceStyle.percent($0.percent))" }.joined(separator: "  "))
                 Text("\(glance.running) running · \(glance.needsCount) waiting").foregroundColor(.secondary)
             }
             .font(.caption)

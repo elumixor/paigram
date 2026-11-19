@@ -270,7 +270,8 @@ public final class PaiGlanceLiveSource: PaiGlanceSource {
             agents: agents,
             running: raw["running"] as? Int ?? 0,
             needsCount: listed?.count ?? raw["needs"] as? Int ?? needs.count,
-            needs: Array(needs.sorted { $0.createdAt < $1.createdAt }.prefix(needsLimit))
+            needs: Array(needs.sorted { $0.createdAt < $1.createdAt }.prefix(needsLimit)),
+            hold: PaiGlance.Hold.decode(raw["hold"])
         )
     }
 

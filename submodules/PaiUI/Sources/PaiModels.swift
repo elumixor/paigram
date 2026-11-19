@@ -1,4 +1,5 @@
 import Foundation
+import PaiGlance
 
 /// What the daemon reports about one thread (`Session.summary()` / `/tasks.recent`).
 public struct PaiSession: Codable, Identifiable, Equatable {
@@ -316,6 +317,11 @@ public struct PaiUsage: Codable, Equatable {
     public let costUsd: Double?
     public let error: String?
     public let via: String?
+    /// Work the box holds back near the weekly limit; nil when nothing is held or the box is too old to say.
+    public var hold: PaiGlance.Hold? = nil
+
+    /// The muted line under the meter, nil when nothing is held.
+    public var holdLine: String? { hold?.line() }
 
     /// The window that runs out first: the session one, unless a weekly one is further along.
     public var limiting: PaiUsageWindow? {

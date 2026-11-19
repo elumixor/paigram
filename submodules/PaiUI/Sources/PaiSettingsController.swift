@@ -154,8 +154,14 @@ struct SettingsView: View {
     @ViewBuilder private var usageSection: some View {
         if let usage = settings.usage {
             Section {
+                if usage.windows.isEmpty {
+                    SettingsRow(symbol: "speedometer", color: .gray, title: "Limits", value: "—")
+                }
                 ForEach(usage.windows) { window in
                     UsageRow(window: window)
+                }
+                if let line = usage.holdLine {
+                    Text(line).font(.footnote).foregroundStyle(.secondary)
                 }
                 if let cost = usage.costUsd {
                     SettingsRow(symbol: "dollarsign.circle.fill", color: .mint, title: "Sessions cost", value: String(format: "$%.2f", cost))
