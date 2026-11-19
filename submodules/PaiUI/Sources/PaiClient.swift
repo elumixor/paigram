@@ -1,4 +1,5 @@
 import Foundation
+import PaiPlaces
 
 public struct PaiTelegramInfo: Decodable {
     public let botUsername: String
@@ -59,6 +60,16 @@ public final class PaiClient {
             throw PaiClientError(message: detail ?? "\(path) failed with HTTP \(status)")
         }
         return try JSONDecoder().decode(T.self, from: data)
+    }
+
+    /// A call's raw answer, for callers that decode it themselves (`PaiPlaces`); a non-2xx answer throws `PaiPlacesHTTPError`.
+    public func send(_ path: String, method: String, body: Any?) async throws -> Data {
+        let request = try request(path, method: method, body: body)
+        let (data, response) = try await session.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if status == 401, let token = PaiAuth.token { PaiAuth.rejected(token) }
+        guard (200..<300).contains(status) else { throw PaiPlacesHTTPError(status: status) }
+        return data
     }
 
     /// A file's bytes as the box keeps it (an attachment, an artifact), with the same auth as every call.
