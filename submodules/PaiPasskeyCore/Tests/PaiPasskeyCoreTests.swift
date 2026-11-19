@@ -196,3 +196,42 @@ final class JSONShapeTests: XCTestCase {
         XCTAssertNil(locked.untilDate)
     }
 }
+
+final class GuardTests: XCTestCase {
+    let pinned = "pai.desk.atmagaming.com"
+
+    func testRelyingPartyAcceptsPinnedOrMissing() throws {
+        XCTAssertEqual(try PaiPasskeyGuard.relyingParty(pinned, pinned: pinned), pinned)
+        XCTAssertEqual(try PaiPasskeyGuard.relyingParty(nil, pinned: pinned), pinned)
+    }
+
+    func testRelyingPartyRefusesOtherIds() {
+        for sent in ["evil.example.com", "desk.atmagaming.com", "PAI.desk.atmagaming.com", "pai.desk.atmagaming.com.evil.com", ""] {
+            XCTAssertThrowsError(try PaiPasskeyGuard.relyingParty(sent, pinned: pinned)) { error in
+                XCTAssertEqual(error as? PaiPasskeyGuardError, .wrongRelyingParty(sent))
+            }
+        }
+    }
+
+    func testChangeHashMustMatch() {
+        XCTAssertNoThrow(try PaiPasskeyGuard.checkChange(requested: "abc123", returned: "abc123"))
+        XCTAssertThrowsError(try PaiPasskeyGuard.checkChange(requested: "abc123", returned: "def456")) { error in
+            XCTAssertEqual(error as? PaiPasskeyGuardError, .wrongChange(requested: "abc123", returned: "def456"))
+        }
+    }
+}
+
+final class ChangeFormatTests: XCTestCase {
+    func testStringShownRaw() {
+        XCTAssertEqual(PaiChangeFormat.text("Send invoice to https://x.com/a"), "Send invoice to https://x.com/a")
+    }
+
+    func testObjectIsPrettySortedWithoutEscapedSlashes() {
+        let text = PaiChangeFormat.text(["to": "a@b.com", "amount": "10", "url": "https://x.com/p"])
+        XCTAssertEqual(text, "{\n  \"amount\" : \"10\",\n  \"to\" : \"a@b.com\",\n  \"url\" : \"https://x.com/p\"\n}")
+    }
+
+    func testNullIsNil() {
+        XCTAssertNil(PaiChangeFormat.text(String?.none))
+    }
+}

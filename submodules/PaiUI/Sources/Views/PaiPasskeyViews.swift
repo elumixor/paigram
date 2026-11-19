@@ -184,6 +184,25 @@ struct PaiChangeView: View {
                     } footer: {
                         if let reason = change.reason { Text(reason) }
                     }
+                    let details = Self.details(change)
+                    if !details.isEmpty {
+                        Section("Details") {
+                            ForEach(details, id: \.title) { detail in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(detail.title).font(.footnote).foregroundStyle(.secondary)
+                                    ScrollView(.vertical) {
+                                        Text(detail.text)
+                                            .font(.system(.footnote, design: .monospaced))
+                                            .textSelection(.enabled)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                    .frame(maxHeight: 280)
+                                }
+                                .padding(.vertical, 2)
+                            }
+                        }
+                    }
                     if change.isPending {
                         Section {
                             Button { Task { await model.decide(approve: true) } } label: {
@@ -216,6 +235,19 @@ struct PaiChangeView: View {
             Text(title)
             Spacer(minLength: 16)
             Text(value).foregroundStyle(.secondary).multilineTextAlignment(.trailing)
+        }
+    }
+
+    /// Everything the passkey signs off on, so approving is never blind: the op's arguments, or the page edit.
+    static func details(_ change: PaiChange) -> [(title: String, text: String)] {
+        let values: [(String, JSONValue?)] = [
+            ("Arguments", change.op?.args),
+            ("Page changes", change.page?.changes),
+            ("Click target", change.page?.clickTarget),
+            ("Before", change.page?.before)
+        ]
+        return values.compactMap { title, value in
+            value.flatMap { PaiChangeFormat.text($0) }.map { (title, $0) }
         }
     }
 

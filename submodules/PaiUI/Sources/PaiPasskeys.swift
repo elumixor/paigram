@@ -83,7 +83,7 @@ public enum PaiPasskeys {
         guard let challenge = Base64URL.decode(options.challenge), let userID = Base64URL.decode(options.user.id) else {
             throw PaiClientError(message: "The box sent a malformed passkey request")
         }
-        let provider = ASAuthorizationPlatformPublicKeyCredentialProvider(relyingPartyIdentifier: options.rp.id ?? relyingParty)
+        let provider = ASAuthorizationPlatformPublicKeyCredentialProvider(relyingPartyIdentifier: try PaiPasskeyGuard.relyingParty(options.rp.id, pinned: relyingParty))
         let request = provider.createCredentialRegistrationRequest(challenge: challenge, name: options.user.name, userID: userID)
         request.displayName = options.user.displayName
         request.userVerificationPreference = .required
@@ -122,7 +122,9 @@ public enum PaiPasskeys {
     // MARK: Changes
 
     public static func change(_ hash: String) async throws -> PaiChange {
-        try await client.call(PaiChange.self, "/changes/\(escaped(hash))", keepTokenOn401: true)
+        let change = try await client.call(PaiChange.self, "/changes/\(escaped(hash))", keepTokenOn401: true)
+        try PaiPasskeyGuard.checkChange(requested: hash, returned: change.hash)
+        return change
     }
 
     @MainActor
@@ -142,7 +144,7 @@ public enum PaiPasskeys {
     private static func assert(challengePath: String) async throws -> PasskeyAssertionResponse {
         let options = try await passkeyCall(PasskeyRequestOptions.self, challengePath, body: nil)
         guard let challenge = Base64URL.decode(options.challenge) else { throw PaiClientError(message: "The box sent a malformed passkey request") }
-        let provider = ASAuthorizationPlatformPublicKeyCredentialProvider(relyingPartyIdentifier: options.rpId ?? relyingParty)
+        let provider = ASAuthorizationPlatformPublicKeyCredentialProvider(relyingPartyIdentifier: try PaiPasskeyGuard.relyingParty(options.rpId, pinned: relyingParty))
         let request = provider.createCredentialAssertionRequest(challenge: challenge)
         request.allowedCredentials = (options.allowCredentials ?? []).compactMap(\.idData).map(ASAuthorizationPlatformPublicKeyCredentialDescriptor.init(credentialID:))
         request.userVerificationPreference = .required
