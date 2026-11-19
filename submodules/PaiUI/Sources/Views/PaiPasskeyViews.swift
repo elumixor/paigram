@@ -1,4 +1,5 @@
 import AccountContext
+import Display
 import Foundation
 import PaiPasskeyCore
 import SwiftUI

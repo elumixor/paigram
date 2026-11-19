@@ -949,6 +949,13 @@ final class AuthorizedApplicationContext {
     
     func openUrl(_ url: URL, external: Bool = false) {
         if self.rootController.rootTabController != nil {
+            // Paigram: a pai change push opens its approve / deny screen.
+            if url.scheme == "paigram" && url.host == "change" {
+                if let hash = url.pathComponents.last(where: { $0 != "/" }), #available(iOS 16.0, *) {
+                    self.rootController.pushViewController(paiChangeController(context: self.context, hash: hash))
+                }
+                return
+            }
             // Paigram: the widget's and the usage alerts' links.
             if let target = PaiGlanceLink.parse(url) {
                 switch target {

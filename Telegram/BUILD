@@ -534,16 +534,20 @@ icloud_fragment = "" if not telegram_enable_icloud else """
     telegram_icloud_environment="Production" if telegram_aps_environment == "production" else "Development"
 )
 
-associated_domains_fragment = "" if telegram_bundle_id not in official_bundle_ids else """
-<key>com.apple.developer.associated-domains</key>
-<array>
+# Paigram: pai passkeys need webcredentials for the pai relying party on every bundle id; Telegram's domains stay official-only.
+official_associated_domains = """
     <string>applinks:telegram.me</string>
     <string>applinks:t.me</string>
     <string>applinks:*.t.me</string>
     <string>webcredentials:t.me</string>
     <string>webcredentials:telegram.org</string>
-</array>
-"""
+""" if telegram_bundle_id in official_bundle_ids else ""
+
+associated_domains_fragment = """
+<key>com.apple.developer.associated-domains</key>
+<array>
+    <string>webcredentials:pai.desk.atmagaming.com</string>{official_associated_domains}</array>
+""".format(official_associated_domains=official_associated_domains)
 
 siri_fragment = "" if not telegram_enable_siri else """
 <key>com.apple.developer.siri</key>
