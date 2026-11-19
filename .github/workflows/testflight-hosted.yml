@@ -1,7 +1,7 @@
 name: TestFlight (GitHub runner)
 
 # The same release on a GitHub macOS runner (free for this public repo, about 1h40 with the queue).
-# Dispatched only: by the Mac workflow's `fallback` job when its build fails, or by hand on an `ios-v*` tag.
+# Dispatched by hand only, on an `ios-v*` tag, when the Mac is asleep or its build failed; nothing starts it.
 # GitHub's macOS pool often refuses the job outright ("not acquired by Runner of type hosted" after 15
 # minutes), so a build that never got a machine is tried once more on the macOS 15 image, which has the
 # same Xcode and a shorter queue.

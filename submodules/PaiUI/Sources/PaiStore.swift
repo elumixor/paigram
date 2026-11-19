@@ -81,6 +81,12 @@ public final class PaiStore: ObservableObject {
         PaiPerf.first("store.start")
         connectionError = nil
         refresh()
+        // Back in the app: asks answered elsewhere meanwhile (the web, another device) leave the list and the notifications.
+        if activeObserver == nil {
+            activeObserver = NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.refreshNeeds() }
+            }
+        }
         followTask = Task { [weak self] in
             while let self, !Task.isCancelled {
                 do {
@@ -196,6 +202,7 @@ public final class PaiStore: ObservableObject {
     // MARK: Decisions
 
     private var needsTask: Task<Void, Never>?
+    private var activeObserver: NSObjectProtocol?
 
     /// What waits on the user, fetched again whenever a question opens or closes anywhere.
     public func refreshNeeds() {
@@ -207,6 +214,7 @@ public final class PaiStore: ObservableObject {
             PaiPerf.mark("load.needs")
             self.settled.insert("needs")
             PaiChat.needs = fetched
+            PaiNotificationAnswer.withdrawAnswered(open: fetched)
         }
     }
 

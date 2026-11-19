@@ -174,6 +174,9 @@ func paiHistoryContent(row: PaiLogRow, slug: String, thread: Int64, agents: [Pai
             }
             return paiWithTrailer(firstLine(row.body), [], meta: trailer)
         }
+        if row.kind == "report", let status = row.meta["status"] {
+            trailer["status"] = status
+        }
         return said(row.from == "user" ? "user" : "result")
     case "ask":
         for key in ["askId", "options", "optionDetails", "multiSelect", "questions", "answer"] {

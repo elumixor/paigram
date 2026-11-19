@@ -1,4 +1,5 @@
 import Foundation
+import PaiUI
 import UIKit
 import Postbox
 import SwiftSignalKit
@@ -238,6 +239,7 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
     let globalControlPanelsContext: GlobalControlPanelsContext
     private(set) var globalControlPanelsContextState: GlobalControlPanelsContext.State?
     private var globalControlPanelsContextStateDisposable: Disposable?
+    private var paiNeedsObserver: NSObjectProtocol?
     
     public override func updateNavigationCustomData(_ data: Any?, progress: CGFloat, transition: ContainedViewLayoutTransition) {
         if self.isNodeLoaded {
@@ -784,6 +786,10 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
             self.globalControlPanelsContextState = state
             self.requestLayout(transition: .animated(duration: 0.4, curve: .spring))
         })
+        // Paigram: the "decisions waiting" notice follows the asks.
+        self.paiNeedsObserver = NotificationCenter.default.addObserver(forName: PaiChat.needsChanged, object: nil, queue: .main) { [weak self] _ in
+            self?.requestLayout(transition: .animated(duration: 0.4, curve: .spring))
+        }
     }
 
     required public init(coder aDecoder: NSCoder) {
@@ -792,6 +798,9 @@ public class ChatListControllerImpl: TelegramBaseController, ChatListController 
     
     deinit {
         self.openMessageFromSearchDisposable.dispose()
+        if let paiNeedsObserver = self.paiNeedsObserver {
+            NotificationCenter.default.removeObserver(paiNeedsObserver)
+        }
         self.badgeDisposable?.dispose()
         self.badgeIconDisposable?.dispose()
         self.passcodeLockTooltipDisposable.dispose()

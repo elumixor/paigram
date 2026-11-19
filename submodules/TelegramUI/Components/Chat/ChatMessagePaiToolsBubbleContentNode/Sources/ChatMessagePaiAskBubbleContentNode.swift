@@ -160,6 +160,8 @@ public final class ChatMessagePaiAskBubbleContentNode: ChatMessageBubbleContentN
 
             return (contentProperties, nil, CGFloat.greatestFiniteMagnitude, { constrainedSize, _ in
                 let colors = item.presentationData.theme.theme.chat.message.incoming
+                // Wallpaper themes may leave `accentTextColor` fully transparent.
+                let accent = colors.accentTextColor.cgColor.alpha < 0.5 ? colors.primaryTextColor : colors.accentTextColor
                 let base = item.presentationData.messageFont.pointSize
                 let labelFont = Font.medium(floor(base * 16.0 / 17.0))
                 let subtitleFont = Font.regular(floor(base * 14.0 / 17.0))
@@ -191,7 +193,7 @@ public final class ChatMessagePaiAskBubbleContentNode: ChatMessageBubbleContentN
                     var laid = Laid(style: .option(ticked: ticked), tap: tap, gap: gap, check: check, thumb: thumb, url: detail?.url)
                     laid.label = textImage(label, font: labelFont, color: labelColor ?? colors.primaryTextColor, maxWidth: textWidth, lines: 1)
                     laid.subtitle = detail?.subtitle.flatMap { textImage($0, font: subtitleFont, color: colors.secondaryTextColor, maxWidth: textWidth, lines: 2) }
-                    laid.domain = detail?.domain.flatMap { textImage("\($0) ↗", font: domainFont, color: colors.accentTextColor, maxWidth: textWidth, lines: 1) }
+                    laid.domain = detail?.domain.flatMap { textImage("\($0) ↗", font: domainFont, color: accent, maxWidth: textWidth, lines: 1) }
                     let parts = [laid.label, laid.subtitle, laid.domain].compactMap { $0 }
                     laid.textHeight = parts.reduce(0.0) { $0 + $1.size.height } + CGFloat(max(0, parts.count - 1)) * lineGap
                     let contentHeight = max(laid.textHeight, thumb != nil ? thumbSize : 0.0, check != nil ? checkSize : 0.0)
@@ -225,11 +227,11 @@ public final class ChatMessagePaiAskBubbleContentNode: ChatMessageBubbleContentN
                         let picks = typed != nil && takesWords ? [] : (draft.picked[q] ?? [])
                         for (i, label) in question.options.enumerated() {
                             let ticked = picks.contains(i)
-                            laid.append(option(label: label, detail: details?[i], check: checkImage(ticked: ticked, color: colors.accentTextColor), ticked: ticked, tap: .pick(card: card, question: q, option: i), gap: i == 0 ? 6.0 : rowGap))
+                            laid.append(option(label: label, detail: details?[i], check: checkImage(ticked: ticked, color: accent), ticked: ticked, tap: .pick(card: card, question: q, option: i), gap: i == 0 ? 6.0 : rowGap))
                         }
                         if takesWords {
                             let prompt = question.options.isEmpty ? "Your answer…" : "Type something…"
-                            laid.append(option(label: typed ?? prompt, labelColor: typed != nil ? colors.primaryTextColor : colors.accentTextColor, detail: nil, check: symbolImage(typed != nil ? "checkmark.circle.fill" : "square.and.pencil", color: colors.accentTextColor), ticked: typed != nil, tap: .type(card: card, question: q), gap: question.options.isEmpty ? 6.0 : rowGap))
+                            laid.append(option(label: typed ?? prompt, labelColor: typed != nil ? colors.primaryTextColor : accent, detail: nil, check: symbolImage(typed != nil ? "checkmark.circle.fill" : "square.and.pencil", color: accent), ticked: typed != nil, tap: .type(card: card, question: q), gap: question.options.isEmpty ? 6.0 : rowGap))
                         }
                     }
                     let answered = draft.answered(card)
@@ -244,7 +246,7 @@ public final class ChatMessagePaiAskBubbleContentNode: ChatMessageBubbleContentN
                     }
                 } else {
                     for row in PaiAsk.rows(item.message) ?? [] {
-                        let check = row.isMulti ? checkImage(ticked: row.ticked, color: colors.accentTextColor) : nil
+                        let check = row.isMulti ? checkImage(ticked: row.ticked, color: accent) : nil
                         laid.append(option(label: row.label, detail: row.detail, check: check, ticked: row.ticked, tap: .callback(row.data), gap: laid.isEmpty ? 4.0 : rowGap))
                     }
                 }
@@ -284,10 +286,10 @@ public final class ChatMessagePaiAskBubbleContentNode: ChatMessageBubbleContentN
                                 node.background.backgroundColor = .clear
                                 padding = .zero
                             case let .option(ticked):
-                                node.background.backgroundColor = colors.accentTextColor.withAlphaComponent(ticked ? 0.16 : 0.08)
+                                node.background.backgroundColor = accent.withAlphaComponent(ticked ? 0.16 : 0.08)
                                 padding = rowPadding
                             case let .send(enabled):
-                                node.background.backgroundColor = colors.accentTextColor.withAlphaComponent(enabled ? 1.0 : 0.4)
+                                node.background.backgroundColor = accent.withAlphaComponent(enabled ? 1.0 : 0.4)
                                 padding = UIEdgeInsets(top: 0.0, left: floorToScreenPixels((width - (laid.label?.size.width ?? 0.0)) / 2.0), bottom: 0.0, right: 0.0)
                             }
 

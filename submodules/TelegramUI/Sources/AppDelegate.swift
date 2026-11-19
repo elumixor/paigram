@@ -1208,6 +1208,8 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
         
         // Paigram: email chats sync through the pai box, for whichever account is in front.
         EmailChats.configure()
+        // Paigram: place fences; made here so a background relaunch for a region event reaches the location manager.
+        PaiPlaceReminders.start()
         let _ = (self.sharedContextPromise.get()
         |> mapToSignal { sharedApplicationContext -> Signal<AccountContext?, NoError> in
             return sharedApplicationContext.sharedContext.activeAccountContexts

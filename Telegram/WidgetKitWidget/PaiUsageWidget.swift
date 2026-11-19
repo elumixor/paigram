@@ -5,7 +5,7 @@ import SwiftUI
 import WidgetKit
 import PaiGlance
 
-/// Paigram's glance on the home and lock screens: plan usage, today's spend, running agents and what waits on the user.
+/// Paigram's glance on the home and lock screens: what waits on the user, what the agents do, and the weekly window.
 @available(iOS 14.0, *)
 struct PaiUsageWidget: Widget {
     private let kind = "PaiUsage"
@@ -15,15 +15,15 @@ struct PaiUsageWidget: Widget {
             PaiGlanceWidgetView(entry: entry)
         }
         .configurationDisplayName("pai")
-        .description("Usage, spend, running agents and questions waiting on you.")
+        .description("Questions waiting on you, what your agents are doing, and the weekly limit.")
         .supportedFamilies(PaiUsageWidget.families)
     }
 
     private static var families: [WidgetFamily] {
         if #available(iOS 16.0, *) {
-            return [.systemSmall, .systemMedium, .accessoryCircular, .accessoryRectangular, .accessoryInline]
+            return [.systemSmall, .systemMedium, .systemLarge, .accessoryCircular, .accessoryRectangular, .accessoryInline]
         }
-        return [.systemSmall, .systemMedium]
+        return [.systemSmall, .systemMedium, .systemLarge]
     }
 }
 
@@ -100,7 +100,8 @@ struct PaiGlanceWidgetView: View {
     }
 
     private var url: URL {
-        if let agent = entry.glance?.oldestNeed?.agent, family != .systemMedium {
+        if let glance = entry.glance, let agent = PaiWidgetModel(glance: glance, now: entry.date).oldestAsk?.agent,
+           family != .systemMedium, family != .systemLarge {
             return PaiGlanceLink.agent(agent)
         }
         return PaiGlanceLink.usage
@@ -109,16 +110,19 @@ struct PaiGlanceWidgetView: View {
     @ViewBuilder
     private var content: some View {
         if let glance = entry.glance {
+            let model = PaiWidgetModel(glance: glance, now: entry.date)
             switch family {
             case .systemMedium:
-                PaiMediumView(glance: glance)
+                PaiMediumView(model: model)
+            case .systemLarge:
+                PaiLargeView(model: model)
             case .systemSmall:
-                PaiSmallView(glance: glance)
+                PaiSmallView(model: model)
             default:
                 if #available(iOS 16.0, *) {
-                    PaiAccessoryView(glance: glance, family: family)
+                    PaiAccessoryView(model: model, family: family)
                 } else {
-                    PaiSmallView(glance: glance)
+                    PaiSmallView(model: model)
                 }
             }
         } else {
@@ -135,134 +139,133 @@ struct PaiGlanceWidgetView: View {
 }
 
 enum PaiGlanceStyle {
-    static func color(_ percent: Double) -> Color {
+    static func color(_ percent: Double?) -> Color {
+        guard let percent = percent else { return .secondary }
         if percent >= 90 { return .red }
         if percent >= 70 { return .orange }
         return .green
     }
-
-    static func usd(_ value: Double) -> String {
-        value >= 100 ? String(format: "$%.0f", value) : String(format: "$%.2f", value)
-    }
-
-    static func percent(_ value: Double) -> String {
-        "\(Int(value.rounded()))%"
-    }
-
-    static func age(_ date: Date, now: Date = Date()) -> String {
-        let minutes = max(0, Int(now.timeIntervalSince(date) / 60))
-        if minutes < 60 { return "\(minutes)m" }
-        if minutes < 24 * 60 { return "\(minutes / 60)h" }
-        return "\(minutes / 1440)d"
-    }
 }
 
+/// The weekly window as a capsule, with the 5-hour window as a thin strip inside it.
 @available(iOS 14.0, *)
-private struct PaiRing: View {
-    let percent: Double
-    let lineWidth: CGFloat
+private struct PaiWeekBar: View {
+    let bar: PaiWidgetModel.Bar
+    var compact = false
 
     var body: some View {
-        ZStack {
-            Circle().stroke(Color.primary.opacity(0.12), lineWidth: lineWidth)
-            Circle()
-                .trim(from: 0, to: CGFloat(min(percent, 100) / 100))
-                .stroke(PaiGlanceStyle.color(percent), style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-        }
-    }
-}
-
-@available(iOS 14.0, *)
-private struct PaiBar: View {
-    let window: PaiGlance.Window
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 4) {
-                Text(window.name).font(.caption2.weight(.semibold)).foregroundColor(.secondary)
-                Spacer(minLength: 0)
-                Text(PaiGlanceStyle.percent(window.percent)).font(.caption.weight(.bold)).monospacedDigitIfAvailable()
-            }
+        VStack(alignment: .leading, spacing: 4) {
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(Color.primary.opacity(0.12))
-                    Capsule().fill(PaiGlanceStyle.color(window.percent))
-                        .frame(width: proxy.size.width * CGFloat(min(window.percent, 100) / 100))
+                    Capsule().fill(Color.primary.opacity(0.1))
+                    if let weekly = bar.weekly {
+                        Capsule().fill(PaiGlanceStyle.color(bar.peakPercent).opacity(0.85))
+                            .frame(width: max(proxy.size.height, proxy.size.width * CGFloat(weekly)))
+                    }
+                    if let session = bar.session {
+                        Capsule().fill(Color.primary.opacity(0.55))
+                            .frame(width: max(2, (proxy.size.width - 4) * CGFloat(session)), height: 2)
+                            .padding(.leading, 2)
+                    }
                 }
             }
-            .frame(height: 5)
-            if let left = window.resetsIn() {
-                Text("resets in \(left)").font(.system(size: 9)).foregroundColor(.secondary)
+            .frame(height: 8)
+            HStack(spacing: 4) {
+                Text("Week \(bar.weeklyLabel)").foregroundColor(.primary)
+                Text("5h \(bar.sessionLabel)")
+                if !compact, let resets = bar.weeklyResetsIn {
+                    Spacer(minLength: 0)
+                    Text("resets \(resets)")
+                }
+            }
+            .font(.system(size: 10, weight: .medium))
+            .foregroundColor(.secondary)
+            .monospacedDigitIfAvailable()
+            .lineLimit(1)
+        }
+    }
+}
+
+@available(iOS 14.0, *)
+private struct PaiAsksHeader: View {
+    let count: Int
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Text("\(count)")
+                .font(.system(size: 34, weight: .semibold, design: .rounded))
+                .foregroundColor(count > 0 ? .orange : .secondary)
+                .monospacedDigitIfAvailable()
+            Text(count == 1 ? "ask" : "asks").font(.subheadline.weight(.medium)).foregroundColor(.secondary)
+        }
+        .lineLimit(1)
+    }
+}
+
+@available(iOS 14.0, *)
+private struct PaiAskRow: View {
+    let ask: PaiWidgetModel.Ask
+    var lines = 2
+
+    var body: some View {
+        Link(destination: ask.agent.map(PaiGlanceLink.agent) ?? PaiGlanceLink.usage) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text("\(ask.from) · \(ask.age)").font(.caption2.weight(.semibold)).foregroundColor(.secondary).lineLimit(1)
+                Text(ask.question).font(.system(size: 12)).foregroundColor(.primary).lineLimit(lines)
             }
         }
     }
 }
 
 @available(iOS 14.0, *)
-private struct PaiNeedsBadge: View {
-    let count: Int
+private struct PaiAgentRow: View {
+    let agent: PaiWidgetModel.Agent
 
     var body: some View {
-        HStack(spacing: 3) {
-            Image(systemName: count > 0 ? "questionmark.bubble.fill" : "checkmark.bubble")
-            Text("\(count)").monospacedDigitIfAvailable()
+        Link(destination: PaiGlanceLink.agent(agent.slug)) {
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 4) {
+                    Circle().fill(agent.working ? Color.green : Color.secondary.opacity(0.4)).frame(width: 6, height: 6)
+                    Text(agent.name).font(.caption.weight(.semibold)).lineLimit(1)
+                    Spacer(minLength: 0)
+                    if let age = agent.age {
+                        Text(age).font(.caption2).foregroundColor(.secondary).monospacedDigitIfAvailable()
+                    }
+                }
+                Text(agent.line).font(.system(size: 11)).foregroundColor(.secondary).lineLimit(1)
+            }
         }
-        .font(.caption.weight(.semibold))
-        .foregroundColor(count > 0 ? .orange : .secondary)
     }
 }
 
 @available(iOS 14.0, *)
-private struct PaiRunningBadge: View {
-    let count: Int
+private struct PaiHoldLine: View {
+    let text: String
 
     var body: some View {
-        HStack(spacing: 3) {
-            Image(systemName: "bolt.fill")
-            Text("\(count)").monospacedDigitIfAvailable()
-        }
-        .font(.caption.weight(.semibold))
-        .foregroundColor(count > 0 ? .blue : .secondary)
+        Label(text, systemImage: "pause.circle.fill")
+            .font(.system(size: 10, weight: .medium))
+            .foregroundColor(.orange)
+            .lineLimit(1)
     }
 }
 
 @available(iOS 14.0, *)
 private struct PaiSmallView: View {
-    let glance: PaiGlance
+    let model: PaiWidgetModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .center, spacing: 8) {
-                if let window = glance.limiting {
-                    ZStack {
-                        PaiRing(percent: window.percent, lineWidth: 6)
-                        VStack(spacing: 0) {
-                            Text(PaiGlanceStyle.percent(window.percent)).font(.system(size: 14, weight: .bold)).monospacedDigitIfAvailable()
-                            Text(window.name == "Weekly" ? "week" : "5h").font(.system(size: 8)).foregroundColor(.secondary)
-                        }
-                    }
-                    .frame(width: 54, height: 54)
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("today").font(.caption2).foregroundColor(.secondary)
-                    Text(PaiGlanceStyle.usd(glance.todayUsd)).font(.system(size: 17, weight: .bold)).monospacedDigitIfAvailable()
-                        .minimumScaleFactor(0.6).lineLimit(1)
-                }
-            }
-            HStack(spacing: 10) {
-                PaiRunningBadge(count: glance.running)
-                PaiNeedsBadge(count: glance.needsCount)
-            }
-            if let need = glance.oldestNeed {
-                Text("\(need.from): \(need.plainQuestion)")
-                    .font(.system(size: 11))
-                    .lineLimit(2)
-                    .foregroundColor(.primary)
-            } else if let top = glance.agents.first {
-                Text("\(top.name) \(PaiGlanceStyle.usd(top.usd))").font(.system(size: 11)).foregroundColor(.secondary).lineLimit(1)
+        VStack(alignment: .leading, spacing: 4) {
+            PaiAsksHeader(count: model.asksCount)
+            if let ask = model.oldestAsk {
+                Text("\(ask.from) · \(ask.age)").font(.caption2.weight(.semibold)).foregroundColor(.secondary).lineLimit(1)
+                Text(ask.question).font(.system(size: 12)).lineLimit(2)
+            } else if let agent = model.agents.first {
+                Text(agent.name).font(.caption2.weight(.semibold)).foregroundColor(.secondary).lineLimit(1)
+                Text(agent.line).font(.system(size: 12)).foregroundColor(.secondary).lineLimit(2)
             }
             Spacer(minLength: 0)
+            PaiWeekBar(bar: model.bar, compact: true)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(14)
@@ -271,75 +274,88 @@ private struct PaiSmallView: View {
 
 @available(iOS 14.0, *)
 private struct PaiMediumView: View {
-    let glance: PaiGlance
+    let model: PaiWidgetModel
 
     var body: some View {
-        HStack(alignment: .top, spacing: 14) {
-            Link(destination: PaiGlanceLink.usage) {
-                VStack(alignment: .leading, spacing: 7) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(PaiGlanceStyle.usd(glance.todayUsd)).font(.system(size: 20, weight: .bold)).monospacedDigitIfAvailable()
-                        Text("today").font(.caption2).foregroundColor(.secondary)
-                    }
-                    ForEach(glance.windows.filter { $0.name == "Session" || $0.name == "Weekly" }) { window in
-                        PaiBar(window: window)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 14) {
+                VStack(alignment: .leading, spacing: 3) {
+                    PaiAsksHeader(count: model.asksCount)
+                    if let ask = model.oldestAsk {
+                        PaiAskRow(ask: ask)
+                    } else {
+                        Text("Nothing waiting").font(.system(size: 12)).foregroundColor(.secondary)
                     }
                     Spacer(minLength: 0)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(model.agents.prefix(model.holdLine == nil ? 3 : 2)) { PaiAgentRow(agent: $0) }
+                    Spacer(minLength: 0)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 10) {
-                    PaiRunningBadge(count: glance.running)
-                    PaiNeedsBadge(count: glance.needsCount)
-                }
-                if let need = glance.oldestNeed {
-                    Link(destination: need.agent.map(PaiGlanceLink.agent) ?? PaiGlanceLink.usage) {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("\(need.from) · \(PaiGlanceStyle.age(need.createdAt))").font(.caption2.weight(.semibold)).foregroundColor(.orange)
-                            Text(need.plainQuestion).font(.system(size: 11)).lineLimit(2)
-                        }
-                    }
-                }
-                ForEach(glance.agents.prefix(glance.oldestNeed == nil ? 4 : 2)) { agent in
-                    Link(destination: PaiGlanceLink.agent(agent.slug)) {
-                        HStack(spacing: 4) {
-                            Text(agent.name).font(.system(size: 11)).lineLimit(1)
-                            Spacer(minLength: 0)
-                            Text(PaiGlanceStyle.usd(agent.usd)).font(.system(size: 11, weight: .medium)).foregroundColor(.secondary).monospacedDigitIfAvailable()
-                        }
-                    }
-                }
-                Spacer(minLength: 0)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            if let hold = model.holdLine { PaiHoldLine(text: hold) }
+            PaiWeekBar(bar: model.bar)
         }
         .padding(14)
     }
 }
 
+@available(iOS 14.0, *)
+private struct PaiLargeView: View {
+    let model: PaiWidgetModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            PaiAsksHeader(count: model.asksCount)
+            ForEach(model.asks.prefix(2)) { PaiAskRow(ask: $0, lines: 1) }
+            if !model.agents.isEmpty {
+                Divider()
+                ForEach(model.agents.prefix(model.asks.count > 1 ? 4 : 5)) { PaiAgentRow(agent: $0) }
+            }
+            Spacer(minLength: 0)
+            if let hold = model.holdLine { PaiHoldLine(text: hold) }
+            PaiWeekBar(bar: model.bar)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(16)
+    }
+}
+
 @available(iOS 16.0, *)
 private struct PaiAccessoryView: View {
-    let glance: PaiGlance
+    let model: PaiWidgetModel
     let family: WidgetFamily
 
     var body: some View {
-        let window = glance.limiting
         switch family {
         case .accessoryCircular:
-            Gauge(value: min(window?.percent ?? 0, 100), in: 0 ... 100) {
-                Text(window?.name == "Weekly" ? "W" : "5h")
-            } currentValueLabel: {
-                Text("\(Int((window?.percent ?? 0).rounded()))")
+            if let weekly = model.bar.weekly {
+                Gauge(value: weekly) {
+                    Text("W")
+                } currentValueLabel: {
+                    Text("\(Int((weekly * 100).rounded()))")
+                }
+                .gaugeStyle(.accessoryCircular)
+            } else {
+                ZStack {
+                    AccessoryWidgetBackground()
+                    VStack(spacing: 0) {
+                        Text("W").font(.caption2)
+                        Text(PaiWidgetModel.Bar.unknownLabel).font(.headline)
+                    }
+                }
             }
-            .gaugeStyle(.accessoryCircular)
         case .accessoryInline:
-            Text("\(PaiGlanceStyle.percent(window?.percent ?? 0)) · \(PaiGlanceStyle.usd(glance.todayUsd)) · \(glance.needsCount)?")
+            Text("\(model.asksCount) asks · W \(model.bar.weeklyLabel) · 5h \(model.bar.sessionLabel)")
         default:
             VStack(alignment: .leading, spacing: 1) {
-                Text("pai \(PaiGlanceStyle.usd(glance.todayUsd))").font(.headline)
-                Text(glance.windows.prefix(2).map { "\($0.name == "Weekly" ? "W" : "5h") \(PaiGlanceStyle.percent($0.percent))" }.joined(separator: "  "))
-                Text("\(glance.running) running · \(glance.needsCount) waiting").foregroundColor(.secondary)
+                Text("\(model.asksCount) \(model.asksCount == 1 ? "ask" : "asks")").font(.headline)
+                if let ask = model.oldestAsk {
+                    Text("\(ask.from): \(ask.question)").lineLimit(1)
+                }
+                Text("Week \(model.bar.weeklyLabel) · 5h \(model.bar.sessionLabel)").foregroundColor(.secondary)
             }
             .font(.caption)
         }

@@ -23,6 +23,7 @@ import TelegramNotices
 import ChatControllerInteraction
 import TranslateUI
 import ChatHistoryEntry
+import PaiUI
 import ChatOverscrollControl
 import ChatBotInfoItem
 import ChatUserInfoItem
@@ -1819,7 +1820,7 @@ public final class ChatHistoryListNodeImpl: ASDisplayNode, ChatHistoryNode, Chat
         let promises = combineLatest(
             self.historyAppearsClearedPromise.get(),
             self.pendingUnpinnedAllMessagesPromise.get(),
-            self.pendingRemovedMessagesPromise.get(),
+            combineLatest(self.pendingRemovedMessagesPromise.get(), PaiRunFold.version.get()) |> map { $0.0 },
             self.currentlyPlayingMessageIdPromise.get(),
             self.scrollToMessageIdPromise.get(),
             self.chatHasBotsPromise.get(),

@@ -58,7 +58,7 @@ public enum PaiAgentList {
         })
     }
 
-    private static func botPeer(context: AccountContext) -> Signal<EnginePeer?, NoError> {
+    static func botPeer(context: AccountContext) -> Signal<EnginePeer?, NoError> {
         if let botPeerId = PaiChat.botPeerId {
             return context.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: botPeerId))
         }

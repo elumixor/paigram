@@ -20,6 +20,44 @@ private let codeIcon: UIImage = {
     return generateTintedImage(image: UIImage(bundleImageName: "Chat/Message/TextCodeIcon"), color: .white)!
 }()
 
+private let codeBlockCopyIcon: UIImage? = {
+    return UIImage(bundleImageName: "Chat/Context Menu/Copy")
+}()
+
+private func codeBlockCopyButtonSize(title: NSAttributedString) -> CGSize {
+    let labelSize = title.boundingRect(with: CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude), options: .usesLineFragmentOrigin, context: nil).size
+    return CodeBlockCopyButtonLayout.buttonSize(labelSize: CGSize(width: ceil(labelSize.width), height: ceil(labelSize.height)))
+}
+
+private var codeBlockCopyButtonImageCache: [String: UIImage] = [:]
+
+/// White icon + label, tinted at display time like the other block icons. Main thread only.
+private func codeBlockCopyButtonImage(title: NSAttributedString) -> UIImage? {
+    let font = title.attribute(.font, at: 0, effectiveRange: nil) as? UIFont
+    let key = "\(title.string)|\(font?.fontName ?? "")|\(font?.pointSize ?? 0.0)"
+    if let image = codeBlockCopyButtonImageCache[key] {
+        return image
+    }
+    let size = codeBlockCopyButtonSize(title: title)
+    let whiteTitle = NSMutableAttributedString(attributedString: title)
+    whiteTitle.addAttribute(.foregroundColor, value: UIColor.white, range: NSRange(location: 0, length: whiteTitle.length))
+    let labelHeight = ceil(whiteTitle.boundingRect(with: CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude), options: .usesLineFragmentOrigin, context: nil).height)
+    let image = generateImage(size, rotatedContext: { size, context in
+        context.clear(CGRect(origin: CGPoint(), size: size))
+        UIGraphicsPushContext(context)
+        let iconSize = CodeBlockCopyButtonLayout.iconSize
+        if let icon = codeBlockCopyIcon, let tintedIcon = generateTintedImage(image: icon, color: .white) {
+            tintedIcon.draw(in: CGRect(origin: CGPoint(x: 0.0, y: floor((size.height - iconSize.height) / 2.0)), size: iconSize))
+        }
+        whiteTitle.draw(at: CGPoint(x: iconSize.width + CodeBlockCopyButtonLayout.iconLabelSpacing, y: floor((size.height - labelHeight) / 2.0)))
+        UIGraphicsPopContext()
+    })
+    if let image {
+        codeBlockCopyButtonImageCache[key] = image
+    }
+    return image
+}
+
 private let expandArrowIcon: UIImage = {
     return generateTintedImage(image: UIImage(bundleImageName: "Item List/ExpandingItemVerticalRegularArrow"), color: .white)!
 }()
@@ -159,9 +197,12 @@ private final class InteractiveTextNodeBlockQuote {
     let tertiaryTintColor: UIColor?
     let backgroundColor: UIColor
     let isCollapsed: Bool?
+    /// Text the code block's copy button puts on the pasteboard; nil when there is no button.
+    let copyText: String?
     
-    init(id: Int, frame: CGRect, data: TextNodeBlockQuoteData, tintColor: UIColor, secondaryTintColor: UIColor?, tertiaryTintColor: UIColor?, backgroundColor: UIColor, isCollapsed: Bool?) {
+    init(id: Int, frame: CGRect, data: TextNodeBlockQuoteData, tintColor: UIColor, secondaryTintColor: UIColor?, tertiaryTintColor: UIColor?, backgroundColor: UIColor, isCollapsed: Bool?, copyText: String?) {
         self.id = id
+        self.copyText = copyText
         self.frame = frame
         self.data = data
         self.tintColor = tintColor
@@ -552,6 +593,21 @@ public final class InteractiveTextNodeLayout: NSObject {
         } else {
             return false
         }
+    }
+    
+    /// Text of the code block whose copy button contains `point`, if any.
+    public func codeBlockCopyTextAtPoint(_ point: CGPoint) -> String? {
+        let transformedPoint = CGPoint(x: point.x - self.insets.left, y: point.y - self.insets.top)
+        for segment in self.segments {
+            guard let blockQuote = segment.blockQuote, let copyText = blockQuote.copyText, let copyButtonTitle = blockQuote.data.copyButtonTitle else {
+                continue
+            }
+            let hitRect = CodeBlockCopyButtonLayout.hitRect(blockFrame: blockQuote.frame, buttonSize: codeBlockCopyButtonSize(title: copyButtonTitle))
+            if hitRect.contains(transformedPoint) {
+                return copyText
+            }
+        }
+        return nil
     }
     
     public func attributesAtPoint(_ point: CGPoint, orNearest: Bool) -> (Int, [NSAttributedString.Key: Any])? {
@@ -1384,6 +1440,10 @@ open class InteractiveTextNode: ASDisplayNode, TextNodeProtocol, UIGestureRecogn
         super.didLoad()
     }
     
+    public func codeBlockCopyTextAtPoint(_ point: CGPoint) -> String? {
+        return self.cachedLayout?.codeBlockCopyTextAtPoint(point)
+    }
+    
     public func attributesAtPoint(_ point: CGPoint, orNearest: Bool = false) -> (Int, [NSAttributedString.Key: Any])? {
         if let cachedLayout = self.cachedLayout {
             return cachedLayout.attributesAtPoint(point, orNearest: orNearest)
@@ -1588,6 +1648,7 @@ open class InteractiveTextNode: ASDisplayNode, TextNodeProtocol, UIGestureRecogn
             var secondaryTintColor: UIColor?
             var tertiaryTintColor: UIColor?
             var blockQuote: TextNodeBlockQuoteData?
+            var text: String?
             var additionalWidth: CGFloat = 0.0
             
             init(id: Int?) {
@@ -1626,6 +1687,7 @@ open class InteractiveTextNode: ASDisplayNode, TextNodeProtocol, UIGestureRecogn
             
             let calculatedSegment = CalculatedSegment(id: blockIndex)
             calculatedSegment.blockQuote = segment.blockQuote
+            calculatedSegment.text = segment.substring.string
             calculatedSegment.tintColor = segment.tintColor
             calculatedSegment.secondaryTintColor = segment.secondaryTintColor
             calculatedSegment.tertiaryTintColor = segment.tertiaryTintColor
@@ -1644,7 +1706,9 @@ open class InteractiveTextNode: ASDisplayNode, TextNodeProtocol, UIGestureRecogn
                 case .quote:
                     additionalSegmentRightInset = blockQuoteIconInset
                 case .code:
-                    if segment.title != nil {
+                    if let copyButtonTitle = blockQuote.copyButtonTitle {
+                        additionalSegmentRightInset = CodeBlockCopyButtonLayout.reservedHeaderWidth(buttonSize: codeBlockCopyButtonSize(title: copyButtonTitle))
+                    } else if segment.title != nil {
                         additionalSegmentRightInset = blockQuoteIconInset
                     }
                 }
@@ -2037,7 +2101,8 @@ open class InteractiveTextNode: ASDisplayNode, TextNodeProtocol, UIGestureRecogn
                     secondaryTintColor: segment.secondaryTintColor,
                     tertiaryTintColor: segment.tertiaryTintColor,
                     backgroundColor: blockQuote.backgroundColor,
-                    isCollapsed: (blockQuote.isCollapsible && segmentLines.count > 3) ? isCollapsed : nil
+                    isCollapsed: (blockQuote.isCollapsible && segmentLines.count > 3) ? isCollapsed : nil,
+                    copyText: blockQuote.copyButtonTitle != nil ? segment.text : nil
                 )
             }
             
@@ -3186,7 +3251,11 @@ final class TextContentItemLayer: SimpleLayer {
             var quoteTypeIcon: UIImage?
             switch blockQuote.data.kind {
             case .code:
-                quoteTypeIcon = codeIcon
+                if let copyButtonTitle = blockQuote.data.copyButtonTitle {
+                    quoteTypeIcon = codeBlockCopyButtonImage(title: copyButtonTitle)
+                } else {
+                    quoteTypeIcon = codeIcon
+                }
             case .quote:
                 quoteTypeIcon = quoteIcon
             }
@@ -3203,7 +3272,7 @@ final class TextContentItemLayer: SimpleLayer {
                 if quoteTypeIconNode.image !== quoteTypeIcon {
                     quoteTypeIconNode.image = quoteTypeIcon
                 }
-                let quoteTypeIconFrame = CGRect(origin: CGPoint(x: blockBackgroundFrame.maxX - 4.0 - quoteTypeIcon.size.width, y: blockBackgroundFrame.minY + 4.0), size: quoteTypeIcon.size)
+                let quoteTypeIconFrame = CodeBlockCopyButtonLayout.buttonFrame(blockFrame: blockBackgroundFrame, buttonSize: quoteTypeIcon.size)
                 quoteTypeIconNode.layer.layerTintColor = blockQuote.tintColor.cgColor
                 animation.animator.updateFrame(layer: quoteTypeIconNode.layer, frame: quoteTypeIconFrame, completion: nil)
             } else if let quoteTypeIconNode = self.quoteTypeIconNode {

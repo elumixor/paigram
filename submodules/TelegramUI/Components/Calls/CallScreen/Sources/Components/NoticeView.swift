@@ -67,7 +67,7 @@ final class NoticeView: OverlayMaskContainerView {
         let iconSpacing: CGFloat = -3.0
         
         if self.iconView.image == nil {
-            self.iconView.image = UIImage(bundleImageName: icon)?.withRenderingMode(.alwaysTemplate)
+            self.iconView.image = (UIImage(bundleImageName: icon) ?? UIImage(systemName: icon, withConfiguration: UIImage.SymbolConfiguration(pointSize: 11.0, weight: .semibold)))?.withRenderingMode(.alwaysTemplate)
             self.iconView.tintColor = .white
         }
         let iconSize = self.iconView.image?.size ?? CGSize(width: 12.0, height: 12.0)

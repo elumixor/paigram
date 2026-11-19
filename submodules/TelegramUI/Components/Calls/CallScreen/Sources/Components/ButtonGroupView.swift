@@ -13,6 +13,7 @@ final class ButtonGroupView: OverlayMaskContainerView {
                 case flipCamera
                 case video
                 case microphone
+                case record
                 case end
             }
             
@@ -20,6 +21,7 @@ final class ButtonGroupView: OverlayMaskContainerView {
             case flipCamera
             case video(isActive: Bool)
             case microphone(isMuted: Bool)
+            case record(isActive: Bool)
             case end
             
             var key: Key {
@@ -32,6 +34,8 @@ final class ButtonGroupView: OverlayMaskContainerView {
                     return .video
                 case .microphone:
                     return .microphone
+                case .record:
+                    return .record
                 case .end:
                     return .end
                 }
@@ -62,6 +66,16 @@ final class ButtonGroupView: OverlayMaskContainerView {
     }
     
     private var buttons: [Button]?
+    
+    /// SF Symbol rendered to a plain bitmap: the button draws its icon as a `cgImage` mask, which symbol images don't provide reliably.
+    static func symbolImage(_ name: String) -> UIImage? {
+        guard let symbol = UIImage(systemName: name, withConfiguration: UIImage.SymbolConfiguration(pointSize: 26.0, weight: .regular))?.withTintColor(.white, renderingMode: .alwaysOriginal) else {
+            return nil
+        }
+        return UIGraphicsImageRenderer(size: symbol.size).image { _ in
+            symbol.draw(at: CGPoint())
+        }
+    }
     private var buttonViews: [Button.Content.Key: ContentOverlayButton] = [:]
     private var noticeViews: [AnyHashable: NoticeView] = [:]
     private var closeButtonView: CloseButtonView?
@@ -90,7 +104,7 @@ final class ButtonGroupView: OverlayMaskContainerView {
         self.buttons = buttons
         
         let buttonSize: CGFloat = 56.0
-        let buttonSpacing: CGFloat = 36.0
+        let buttonSpacing: CGFloat = buttons.count > 1 ? max(8.0, min(36.0, floor((size.width - 32.0 - buttonSize * CGFloat(buttons.count)) / CGFloat(buttons.count - 1)))) : 36.0
         
         let buttonNoticeSpacing: CGFloat = 16.0
         let controlsHiddenNoticeSpacing: CGFloat = 0.0
@@ -265,6 +279,10 @@ final class ButtonGroupView: OverlayMaskContainerView {
             case let .microphone(isActiveValue):
                 title = strings.Call_Mute
                 image = UIImage(bundleImageName: "Call/Mute")
+                isActive = isActiveValue
+            case let .record(isActiveValue):
+                title = "Record"
+                image = ButtonGroupView.symbolImage("record.circle")
                 isActive = isActiveValue
             case .end:
                 title = strings.Call_End

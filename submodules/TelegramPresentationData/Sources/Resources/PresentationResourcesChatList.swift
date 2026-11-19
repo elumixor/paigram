@@ -29,7 +29,10 @@ private func generateBadgeBackgroundImage(theme: PresentationTheme, diameter: CG
             } else if provisional {
                 context.setFillColor(theme.chatList.unreadBadgeActiveBackgroundColor.withMultipliedAlpha(0.1).cgColor)
             } else {
-                context.setFillColor(theme.chatList.unreadBadgeActiveBackgroundColor.cgColor)
+                // Wallpaper themes may leave the active badge color fully transparent.
+                let color = theme.chatList.unreadBadgeActiveBackgroundColor
+                let fallback = theme.list.itemAccentColor.cgColor.alpha >= 0.5 ? theme.list.itemAccentColor : UIColor.systemBlue
+                context.setFillColor((color.cgColor.alpha >= 0.5 ? color : fallback).cgColor)
             }
         } else {
             if provisional {
