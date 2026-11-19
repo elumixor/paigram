@@ -1,5 +1,6 @@
 #import <TgVoipWebrtc/OngoingCallThreadLocalContext.h>
 #include <cstdint>
+#include <atomic>
 
 #import "MediaUtils.h"
 
@@ -137,6 +138,64 @@ public:
 
 }
 
+// Paigram: single-producer/single-consumer ring for the transcript recording tap.
+// The audio thread writes mono int16 frames; a dispatch timer drains them off the hot path.
+class CallRecordingRing {
+public:
+    explicit CallRecordingRing(size_t capacity) : _buffer(capacity) {
+    }
+
+    void write(const int16_t *samples, size_t frames, size_t channels, uint32_t sampleRate) {
+        if (samples == nullptr || frames == 0 || channels == 0) {
+            return;
+        }
+        _sampleRate.store(sampleRate, std::memory_order_relaxed);
+        size_t capacity = _buffer.size();
+        size_t head = _head.load(std::memory_order_relaxed);
+        size_t tail = _tail.load(std::memory_order_acquire);
+        size_t freeSpace = capacity - (head - tail);
+        size_t count = std::min(frames, freeSpace);
+        for (size_t i = 0; i < count; i++) {
+            int32_t sum = 0;
+            for (size_t c = 0; c < channels; c++) {
+                sum += samples[i * channels + c];
+            }
+            _buffer[(head + i) % capacity] = (int16_t)(sum / (int32_t)channels);
+        }
+        _head.store(head + count, std::memory_order_release);
+    }
+
+    NSData *drain(int32_t *sampleRate) {
+        size_t capacity = _buffer.size();
+        size_t tail = _tail.load(std::memory_order_relaxed);
+        size_t head = _head.load(std::memory_order_acquire);
+        size_t count = head - tail;
+        *sampleRate = (int32_t)_sampleRate.load(std::memory_order_relaxed);
+        if (count == 0) {
+            return [NSData data];
+        }
+        NSMutableData *data = [[NSMutableData alloc] initWithLength:count * sizeof(int16_t)];
+        int16_t *out = (int16_t *)data.mutableBytes;
+        for (size_t i = 0; i < count; i++) {
+            out[i] = _buffer[(tail + i) % capacity];
+        }
+        _tail.store(tail + count, std::memory_order_release);
+        return data;
+    }
+
+private:
+    std::vector<int16_t> _buffer;
+    std::atomic<size_t> _head{0};
+    std::atomic<size_t> _tail{0};
+    std::atomic<uint32_t> _sampleRate{48000};
+};
+
+struct CallRecordingTap {
+    // ~4 s at 48 kHz per track; drained every 100 ms.
+    CallRecordingRing mic{48000 * 4};
+    CallRecordingRing remote{48000 * 4};
+};
+
 class WrappedAudioDeviceModuleIOS : public tgcalls::DefaultWrappedAudioDeviceModule, public webrtc::AudioTransport {
 public:
     WrappedAudioDeviceModuleIOS(webrtc::scoped_refptr<webrtc::AudioDeviceModule> impl) :
@@ -182,6 +241,12 @@ public:
 
     virtual int32_t RegisterAudioCallback(webrtc::AudioTransport *audioCallback) override {
         return 0;
+    }
+
+    void SetRecordingTap(std::shared_ptr<CallRecordingTap> tap) {
+        _mutex.Lock();
+        _recordingTap = tap;
+        _mutex.Unlock();
     }
 
     virtual int32_t Init() override {
@@ -504,6 +569,9 @@ public:
                 );
             }
         }
+        if (_recordingTap && nBytesPerSample == 2 * nChannels) {
+            _recordingTap->mic.write((const int16_t *)audioSamples, nSamples, nChannels, samplesPerSec);
+        }
         _mutex.Unlock();
         return 0;
     }
@@ -538,6 +606,9 @@ public:
                     estimatedCaptureTimeNS
                 );
             }
+        }
+        if (_recordingTap && nBytesPerSample == 2 * nChannels) {
+            _recordingTap->mic.write((const int16_t *)audioSamples, nSamples, nChannels, samplesPerSec);
         }
         _mutex.Unlock();
         return 0;
@@ -616,6 +687,10 @@ public:
             }
         } else {
             nSamplesOut = 0;
+        }
+        
+        if (_recordingTap && nSamplesOut > 0 && nBytesPerSample == 2 * nChannels) {
+            _recordingTap->remote.write((const int16_t *)audioSamples, nSamplesOut, nChannels, samplesPerSec);
         }
         
         _mutex.Unlock();
@@ -697,6 +772,7 @@ private:
     std::vector<std::pair<webrtc::AudioTransport *, bool>> _audioTransports;
     webrtc::Mutex _mutex;
     std::vector<int16_t> _mixAudioSamples;
+    std::shared_ptr<CallRecordingTap> _recordingTap;
 };
 
 class WrappedChildAudioDeviceModule : public tgcalls::DefaultWrappedAudioDeviceModule {
@@ -782,6 +858,10 @@ private:
 
 @implementation SharedCallAudioDevice {
     std::shared_ptr<tgcalls::ThreadLocalObject<tgcalls::SharedAudioDeviceModule>> _audioDeviceModule;
+    dispatch_queue_t _recordingQueue;
+    dispatch_source_t _recordingTimer;
+    dispatch_block_t _recordingDrain;
+    std::shared_ptr<CallRecordingTap> _recordingTap;
 }
 
 - (instancetype _Nonnull)initWithDisableRecording:(bool)disableRecording enableSystemMute:(bool)enableSystemMute {
@@ -805,6 +885,75 @@ private:
         webrtc::tgcalls_ios_adm::AudioDeviceModuleIOS *deviceModule_iOS = (webrtc::tgcalls_ios_adm::AudioDeviceModuleIOS *)deviceModule->WrappedInstance().get();
         deviceModule_iOS->setTone([tone asTone]);
         #endif
+    });
+}
+
+- (void)setRecordingTapOnModule:(std::shared_ptr<CallRecordingTap>)tap {
+    _audioDeviceModule->perform([tap](tgcalls::SharedAudioDeviceModule *audioDeviceModule) {
+        #ifdef WEBRTC_IOS
+        WrappedAudioDeviceModuleIOS *deviceModule = (WrappedAudioDeviceModuleIOS *)audioDeviceModule->audioDeviceModule().get();
+        deviceModule->SetRecordingTap(tap);
+        #endif
+    });
+}
+
+- (void)startRecordingWithHandler:(void (^ _Nonnull)(NSData * _Nonnull mic, int32_t micSampleRate, NSData * _Nonnull remote, int32_t remoteSampleRate))handler {
+    if (_recordingQueue == nil) {
+        _recordingQueue = dispatch_queue_create("org.paigram.call-recording-tap", DISPATCH_QUEUE_SERIAL);
+    }
+    if (_recordingTap) {
+        return;
+    }
+    auto tap = std::make_shared<CallRecordingTap>();
+    _recordingTap = tap;
+    [self setRecordingTapOnModule:tap];
+
+    void (^handlerCopy)(NSData *, int32_t, NSData *, int32_t) = [handler copy];
+    dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, _recordingQueue);
+    dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, 100 * NSEC_PER_MSEC), 100 * NSEC_PER_MSEC, 10 * NSEC_PER_MSEC);
+    dispatch_block_t drain = ^{
+        int32_t micRate = 0;
+        int32_t remoteRate = 0;
+        NSData *mic = tap->mic.drain(&micRate);
+        NSData *remote = tap->remote.drain(&remoteRate);
+        if (mic.length != 0 || remote.length != 0) {
+            handlerCopy(mic, micRate, remote, remoteRate);
+        }
+    };
+    dispatch_source_set_event_handler(timer, drain);
+    _recordingTimer = timer;
+    _recordingDrain = drain;
+    dispatch_resume(timer);
+}
+
+- (void)stopRecording:(void (^ _Nullable)(void))completion {
+    std::shared_ptr<CallRecordingTap> tap = _recordingTap;
+    dispatch_source_t timer = _recordingTimer;
+    dispatch_block_t drain = _recordingDrain;
+    _recordingTap.reset();
+    _recordingTimer = nil;
+    _recordingDrain = nil;
+    if (!tap || timer == nil) {
+        if (completion) {
+            completion();
+        }
+        return;
+    }
+    [self setRecordingTapOnModule:nullptr];
+    void (^completionCopy)(void) = [completion copy];
+    dispatch_queue_t queue = _recordingQueue;
+    // The module clears its tap on the worker thread; hop there and back so the final drain sees every written frame.
+    _audioDeviceModule->perform([queue, timer, drain, completionCopy](tgcalls::SharedAudioDeviceModule *) {
+        dispatch_async(queue, ^{
+            // Stop the timer, then one last drain takes what was left in the rings.
+            dispatch_source_cancel(timer);
+            if (drain) {
+                drain();
+            }
+            if (completionCopy) {
+                completionCopy();
+            }
+        });
     });
 }
 
