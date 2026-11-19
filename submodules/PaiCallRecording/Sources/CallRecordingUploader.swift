@@ -112,14 +112,7 @@ public final class CallRecordingUploader: @unchecked Sendable {
     /// Uploads pending recordings one by one until none is left or one has to wait (network, server, auth).
     /// Single-flight: a call while running makes the running pass go round once more.
     public func uploadPending() async {
-        lock.lock()
-        if isRunning {
-            runAgain = true
-            lock.unlock()
-            return
-        }
-        isRunning = true
-        lock.unlock()
+        guard beginRun() else { return }
 
         while true {
             for callId in store.abandoned(olderThan: CallRecordingUploader.abandonedAge) {
@@ -132,26 +125,46 @@ public final class CallRecordingUploader: @unchecked Sendable {
                     break
                 }
             }
-            lock.lock()
-            if runAgain {
-                runAgain = false
-                lock.unlock()
-                continue
+            if !endRun() {
+                return
             }
-            isRunning = false
-            lock.unlock()
-            return
         }
+    }
+
+    /// Marks a pass as running; false when one already runs (it then goes round once more).
+    private func beginRun() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if isRunning {
+            runAgain = true
+            return false
+        }
+        isRunning = true
+        return true
+    }
+
+    /// Ends a pass; true when another pass was asked for meanwhile and has to run.
+    private func endRun() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if runAgain {
+            runAgain = false
+            return true
+        }
+        isRunning = false
+        return false
+    }
+
+    private func credentials() -> (URL?, String?, (@Sendable () -> Void)?) {
+        lock.lock()
+        defer { lock.unlock() }
+        return (baseURL, token, onUnauthorized)
     }
 
     /// Uploads one recording and applies the decision to its files. Nil credentials keep it.
     @discardableResult
     public func upload(_ meta: CallRecordingMeta) async -> Decision {
-        lock.lock()
-        let baseURL = self.baseURL
-        let token = self.token
-        let onUnauthorized = self.onUnauthorized
-        lock.unlock()
+        let (baseURL, token, onUnauthorized) = credentials()
         guard let baseURL, let token else { return .keep }
 
         let callId = meta.callId
