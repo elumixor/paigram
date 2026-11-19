@@ -58,8 +58,9 @@ final class PaiPasskeyModel: ObservableObject {
 @available(iOS 16.0, *)
 struct PaiPasskeySection: View {
     @StateObject private var model = PaiPasskeyModel()
-    @State private var askingInvite = false
-    @State private var invite = ""
+    @State private var scanning = false
+    /// The scanned code, enrolled once the scanner sheet is gone so the sign-in sheet has a window to present on.
+    @State private var scannedInvite: String?
 
     private static let windows: [(String, Int)] = [("15 minutes", 15), ("1 hour", 60), ("4 hours", 240)]
 
@@ -83,7 +84,7 @@ struct PaiPasskeySection: View {
             } else {
                 Menu {
                     Button("Add passkey") { Task { await model.enrol(invite: nil) } }
-                    Button("Add with device code") { invite = ""; askingInvite = true }
+                    Button("Scan code from Mac") { scanning = true }
                 } label: {
                     SettingsRow(symbol: "person.badge.key.fill", color: .blue, title: "Add passkey", value: nil)
                 }
@@ -95,15 +96,15 @@ struct PaiPasskeySection: View {
             if let error = model.error {
                 Text(error).foregroundStyle(.red)
             } else if !model.enrolled {
-                Text("A passkey on this phone unlocks pai and approves its changes.")
+                Text("A passkey on this phone unlocks pai and approves its changes. First passkey on Mac? Open pai on Mac › Settings › Account › Add another device, then Scan code from Mac here.")
             }
         }
-        .alert("Device code", isPresented: $askingInvite) {
-            TextField("Code", text: $invite).textInputAutocapitalization(.never).autocorrectionDisabled()
-            Button("Cancel", role: .cancel) {}
-            Button("Add") { let code = invite.trimmingCharacters(in: .whitespaces); Task { await model.enrol(invite: code) } }
-        } message: {
-            Text("The add-device code shown on a device that already has a passkey.")
+        .sheet(isPresented: $scanning, onDismiss: {
+            guard let code = scannedInvite else { return }
+            scannedInvite = nil
+            Task { await model.enrol(invite: code) }
+        }) {
+            PaiInviteScannerView { code in scannedInvite = code }
         }
         .task { await model.load() }
     }

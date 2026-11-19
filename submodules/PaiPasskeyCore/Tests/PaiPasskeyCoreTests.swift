@@ -234,4 +234,20 @@ final class ChangeFormatTests: XCTestCase {
     func testNullIsNil() {
         XCTAssertNil(PaiChangeFormat.text(String?.none))
     }
+
+    func testInviteFromWebQR() {
+        let code = "Qx3v_9-AbCdEfGhIjKlMnOpQrStUvWx"
+        XCTAssertEqual(PaiPasskeyEnrol.invite(fromScanned: "https://pai.desk.atmagaming.com/settings/account?enrol=\(code)"), code)
+    }
+
+    func testInviteBareCode() {
+        XCTAssertEqual(PaiPasskeyEnrol.invite(fromScanned: "  Qx3v_9-AbCdEfGhIjKlMnOpQrStUvWx\n"), "Qx3v_9-AbCdEfGhIjKlMnOpQrStUvWx")
+    }
+
+    func testInviteJunkIsNil() {
+        XCTAssertNil(PaiPasskeyEnrol.invite(fromScanned: "hello world"))
+        XCTAssertNil(PaiPasskeyEnrol.invite(fromScanned: "https://example.com/?q=1"))
+        XCTAssertNil(PaiPasskeyEnrol.invite(fromScanned: "https://pai.desk.atmagaming.com/link?enrol=1"))
+        XCTAssertNil(PaiPasskeyEnrol.invite(fromScanned: ""))
+    }
 }

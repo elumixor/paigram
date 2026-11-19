@@ -39,6 +39,24 @@ public enum PaiPasskeyEnrol {
         return components.url
     }
 
+    /// The add-device code in what the camera read off pai's web Settings: its QR is
+    /// `https://<pai>/settings/account?enrol=<code>`; a bare code typed or scanned counts too. Anything else = nil.
+    public static func invite(fromScanned text: String) -> String? {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let components = URLComponents(string: text), components.scheme != nil {
+            guard let code = components.queryItems?.first(where: { $0.name == "enrol" })?.value else { return nil }
+            return isCode(code) ? code : nil
+        }
+        return isCode(text) ? text : nil
+    }
+
+    /// pai's codes are 24 random bytes in base64url (32 characters).
+    private static func isCode(_ text: String) -> Bool {
+        text.count >= 16 && text.count <= 128 && text.unicodeScalars.allSatisfy {
+            ($0.isASCII && CharacterSet.alphanumerics.contains($0)) || $0 == "-" || $0 == "_"
+        }
+    }
+
     public struct Callback: Equatable {
         public let ticket: String
         public let expires: Date?

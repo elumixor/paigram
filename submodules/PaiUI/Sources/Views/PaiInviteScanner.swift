@@ -1,0 +1,206 @@
+import AVFoundation
+import PaiPasskeyCore
+import SwiftUI
+import UIKit
+import VisionKit
+
+/// Reads the add-device QR pai's web Settings shows on a device that already has a passkey
+/// (Settings › Account › Add another device), so this phone can enrol its own. A typed code works too.
+@available(iOS 16.0, *)
+struct PaiInviteScannerView: View {
+    let onCode: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var typed = ""
+    @State private var hint: String?
+    @State private var done = false
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                PaiQRCamera { text in scanned(text) }
+                    .ignoresSafeArea(edges: .horizontal)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(hint ?? "On your Mac open pai › Settings › Account › Add another device, then point the camera at its QR.")
+                        .font(.footnote)
+                        .foregroundStyle(hint == nil ? Color.secondary : Color.red)
+                    HStack {
+                        TextField("Or type the code", text: $typed)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .textFieldStyle(.roundedBorder)
+                            .submitLabel(.done)
+                            .onSubmit { submitTyped() }
+                        Button("Add") { submitTyped() }
+                            .disabled(typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                }
+                .padding()
+            }
+            .navigationTitle("Scan code from Mac")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+            }
+        }
+    }
+
+    private func submitTyped() {
+        if let code = PaiPasskeyEnrol.invite(fromScanned: typed) {
+            finish(code)
+        } else {
+            hint = "That isn't an add-device code: copy it from pai's Add another device, or scan its QR."
+        }
+    }
+
+    private func scanned(_ text: String) {
+        if let code = PaiPasskeyEnrol.invite(fromScanned: text) {
+            finish(code)
+        } else {
+            hint = "That QR isn't pai's add-device code."
+        }
+    }
+
+    private func finish(_ code: String) {
+        guard !done else { return }
+        done = true
+        dismiss()
+        onCode(code)
+    }
+}
+
+/// The camera, reading QR codes: VisionKit's scanner where the phone supports it, else AVFoundation's metadata output.
+@available(iOS 16.0, *)
+private struct PaiQRCamera: UIViewControllerRepresentable {
+    let onText: (String) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(onText: onText) }
+
+    func makeUIViewController(context: Context) -> UIViewController {
+        if DataScannerViewController.isSupported && DataScannerViewController.isAvailable {
+            let scanner = DataScannerViewController(
+                recognizedDataTypes: [.barcode(symbologies: [.qr])],
+                qualityLevel: .balanced,
+                isHighlightingEnabled: true
+            )
+            scanner.delegate = context.coordinator
+            DispatchQueue.main.async { try? scanner.startScanning() }
+            return scanner
+        }
+        return PaiMetadataScannerController(onText: { context.coordinator.onText($0) })
+    }
+
+    func updateUIViewController(_ controller: UIViewController, context: Context) {
+        context.coordinator.onText = onText
+    }
+
+    static func dismantleUIViewController(_ controller: UIViewController, coordinator: Coordinator) {
+        (controller as? DataScannerViewController)?.stopScanning()
+    }
+
+    final class Coordinator: NSObject, DataScannerViewControllerDelegate {
+        var onText: (String) -> Void
+
+        init(onText: @escaping (String) -> Void) {
+            self.onText = onText
+        }
+
+        func dataScanner(_ dataScanner: DataScannerViewController, didAdd addedItems: [RecognizedItem], allItems: [RecognizedItem]) {
+            report(addedItems)
+        }
+
+        func dataScanner(_ dataScanner: DataScannerViewController, didTapOn item: RecognizedItem) {
+            report([item])
+        }
+
+        private func report(_ items: [RecognizedItem]) {
+            for item in items {
+                if case let .barcode(barcode) = item, let text = barcode.payloadStringValue {
+                    onText(text)
+                    return
+                }
+            }
+        }
+    }
+}
+
+/// The fallback camera for phones without VisionKit's scanner.
+private final class PaiMetadataScannerController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
+    private let onText: (String) -> Void
+    private let session = AVCaptureSession()
+    private let queue = DispatchQueue(label: "pai.qr-scanner")
+    private var preview: AVCaptureVideoPreviewLayer?
+    private let message = UILabel()
+
+    init(onText: @escaping (String) -> Void) {
+        self.onText = onText
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .black
+        message.textColor = .white
+        message.numberOfLines = 0
+        message.textAlignment = .center
+        message.font = .preferredFont(forTextStyle: .footnote)
+        view.addSubview(message)
+        AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if granted { self.configure() } else { self.show("Camera access is off: allow it in Settings, or type the code below.") }
+            }
+        }
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        preview?.frame = view.bounds
+        message.frame = view.bounds.insetBy(dx: 24, dy: 24)
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        let session = self.session
+        queue.async { if session.isRunning { session.stopRunning() } }
+    }
+
+    private func configure() {
+        guard let device = AVCaptureDevice.default(for: .video), let input = try? AVCaptureDeviceInput(device: device), session.canAddInput(input) else {
+            show("No camera here: type the code below.")
+            return
+        }
+        session.addInput(input)
+        let output = AVCaptureMetadataOutput()
+        guard session.canAddOutput(output) else {
+            show("The camera can't read codes: type the code below.")
+            return
+        }
+        session.addOutput(output)
+        output.setMetadataObjectsDelegate(self, queue: .main)
+        output.metadataObjectTypes = output.availableMetadataObjectTypes.contains(.qr) ? [.qr] : []
+        let preview = AVCaptureVideoPreviewLayer(session: session)
+        preview.videoGravity = .resizeAspectFill
+        preview.frame = view.bounds
+        view.layer.insertSublayer(preview, at: 0)
+        self.preview = preview
+        let session = self.session
+        queue.async { session.startRunning() }
+    }
+
+    private func show(_ text: String) {
+        message.text = text
+    }
+
+    func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject], from connection: AVCaptureConnection) {
+        for object in metadataObjects {
+            if let code = object as? AVMetadataMachineReadableCodeObject, let text = code.stringValue {
+                onText(text)
+                return
+            }
+        }
+    }
+}
