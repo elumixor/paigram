@@ -18,6 +18,8 @@ public enum PaiDraftCard {
     public struct Fold: Equatable {
         public var earlier = false
         public var open: Set<Int> = []
+
+        public init() {}
     }
 
     private static var folds: [Int: Fold] = [:]
