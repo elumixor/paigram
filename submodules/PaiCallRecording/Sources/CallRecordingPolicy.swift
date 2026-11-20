@@ -25,7 +25,7 @@ public struct CallRecordingPolicyPeer: Encodable, Equatable, Sendable {
 }
 
 /// Asks pai whether a call may be recorded automatically (calls with the owner's employer contacts are not: pai answers
-/// `record: false`). Anything but a clear "no" records: pai checks again on upload and drops what it must not keep.
+/// `record: false`). Fails closed: only a clear `record: true` records.
 public enum CallRecordingPolicy {
     public struct Answer: Equatable, Sendable {
         public var record: Bool
@@ -39,21 +39,20 @@ public enum CallRecordingPolicy {
 
     static let timeout: TimeInterval = 3
 
-    /// Maps pai's reply to an answer; an error, a non-2xx status (404 = endpoint not deployed yet) or an unreadable
-    /// body records.
+    static let unavailable = Answer(record: false, reason: "policy unavailable")
+
+    /// Maps pai's reply to an answer; anything but a 2xx with a readable `record` (error, timeout, 404, bad body)
+    /// is `unavailable` and does not record.
     public static func answer(status: Int?, body: Data?) -> Answer {
-        guard let status else {
-            return Answer(record: true, reason: "pai unreachable")
-        }
-        guard (200..<300).contains(status), let body, let response = try? JSONDecoder().decode(Response.self, from: body) else {
-            return Answer(record: true, reason: "pai answered \(status)")
+        guard let status, (200..<300).contains(status), let body, let response = try? JSONDecoder().decode(Response.self, from: body) else {
+            return unavailable
         }
         return Answer(record: response.record, reason: response.reason ?? "")
     }
 
     public static func shouldRecord(_ peer: CallRecordingPolicyPeer, uploader: CallRecordingUploader = .shared) async -> Answer {
         guard let (baseURL, token) = uploader.signedIn() else {
-            return Answer(record: true, reason: "pai not signed in")
+            return unavailable
         }
         var request = URLRequest(url: baseURL.appendingPathComponent("calls/should-record"))
         request.httpMethod = "POST"
