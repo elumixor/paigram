@@ -96,6 +96,16 @@ extension PaiChat {
         }
     }
 
+    /// Posted on the main thread when `waiting` changes.
+    public static let waitingChanged = Notification.Name("pai.waitingChanged")
+
+    /// What each agent whose chat was open waits on, by slug: the strip colours by its dev sessions.
+    public static var waiting: [String: PaiWaitingOn] = [:] {
+        didSet {
+            if waiting != oldValue { DispatchQueue.main.async { NotificationCenter.default.post(name: waitingChanged, object: nil) } }
+        }
+    }
+
     /// How many decisions an agent waits on.
     public static func needs(of slug: String) -> Int { needs.filter { $0.agent == slug }.count }
 

@@ -132,6 +132,9 @@ public final class PaiClient {
 
     public func agents() async throws -> [PaiAgent] { try await call([PaiAgent].self, "/agents") }
 
+    /// What an agent waits on now: its dev sessions' live state drives the strip's colour.
+    public func waiting(agent slug: String) async throws -> PaiWaitingOn { try await call(PaiWaitingOn.self, "/agents/\(slug)/waiting") }
+
     /// One agent's chat, oldest first: the latest `limit` rows, or the ones after `after`.
     public func messages(agent slug: String, after: Int? = nil, limit: Int = 100) async throws -> [PaiLogMessage] {
         var query = ["agent": slug, "limit": String(limit)]

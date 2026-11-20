@@ -374,9 +374,16 @@ public struct PaiAgent: Codable, Identifiable, Equatable {
     public var keepPage: String? = nil
     /// What it is for, in a line (the server's `goalOf`: the brief's Goal, else its outcome, page title or role).
     public var goal: String? = nil
+    /// How many dev sessions it waits on run or stalled now.
+    public var dev: DevCounts? = nil
 
     public struct SessionState: Codable, Equatable {
         public let state: String
+    }
+
+    public struct DevCounts: Codable, Equatable {
+        public let running: Int?
+        public let stalled: Int?
     }
 
     public var id: String { slug }
@@ -390,6 +397,45 @@ public struct PaiAgent: Codable, Identifiable, Equatable {
         if let taskTitle, !taskTitle.isEmpty { return taskTitle }
         return briefLine
     }
+}
+
+/// What an idle agent waits on (`GET /agents/:slug/waiting`): its declared line, cards for the user's press, the dev
+/// sessions and routines its wait targets. Every field is optional: an older daemon sends fewer.
+public struct PaiWaitingOn: Codable, Equatable {
+    public struct Line: Codable, Equatable {
+        public let text: String
+        public let at: Double?
+    }
+
+    public struct Card: Codable, Equatable {
+        public let id: Int
+        public let title: String
+    }
+
+    public struct Dev: Codable, Equatable {
+        public let id: String
+        public let title: String
+        public let project: String?
+        /// running, idle, stalled, finished; an older daemon sends only `busy` and `stalled`.
+        public let state: String?
+        public let busy: Bool?
+        public let stalled: Bool?
+
+        public var liveState: String { state ?? (stalled == true ? "stalled" : busy == true ? "running" : "idle") }
+    }
+
+    public struct Routine: Codable, Equatable {
+        public let id: Int
+        public let name: String
+    }
+
+    public var line: Line? = nil
+    public var cards: [Card]? = nil
+    public var dev: [Dev]? = nil
+    public var routines: [Routine]? = nil
+
+    /// Its dev sessions still at work; a finished one has handed its end over.
+    public var liveDev: [Dev] { (dev ?? []).filter { $0.liveState != "finished" } }
 }
 
 /// One row of the message log (`GET /messages`): every word between the user, pai, its agents, routines and watchers.
