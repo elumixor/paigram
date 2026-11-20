@@ -20,12 +20,16 @@ public final class CallRecorder: @unchecked Sendable {
         private var inputRate: Double = 0
         private(set) var framesWritten: AVAudioFramePosition = 0
 
+        private(set) var bytesReceived = 0
+        private(set) var failure: String?
+
         init(url: URL) throws {
             file = try AVAudioFile(forWriting: url, settings: CallRecorder.fileSettings, commonFormat: .pcmFormatFloat32, interleaved: false)
         }
 
         func append(_ samples: Data, rate: Int) {
             guard let file, rate > 0, samples.count >= 2 else { return }
+            bytesReceived += samples.count
             let frameCount = samples.count / 2
             if converter == nil || inputRate != Double(rate) {
                 guard let inputFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: Double(rate), channels: 1, interleaved: false) else { return }
@@ -91,6 +95,7 @@ public final class CallRecorder: @unchecked Sendable {
                 try file.write(from: buffer)
                 framesWritten += AVAudioFramePosition(buffer.frameLength)
             } catch {
+                failure = "\(error)"
                 self.file = nil
             }
         }
@@ -103,6 +108,7 @@ public final class CallRecorder: @unchecked Sendable {
     private let remote: Track
     private var micMuted = false
     private var finished = false
+    private var receivedAudio = false
 
     public init(store: CallRecordingStore, meta: CallRecordingMeta) throws {
         self.store = store
@@ -113,8 +119,10 @@ public final class CallRecorder: @unchecked Sendable {
             self.remote = try Track(url: store.remoteURL(meta.callId))
         } catch {
             store.delete(meta.callId)
+            CallRecordingLog.log("recording \(meta.callId): files not created: \(error)")
             throw error
         }
+        CallRecordingLog.log("recording \(meta.callId): started (\(meta.direction.rawValue)) in \(store.directory(meta.callId).path)")
     }
 
     public var callId: String {
@@ -125,6 +133,10 @@ public final class CallRecorder: @unchecked Sendable {
     public func append(mic micSamples: Data, micRate: Int, remote remoteSamples: Data, remoteRate: Int) {
         queue.async {
             guard !self.finished else { return }
+            if !self.receivedAudio {
+                self.receivedAudio = true
+                CallRecordingLog.log("recording \(self.meta.callId): first audio, mic \(micSamples.count) bytes at \(micRate) Hz, remote \(remoteSamples.count) bytes at \(remoteRate) Hz")
+            }
             if !micSamples.isEmpty {
                 self.mic.append(self.micMuted ? Data(count: micSamples.count) : micSamples, rate: micRate)
             }
@@ -149,6 +161,10 @@ public final class CallRecorder: @unchecked Sendable {
             for track in [self.mic, self.remote] {
                 track.finish()
             }
+            let callId = self.meta.callId
+            for (name, track) in [("mic", self.mic), ("remote", self.remote)] {
+                CallRecordingLog.log("recording \(callId): \(name) got \(track.bytesReceived) bytes, wrote \(track.framesWritten) frames" + (track.failure.map { ", write failed: \($0)" } ?? ""))
+            }
             // pai refuses an empty part: a track that never got audio gets one second of silence.
             for (track, url) in [(self.mic, self.store.micURL(self.meta.callId)), (self.remote, self.store.remoteURL(self.meta.callId))] where track.framesWritten == 0 {
                 if let fresh = try? Track(url: url) {
@@ -157,8 +173,14 @@ public final class CallRecorder: @unchecked Sendable {
                 }
             }
             self.meta.endedAt = CallRecordingMeta.isoString(endedAt)
-            try? self.store.writeMeta(self.meta)
-            completion(self.meta.callId)
+            do {
+                try self.store.writeMeta(self.meta)
+            } catch {
+                CallRecordingLog.log("recording \(callId): meta not written: \(error)")
+            }
+            let size: (URL) -> Int = { (try? FileManager.default.attributesOfItem(atPath: $0.path)[.size] as? Int) ?? 0 }
+            CallRecordingLog.log("recording \(callId): finished, mic.m4a \(size(self.store.micURL(callId))) bytes, remote.m4a \(size(self.store.remoteURL(callId))) bytes")
+            completion(callId)
         }
     }
 }

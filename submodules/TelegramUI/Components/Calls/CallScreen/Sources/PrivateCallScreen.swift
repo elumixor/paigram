@@ -855,7 +855,7 @@ public final class PrivateCallScreen: OverlayMaskContainerView, AVPictureInPictu
         var notices: [ButtonGroupView.Notice] = []
         if !isTerminated {
             if params.state.isTranscriptRecording == true {
-                notices.append(ButtonGroupView.Notice(id: AnyHashable(4 as Int), icon: "record.circle.fill", text: "Recording for transcript"))
+                notices.append(ButtonGroupView.Notice(id: AnyHashable(4 as Int), icon: "record.circle.fill", text: "Transcribing"))
             }
             if params.state.isLocalAudioMuted {
                 notices.append(ButtonGroupView.Notice(id: AnyHashable(0 as Int), icon: "Call/CallToastMicrophone", text: params.state.strings.Call_YourMicrophoneOff))

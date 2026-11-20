@@ -40,6 +40,8 @@ public enum PaiAuth {
 
     /// Hands the token to TelegramCore's box client (email and WhatsApp chats) and the notification extension.
     public static func apply() {
+        CallRecordingLog.sink = { Logger.shared.log("PaiCallRecording", $0) }
+        CallRecordingLog.log("uploader configured, signed in: \(token != nil)")
         if let token {
             PaiBox.configure(baseURL: PaiSecrets.baseURL, token: token)
             CallRecordingUploader.shared.configure(baseURL: PaiSecrets.baseURL, token: token, onUnauthorized: { PaiAuth.rejected(token) })
