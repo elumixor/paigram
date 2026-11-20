@@ -67,10 +67,29 @@ public enum PaiPasskeys {
 
     // MARK: Enrol
 
+    /// A ticket the box handed out, with the passkey request it made for it: everything the confirm screen shows
+    /// (`options.user.name` = the account) before anything is created.
+    public struct PreparedEnrol {
+        let options: PasskeyCreationOptions
+        let ticket: String
+        let verifier: String
+        let name: String
+        let challenge: Data
+        let userID: Data
+
+        public var accountName: String { options.user.name }
+    }
+
     /// Opens the box's sign-in sheet for a ticket, then creates a passkey for it. `invite` = an add-device code from a
     /// device that already has a passkey.
     @MainActor
     public static func enrol(invite: String?) async throws {
+        try await finish(try await prepare(invite: invite))
+    }
+
+    /// The sign-in sheet for a ticket, then the box's passkey request for it. Creates nothing.
+    @MainActor
+    public static func prepare(invite: String?) async throws -> PreparedEnrol {
         let verifier = PKCE.makeVerifier()
         let state = PaiPasskeyEnrol.makeState()
         let name = UIDevice.current.name
@@ -83,8 +102,15 @@ public enum PaiPasskeys {
         guard let challenge = Base64URL.decode(options.challenge), let userID = Base64URL.decode(options.user.id) else {
             throw PaiClientError(message: "The box sent a malformed passkey request")
         }
+        return PreparedEnrol(options: options, ticket: callback.ticket, verifier: verifier, name: name, challenge: challenge, userID: userID)
+    }
+
+    /// Face ID creates the passkey for a prepared request, then the box stores it.
+    @MainActor
+    public static func finish(_ prepared: PreparedEnrol) async throws {
+        let options = prepared.options
         let provider = ASAuthorizationPlatformPublicKeyCredentialProvider(relyingPartyIdentifier: try PaiPasskeyGuard.relyingParty(options.rp.id, pinned: relyingParty))
-        let request = provider.createCredentialRegistrationRequest(challenge: challenge, name: options.user.name, userID: userID)
+        let request = provider.createCredentialRegistrationRequest(challenge: prepared.challenge, name: options.user.name, userID: prepared.userID)
         request.displayName = options.user.displayName
         request.userVerificationPreference = .required
         request.attestationPreference = .none
@@ -98,7 +124,7 @@ public enum PaiPasskeys {
         let response = PasskeyRegistrationResponse(credentialID: registration.credentialID, clientDataJSON: registration.rawClientDataJSON, attestationObject: attestation)
 
         struct Row: Decodable { let id: String? }
-        _ = try await client.call(Row.self, "/unlock/passkeys", method: "POST", body: try PasskeyEnrolFinishBody(ticket: callback.ticket, codeVerifier: verifier, response: response, name: name).jsonObject(), keepTokenOn401: true)
+        _ = try await client.call(Row.self, "/unlock/passkeys", method: "POST", body: try PasskeyEnrolFinishBody(ticket: prepared.ticket, codeVerifier: prepared.verifier, response: response, name: prepared.name).jsonObject(), keepTokenOn401: true)
         setEnrolled(response.id)
     }
 

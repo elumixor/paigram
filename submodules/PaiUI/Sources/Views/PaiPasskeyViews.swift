@@ -33,6 +33,11 @@ final class PaiPasskeyModel: ObservableObject {
         await load()
     }
 
+    @MainActor func finish(_ prepared: PaiPasskeys.PreparedEnrol) async {
+        await run { try await PaiPasskeys.finish(prepared) }
+        await load()
+    }
+
     @MainActor func unlock(minutes: Int) async {
         await run { self.state = try await PaiPasskeys.unlock(minutes: minutes) }
     }
@@ -58,9 +63,6 @@ final class PaiPasskeyModel: ObservableObject {
 @available(iOS 16.0, *)
 struct PaiPasskeySection: View {
     @StateObject private var model = PaiPasskeyModel()
-    @State private var scanning = false
-    /// The scanned code the user confirmed, enrolled once the scanner sheet is gone so the sign-in sheet has a window to present on.
-    @State private var scannedInvite: String?
 
     private static let windows: [(String, Int)] = [("15 minutes", 15), ("1 hour", 60), ("4 hours", 240)]
 
@@ -84,7 +86,7 @@ struct PaiPasskeySection: View {
             } else {
                 Menu {
                     Button("Add passkey") { Task { await model.enrol(invite: nil) } }
-                    Button("Scan code from Mac") { scanning = true }
+                    Button("Scan code from Mac") { PaiInviteScannerPresenter.present(model: model) }
                 } label: {
                     SettingsRow(symbol: "person.badge.key.fill", color: .blue, title: "Add passkey", value: nil)
                 }
@@ -99,14 +101,47 @@ struct PaiPasskeySection: View {
                 Text("A passkey on this phone unlocks pai and approves its changes. First passkey on Mac? Open pai on Mac › Settings › Account › Add another device, then Scan code from Mac here.")
             }
         }
-        .sheet(isPresented: $scanning, onDismiss: {
-            guard let code = scannedInvite else { return }
-            scannedInvite = nil
-            Task { await model.enrol(invite: code) }
-        }) {
-            PaiInviteScannerView { code in scannedInvite = code }
-        }
         .task { await model.load() }
+    }
+}
+
+/// Shows the scanner as a plain UIKit modal on the topmost controller. SwiftUI's `.sheet` + `dismiss` from inside
+/// Telegram's controller tree never closed it (only a swipe did), so Add passkey and Cancel looked dead; here every
+/// button dismisses the host itself.
+@available(iOS 16.0, *)
+enum PaiInviteScannerPresenter {
+    private final class WeakHost {
+        weak var controller: UIViewController?
+    }
+
+    @MainActor static func present(model: PaiPasskeyModel) {
+        guard let top = topController() else { return }
+        let box = WeakHost()
+        let view = PaiInviteScannerView(
+            close: { box.controller?.dismiss(animated: true) },
+            add: { prepared in
+                let enrol = { Task { await model.finish(prepared) } }
+                if let host = box.controller {
+                    host.dismiss(animated: true) { _ = enrol() }
+                } else {
+                    _ = enrol()
+                }
+            }
+        )
+        let host = UIHostingController(rootView: view)
+        host.modalPresentationStyle = .pageSheet
+        box.controller = host
+        top.present(host, animated: true)
+    }
+
+    private static func topController() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let window = scenes.flatMap(\.windows).first(where: \.isKeyWindow) ?? scenes.first?.windows.first
+        var top = window?.rootViewController
+        while let presented = top?.presentedViewController, !presented.isBeingDismissed {
+            top = presented
+        }
+        return top
     }
 }
 
