@@ -356,45 +356,6 @@ public final class ChatMessageInteractiveFileNode: ASDisplayNode {
             return
         }
         
-        let presentationData = context.sharedContext.currentPresentationData.with { $0 }
-        let premiumConfiguration = PremiumConfiguration.with(appConfiguration: arguments.context.currentAppConfiguration.with { $0 })
-        
-        let transcriptionText = self.forcedAudioTranscriptionText ?? transcribedText(message: EngineMessage(message))
-        if transcriptionText == nil && !arguments.associatedData.alwaysDisplayTranscribeButton.providedByGroupBoost {
-            if premiumConfiguration.audioTransciptionTrialCount > 0 {
-                if !arguments.associatedData.isPremium {
-                    if self.presentAudioTranscriptionTooltip(finished: false) {
-                        return
-                    }
-                }
-            } else {
-                guard arguments.associatedData.isPremium else {
-                    if self.hapticFeedback == nil {
-                        self.hapticFeedback = HapticFeedback()
-                    }
-                    self.hapticFeedback?.impact(.medium)
-                    
-                    let tipController = UndoOverlayController(presentationData: presentationData, content: .universal(animation: "anim_voiceToText", scale: 0.065, colors: [:], title: nil, text: presentationData.strings.Message_AudioTranscription_SubscribeToPremium, customUndoText: presentationData.strings.Message_AudioTranscription_SubscribeToPremiumAction, timeout: nil), elevatedLayout: false, position: .top, animateInAsReplacement: false, action: { action in
-                        if case .undo = action {
-                            var replaceImpl: ((ViewController) -> Void)?
-                            let controller = context.sharedContext.makePremiumDemoController(context: context, subject: .voiceToText, forceDark: false, action: {
-                                let controller = context.sharedContext.makePremiumIntroController(context: context, source: .settings, forceDark: false, dismissed: nil)
-                                replaceImpl?(controller)
-                            }, dismissed: nil)
-                            replaceImpl = { [weak controller] c in
-                                controller?.replace(with: c)
-                            }
-                            arguments.controllerInteraction.navigationController()?.pushViewController(controller, animated: true)
-                            
-                            let _ = ApplicationSpecificNotice.incrementAudioTranscriptionSuggestion(accountManager: context.sharedContext.accountManager).startStandalone()
-                        }
-                        return false })
-                    arguments.controllerInteraction.presentControllerInCurrent(tipController, nil)
-                    return
-                }
-            }
-        }
-        
         var shouldBeginTranscription = false
         var shouldExpandNow = false
         
@@ -419,54 +380,9 @@ public final class ChatMessageInteractiveFileNode: ASDisplayNode {
                 self.audioTranscriptionState = .inProgress
                 self.requestUpdateLayout(true)
                 
-                if context.sharedContext.immediateExperimentalUISettings.localTranscription {
-                    let appLocale = presentationData.strings.baseLanguageCode
-                    
-                    let signal: Signal<LocallyTranscribedAudio?, NoError> = context.engine.data.get(TelegramEngine.EngineData.Item.Messages.Message(id: message.id))
-                    |> mapToSignal { message -> Signal<String?, NoError> in
-                        guard let message = message else {
-                            return .single(nil)
-                        }
-                        guard let file = message.media.first(where: { $0 is TelegramMediaFile }) as? TelegramMediaFile else {
-                            return .single(nil)
-                        }
-                        return context.engine.resources.data(id: EngineMediaResource.Id(file.resource.id))
-                        |> take(1)
-                        |> mapToSignal { data -> Signal<String?, NoError> in
-                            if !data.isComplete {
-                                return .single(nil)
-                            }
-                            return .single(data.path)
-                        }
-                    }
-                    |> mapToSignal { result -> Signal<String?, NoError> in
-                        guard let result = result else {
-                            return .single(nil)
-                        }
-                        return convertOpusToAAC(sourcePath: result, allocateTempFile: {
-                            return EngineTempBox.shared.tempFile(fileName: "audio.m4a").path
-                        })
-                    }
-                    |> mapToSignal { result -> Signal<LocallyTranscribedAudio?, NoError> in
-                        guard let result = result else {
-                            return .single(nil)
-                        }
-                        return transcribeAudio(path: result, appLocale: appLocale)
-                    }
-                    
-                    self.transcribeDisposable = (signal
-                    |> deliverOnMainQueue).startStrict(next: { [weak self] result in
-                        guard let strongSelf = self, let arguments = strongSelf.arguments else {
-                            return
-                        }
-                        
-                        if let result = result {
-                            let _ = arguments.context.engine.messages.storeLocallyTranscribedAudio(messageId: arguments.message.id, text: result.text, isFinal: result.isFinal, error: nil).startStandalone()
-                        } else {
-                            strongSelf.audioTranscriptionState = .collapsed
-                            strongSelf.requestUpdateLayout(true)
-                        }
-                    }, completed: { [weak self] in
+                if arguments.associatedData.isPremium {
+                    self.transcribeDisposable = (context.engine.messages.transcribeAudio(messageId: message.id)
+                    |> deliverOnMainQueue).startStrict(next: { [weak self] _ in
                         guard let strongSelf = self else {
                             return
                         }
@@ -474,19 +390,14 @@ public final class ChatMessageInteractiveFileNode: ASDisplayNode {
                         strongSelf.transcribeDisposable = nil
                     })
                 } else {
-                    self.transcribeDisposable = (context.engine.messages.transcribeAudio(messageId: message.id)
-                    |> deliverOnMainQueue).startStrict(next: { [weak self] result in
+                    // Paigram: transcribe on the device for everyone, no Premium or trial needed.
+                    self.transcribeDisposable = (paiTranscribeVoiceMessage(context: context, message: message, forcedLocale: nil)
+                    |> deliverOnMainQueue).startStrict(completed: { [weak self] in
                         guard let strongSelf = self else {
                             return
                         }
                         strongSelf.transcribeDisposable?.dispose()
                         strongSelf.transcribeDisposable = nil
-                        
-                        if let arguments = strongSelf.arguments, !arguments.associatedData.isPremium && !arguments.associatedData.alwaysDisplayTranscribeButton.providedByGroupBoost {
-                            Queue.mainQueue().after(0.1, {
-                                let _ = strongSelf.presentAudioTranscriptionTooltip(finished: true)
-                            })
-                        }
                     })
                 }
             }
@@ -770,22 +681,8 @@ public final class ChatMessageInteractiveFileNode: ASDisplayNode {
                 if Namespaces.Message.allNonRegular.contains(arguments.message.id.namespace) {
                     displayTranscribe = false
                 } else if arguments.message.id.peerId.namespace != Namespaces.Peer.SecretChat && !isViewOnceMessage && !arguments.presentationData.isPreview {
-                    let premiumConfiguration = PremiumConfiguration.with(appConfiguration: arguments.context.currentAppConfiguration.with { $0 })
-                    if arguments.associatedData.isPremium || arguments.associatedData.alwaysDisplayTranscribeButton.providedByGroupBoost {
-                        displayTranscribe = true
-                    } else if premiumConfiguration.audioTransciptionTrialCount > 0 {
-                        if arguments.incoming {
-                            if audioDuration < premiumConfiguration.audioTransciptionTrialMaxDuration {
-                                displayTranscribe = true
-                            }
-                        }
-                    } else if arguments.associatedData.alwaysDisplayTranscribeButton.canBeDisplayed {
-                        if audioDuration >= 60 {
-                            displayTranscribe = true
-                        } else if arguments.incoming && isConsumed == false && arguments.associatedData.alwaysDisplayTranscribeButton.displayForNotConsumed {
-                            displayTranscribe = true
-                        }
-                    }
+                    // Paigram: on-device transcription, shown for every voice message without Premium.
+                    displayTranscribe = true
                 }
                 
                 let transcribedText = forcedAudioTranscriptionText ?? transcribedText(message: EngineMessage(arguments.message))
@@ -797,11 +694,6 @@ public final class ChatMessageInteractiveFileNode: ASDisplayNode {
                     }
                 default:
                     break
-                }
-                
-                let currentTime = Int32(Date().timeIntervalSince1970)
-                if transcribedText == nil, let cooldownUntilTime = arguments.associatedData.audioTranscriptionTrial.cooldownUntilTime, cooldownUntilTime > currentTime {
-                    updatedAudioTranscriptionState = .locked
                 }
                 
                 let effectiveAudioTranscriptionState = updatedAudioTranscriptionState ?? audioTranscriptionState

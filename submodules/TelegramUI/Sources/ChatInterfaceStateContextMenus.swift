@@ -39,6 +39,8 @@ import ChatMessageItemView
 import ChatMessageBubbleItemNode
 import AdsInfoScreen
 import AdsReportScreen
+import ChatMessageInteractiveFileNode
+import LocalAudioTranscription
  
 private struct MessageContextMenuData {
     let starStatus: Bool?
@@ -1114,7 +1116,7 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
         }
         
         var hasRateTranscription = false
-        if hasExpandedAudioTranscription, let audioTranscription = audioTranscription, !didRateAudioTranscription {
+        if hasExpandedAudioTranscription, let audioTranscription = audioTranscription, audioTranscription.id != 0, !didRateAudioTranscription {
             hasRateTranscription = true
             actions.insert(.custom(ChatRateTranscriptionContextItem(context: context, message: message, action: { [weak context] value in
                 guard let context = context else {
@@ -1128,6 +1130,23 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
                 controllerInteraction.displayUndo(content)
             }), false), at: 0)
             actions.insert(.separator, at: 1)
+        }
+        
+        if hasExpandedAudioTranscription, message.effectiveMedia.contains(where: { ($0 as? TelegramMediaFile)?.isVoice == true }) {
+            actions.append(.action(ContextMenuActionItem(text: "Transcribe in…", icon: { theme in
+                return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Translate"), color: theme.actionSheet.primaryTextColor)
+            }, action: { c, _ in
+                var subItems: [ContextMenuItem] = []
+                for language in voiceTranscriptionLanguages {
+                    let locale = language.locale
+                    subItems.append(.action(ContextMenuActionItem(text: language.title, icon: { _ in nil }, action: { c, _ in
+                        c?.dismiss(completion: {
+                            let _ = paiTranscribeVoiceMessage(context: context, message: message, forcedLocale: locale).startStandalone()
+                        })
+                    })))
+                }
+                c?.pushItems(items: .single(ContextController.Items(content: .list(subItems))))
+            })))
         }
         
         if !hasRateTranscription && message.minAutoremoveOrClearTimeout == nil {

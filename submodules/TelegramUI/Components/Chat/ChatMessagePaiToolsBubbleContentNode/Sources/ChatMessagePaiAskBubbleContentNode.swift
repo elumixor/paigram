@@ -388,6 +388,9 @@ public final class ChatMessagePaiAskBubbleContentNode: ChatMessageBubbleContentN
             }
             refresh()
             guard #available(iOS 16.0, *) else { return }
+            // The ask leaves every count and list at once; a refusal brings it back.
+            let settledKey = "ask:\(card.askId)"
+            PaiSettled.add(settledKey)
             Task { @MainActor in
                 do {
                     try await PaiClient().answer(ask: card.askId, text: text)
@@ -396,6 +399,7 @@ public final class ChatMessagePaiAskBubbleContentNode: ChatMessageBubbleContentN
                         draft.sent = true
                     }
                 } catch {
+                    PaiHost.store.unsettle(settledKey)
                     PaiAsk.updateDraft(card.askId) { draft in
                         draft.sending = false
                         draft.error = error.localizedDescription
