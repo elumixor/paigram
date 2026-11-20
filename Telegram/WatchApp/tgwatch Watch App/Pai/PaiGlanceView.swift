@@ -249,7 +249,9 @@ struct PaiNeedScreen: View {
 
     var body: some View {
         if let need = pai.glance?.needs.first(where: { $0.id == id }) {
-            if let draft = need.draft {
+            if need.id.hasPrefix("change:") {
+                PaiChangeView(need: need, hash: String(need.id.dropFirst("change:".count)))
+            } else if let draft = need.draft {
                 PaiDraftView(need: need, draft: draft)
             } else {
                 PaiNeedView(need: need)

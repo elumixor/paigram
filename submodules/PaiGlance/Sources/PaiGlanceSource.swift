@@ -356,7 +356,67 @@ public final class PaiGlanceLiveSource: PaiGlanceSource {
         return nil
     }
 
+    // MARK: - Change cards (the watch approves them with its own key)
+
+    /// A sensitive change waiting for approval (`GET /changes/<hash>`), as the watch shows it.
+    public func change(hash: String, completion: @escaping (Result<PaiGlance.Change, Error>) -> Void) {
+        get("/changes/\(hash)") { result in
+            completion(result.flatMap { data -> Result<PaiGlance.Change, Error> in
+                guard let raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let change = PaiGlance.Change(raw) else {
+                    return .failure(PaiGlanceError.badResponse)
+                }
+                return .success(change)
+            })
+        }
+    }
+
+    /// A fresh single-use challenge for approving change `hash` with a watch key bound to this device token, and the
+    /// ids of this device's watch keys.
+    public func watchChallenge(hash: String, completion: @escaping (Result<(challenge: String, keys: [String]), Error>) -> Void) {
+        post("/changes/\(hash)/watch-challenge", body: [:]) { result in
+            completion(result.flatMap { raw -> Result<(challenge: String, keys: [String]), Error> in
+                guard let challenge = raw["challenge"] as? String else { return .failure(PaiGlanceError.badResponse) }
+                return .success((challenge, raw["keys"] as? [String] ?? []))
+            })
+        }
+    }
+
+    /// The watch key's signature over `pai-watch-approve-change\n<hash>\n<challenge>` (DER, base64url).
+    public func watchApprove(hash: String, key: String, challenge: String, signature: String, completion: @escaping (Result<Void, Error>) -> Void) {
+        post("/changes/\(hash)/watch-approve", body: ["key": key, "challenge": challenge, "signature": signature]) { completion($0.map { _ in () }) }
+    }
+
+    /// Saying no needs no key: the device token alone denies.
+    public func denyChange(hash: String, completion: @escaping (Result<Void, Error>) -> Void) {
+        post("/changes/\(hash)/deny", body: [:]) { completion($0.map { _ in () }) }
+    }
+
     // MARK: - HTTP
+
+    /// A JSON POST; a refusal carries the box's `{error}`.
+    private func post(_ path: String, body: [String: Any], completion: @escaping (Result<[String: Any], Error>) -> Void) {
+        guard let url = URL(string: config.baseURL + path) else {
+            completion(.failure(PaiGlanceError.badResponse))
+            return
+        }
+        var request = request(url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        session.dataTask(with: request) { data, response, error in
+            if let error {
+                completion(.failure(error))
+                return
+            }
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let raw = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+            if (200 ..< 300).contains(status) {
+                completion(.success(raw))
+                return
+            }
+            completion(.failure((raw["error"] as? String).map(PaiGlanceError.refused) ?? PaiGlanceError.http(status)))
+        }.resume()
+    }
 
     private func request(_ url: URL) -> URLRequest {
         var request = URLRequest(url: url, timeoutInterval: 10)
@@ -381,5 +441,66 @@ public final class PaiGlanceLiveSource: PaiGlanceSource {
             }
             completion(.success(data))
         }.resume()
+    }
+}
+
+extension PaiGlance {
+    /// A sensitive change an agent asks to make (`GET /changes/<hash>`): where, why, and what it does as lines.
+    public struct Change: Equatable {
+        public let hash: String
+        /// "pending", "approved", "denied", "expired", "used" or "withdrawn".
+        public let status: String
+        public let agent: String?
+        public let site: String?
+        public let reason: String?
+        /// An op's call and its arguments, or a page's fields old → new and its final click.
+        public let lines: [String]
+        public let expires: Date?
+        /// A root script or a datovka send: only a passkey on the iPhone approves it, never the watch.
+        public let needsPasskey: Bool
+
+        public var isPending: Bool { status == "pending" }
+
+        public init?(_ raw: [String: Any]) {
+            guard let hash = raw["hash"] as? String, let status = raw["status"] as? String else { return nil }
+            self.hash = hash
+            self.status = status
+            agent = raw["agent"] as? String
+            site = raw["site"] as? String
+            reason = raw["reason"] as? String
+            expires = PaiGlanceLiveSource.date(raw["expires"])
+            let clip = { (text: String) in text.count > 140 ? String(text.prefix(140)) + "…" : text }
+            let show = { (value: Any?) -> String in
+                switch value {
+                case let text as String: return text
+                case nil, is NSNull: return "(empty)"
+                default:
+                    guard let value, JSONSerialization.isValidJSONObject([value]), let data = try? JSONSerialization.data(withJSONObject: [value]), let text = String(data: data, encoding: .utf8) else { return "\(value ?? "")" }
+                    return String(text.dropFirst().dropLast())
+                }
+            }
+            var lines: [String] = []
+            var datovka = false
+            if let op = raw["op"] as? [String: Any] {
+                let connector = op["connector"] as? String ?? ""
+                let name = op["op"] as? String ?? ""
+                datovka = connector == "secrets" && name == "datovka_send"
+                lines.append("\(connector) \(name)")
+                let args = op["args"] as? [String: Any] ?? [:]
+                for key in args.keys.sorted() { lines.append(clip("\(key): \(show(args[key]))")) }
+            } else if let page = raw["page"] as? [String: Any] {
+                lines.append("\(page["host"] as? String ?? "")\(page["path"] as? String ?? "")")
+                for change in page["changes"] as? [[String: Any]] ?? [] {
+                    let label = (change["label"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? change["field"] as? String ?? ""
+                    lines.append(clip("\(label): \(show(change["old"])) → \(show(change["new"]))"))
+                }
+                if let click = page["clickTarget"] as? [String: Any] {
+                    let label = (click["label"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? click["step"] as? String ?? ""
+                    lines.append("then: \(label)")
+                }
+            }
+            self.lines = lines
+            needsPasskey = raw["executor"] as? String == "pai-root" || datovka
+        }
     }
 }

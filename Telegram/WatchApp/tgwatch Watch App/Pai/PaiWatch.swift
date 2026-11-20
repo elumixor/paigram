@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import WatchConnectivity
+import WatchKit
 import WidgetKit
 
 /// Pai on the wrist: the usage glance, the questions waiting on the user and the agents with their plans. The phone hands over the box's
@@ -128,6 +129,79 @@ final class PaiWatch: NSObject, WCSessionDelegate {
         }
     }
 
+    // MARK: - Change cards
+
+    /// The change card behind a `change:<hash>` need, read from the box.
+    func change(_ hash: String, completion: @escaping (Result<PaiGlance.Change, Error>) -> Void) {
+        guard let config = PaiVault.config else {
+            completion(.failure(PaiGlanceError.notSignedIn))
+            return
+        }
+        PaiGlanceLiveSource(config: config).change(hash: hash) { result in
+            DispatchQueue.main.async { completion(result) }
+        }
+    }
+
+    /// Approves change `hash` with this watch's Secure Enclave key (`PaiWatchKey`), or denies it. `done` gets nil once
+    /// the box took it, else what to tell the user.
+    func decideChange(_ need: PaiGlance.Need, hash: String, approve: Bool, done: @escaping (String?) -> Void) {
+        guard let config = PaiVault.config else {
+            done("Open Paigram on your iPhone and sign in to pai.")
+            return
+        }
+        answering.insert(need.id)
+        let finish = { (error: String?) in
+            DispatchQueue.main.async {
+                self.answering.remove(need.id)
+                if error == nil, let glance = self.glance {
+                    self.apply(glance: glance.removing(need: need.id))
+                    self.refresh()
+                }
+                done(error)
+            }
+        }
+        let source = PaiGlanceLiveSource(config: config)
+        guard approve else {
+            source.denyChange(hash: hash) { finish(Self.say($0.error)) }
+            return
+        }
+        source.watchChallenge(hash: hash) { result in
+            switch result {
+            case let .failure(error): finish(Self.say(error))
+            case let .success((challenge, keys)):
+                do {
+                    let key = try PaiWatchKey.publicKey()
+                    let id = PaiWatchKey.id(of: key)
+                    guard keys.contains(id) else {
+                        finish(PaiWatchKey.addHint)
+                        return
+                    }
+                    let signature = try PaiWatchKey.sign(hash: hash, challenge: challenge)
+                    source.watchApprove(hash: hash, key: id, challenge: challenge, signature: signature) { finish(Self.say($0.error)) }
+                } catch {
+                    finish(error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    private static func say(_ error: Error?) -> String? {
+        guard let error else { return nil }
+        if case let PaiGlanceError.refused(reason) = error {
+            return reason.hasPrefix("no Apple Watch key") ? PaiWatchKey.addHint : reason
+        }
+        return "Can't reach pai"
+    }
+
+    /// Hands the watch key to the phone once per key, so Add Apple Watch there works while this app is closed.
+    private func offerKey(_ session: WCSession) {
+        guard session.activationState == .activated, let key = try? PaiWatchKey.publicKey() else { return }
+        let id = PaiWatchKey.id(of: key)
+        guard UserDefaults.standard.string(forKey: "pai.watchkey.offered") != id else { return }
+        session.transferUserInfo(["watchKey": key, "watchName": WKInterfaceDevice.current().name])
+        UserDefaults.standard.set(id, forKey: "pai.watchkey.offered")
+    }
+
     // MARK: - Through the phone
 
     private func askPhone() {
@@ -206,6 +280,22 @@ final class PaiWatch: NSObject, WCSessionDelegate {
         let context = session.receivedApplicationContext
         DispatchQueue.main.async {
             if !context.isEmpty { self.receive(context) }
+            self.offerKey(session)
+        }
+    }
+
+    /// The phone's Add Apple Watch asks for this watch's public key (`["watchKey": true]`).
+    func session(_ session: WCSession, didReceiveMessage message: [String: Any], replyHandler: @escaping ([String: Any]) -> Void) {
+        guard message["watchKey"] as? Bool == true else {
+            replyHandler([:])
+            return
+        }
+        DispatchQueue.main.async {
+            do {
+                replyHandler(["publicKey": try PaiWatchKey.publicKey(), "name": WKInterfaceDevice.current().name])
+            } catch {
+                replyHandler(["error": error.localizedDescription])
+            }
         }
     }
 
@@ -219,5 +309,13 @@ extension PaiGlance {
     func removing(need id: String) -> PaiGlance {
         let left = needs.filter { $0.id != id }
         return with(needs: left, needsCount: max(0, needsCount - (needs.count - left.count)))
+    }
+}
+
+private extension Result {
+    /// The error of a failed result, nil for a success.
+    var error: Failure? {
+        if case let .failure(error) = self { return error }
+        return nil
     }
 }
