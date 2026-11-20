@@ -1460,6 +1460,30 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
                 }))
             ))
         }
+        if #available(iOS 16.0, *), self.chatPresentationInterfaceState.search == nil, PaiChat.isBot(self.chatPresentationInterfaceState.renderedPeer?.peer) {
+            // The open topic's pending drafts: the oldest as a card with its email thread, Send and Discard.
+            let threadId = self.chatPresentationInterfaceState.chatLocation.threadId
+            let drafts = MainActor.assumeIsolated { PaiDraftCard.drafts(thread: threadId) }
+            if !drafts.isEmpty {
+                footerPanels.append(HeaderPanelContainerComponent.Panel(
+                    key: "pai-drafts",
+                    orderIndex: 2,
+                    component: AnyComponent(PaiDraftsPanelComponent(drafts: drafts, theme: self.chatPresentationInterfaceState.theme, resolve: { [weak self] id, send in
+                        Task { @MainActor in
+                            do {
+                                try await PaiHost.store.resolve(draft: id, send: send)
+                            } catch {
+                                guard let self, let controller = self.controller else { return }
+                                let strings = self.chatPresentationInterfaceState.strings
+                                controller.present(textAlertController(context: self.context, title: nil, text: error.localizedDescription, actions: [TextAlertAction(type: .defaultAction, title: strings.Common_OK, action: {})]), in: .window(.root))
+                            }
+                        }
+                    }, relayout: { [weak self] in
+                        self?.requestLayout(.animated(duration: 0.2, curve: .easeInOut))
+                    }))
+                ))
+            }
+        }
         if !hideTopPanels, self.chatPresentationInterfaceState.search == nil, let mediaPlayback = self.controller?.globalControlPanelsContextState?.mediaPlayback {
             if let playlistLocation = mediaPlayback.playlistLocation as? PeerMessagesPlaylistLocation, case let .custom(_, _, _, _, hidePanel) = playlistLocation, hidePanel {
                 
