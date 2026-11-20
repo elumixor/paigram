@@ -1,4 +1,5 @@
 /** The repository's own paths and the one file that says which version is being built. */
+import { renameSync } from "node:fs";
 import { $ } from "bun";
 
 export const root = new URL("..", import.meta.url).pathname;
@@ -24,7 +25,9 @@ export async function bumpVersion(minor: boolean): Promise<string> {
   const versions = await readVersions();
   const [major, min, patch] = versions.app.split(".").map(Number);
   const app = minor ? `${major}.${min + 1}.0` : `${major}.${min}.${patch + 1}`;
-  await Bun.write(versionsPath, `${JSON.stringify({ ...versions, app }, null, 4)}\n`);
+  // A fresh file renamed over the old one: the old one may belong to another user (the box once left it so).
+  await Bun.write(`${versionsPath}.tmp`, `${JSON.stringify({ ...versions, app }, null, 4)}\n`);
+  renameSync(`${versionsPath}.tmp`, versionsPath);
   await $`git commit -qm ${`Paigram v${app}`} -- versions.json`.cwd(root);
   console.log(`version ${app}`);
   return app;
