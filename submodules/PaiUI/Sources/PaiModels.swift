@@ -372,6 +372,8 @@ public struct PaiAgent: Codable, Identifiable, Equatable {
     public var taskTitle: String? = nil
     /// `keep:page/<id>` it works on.
     public var keepPage: String? = nil
+    /// What it is for, in a line (the server's `goalOf`: the brief's Goal, else its outcome, page title or role).
+    public var goal: String? = nil
 
     public struct SessionState: Codable, Equatable {
         public let state: String

@@ -42,20 +42,34 @@ func paiAgentInfoItems(peerId: EnginePeer.Id, context: AccountContext, presentat
     let role = agent.role.flatMap { $0.isEmpty ? nil : $0 } ?? (agent.isPai ? "assistant" : "agent")
     about.append(PeerInfoScreenLabeledValueItem(id: 0, label: "role", text: role, action: nil, requestLayout: requestLayout))
     about.append(PeerInfoScreenLabeledValueItem(id: 1, label: "status", text: PaiAgentList.state(agent) ?? "idle", action: nil, requestLayout: requestLayout))
-    if !agent.job.isEmpty {
+    let goal = agent.goal.flatMap { $0.isEmpty ? nil : $0 }
+    if let goal {
+        about.append(PeerInfoScreenLabeledValueItem(id: 4, label: "goal", text: goal, textBehavior: .multiLine(maxLines: 6, enabledEntities: []), action: nil, requestLayout: requestLayout))
+    }
+    if !agent.job.isEmpty && agent.job != goal && agent.job != agent.taskTitle {
         about.append(PeerInfoScreenLabeledValueItem(id: 2, label: "job", text: agent.job, textBehavior: .multiLine(maxLines: 6, enabledEntities: []), action: nil, requestLayout: requestLayout))
     }
+
+    var result: [(AnyHashable, [PeerInfoScreenItem])] = [("pai.about", about)]
+
+    // Its Keep page as a pill: the Keep mark with ↗, the page's title, opening the page.
     if let url = PaiProfile.keepURL(agent) {
-        let title = agent.taskTitle.flatMap { $0.isEmpty ? nil : $0 } ?? "Open in Keep"
-        about.append(PeerInfoScreenLabeledValueItem(id: 3, label: "Keep page", text: title, textColor: .accent, action: { _, _ in
+        let title = agent.taskTitle.flatMap { $0.isEmpty ? nil : $0 } ?? "Keep page"
+        result.append(("pai.keep", [PeerInfoScreenDisclosureItem(id: "keep", label: .text("Keep"), text: title, icon: PaiProfile.keepMark(size: 30.0, color: presentationData.theme.list.itemAccentColor), action: {
             guard let controller = interaction.getController() else {
                 return
             }
             context.sharedContext.openExternalUrl(context: context, urlContext: .generic, url: url, forceExternal: false, presentationData: presentationData, navigationController: controller.navigationController as? NavigationController, dismissInput: {})
-        }, requestLayout: requestLayout))
+        })]))
     }
 
-    var result: [(AnyHashable, [PeerInfoScreenItem])] = [("pai.about", about)]
+    // The brief it was given, whole.
+    if let brief = agent.brief?.trimmingCharacters(in: .whitespacesAndNewlines), !brief.isEmpty {
+        result.append(("pai.brief", [
+            PeerInfoScreenHeaderItem(id: "header", text: "BRIEF"),
+            PeerInfoScreenLabeledValueItem(id: 0, label: "", text: brief.replacingOccurrences(of: "[*_`#>]+", with: "", options: .regularExpression), textBehavior: .multiLine(maxLines: 12, enabledEntities: []), action: nil, requestLayout: requestLayout),
+        ]))
+    }
 
     let children = PaiChat.children(of: slug)
     if !children.isEmpty {
