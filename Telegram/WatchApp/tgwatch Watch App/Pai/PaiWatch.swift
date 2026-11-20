@@ -89,6 +89,45 @@ final class PaiWatch: NSObject, WCSessionDelegate {
         }
     }
 
+    /// Sends a draft need as the user, with his edits (`body`) applied first. `done` gets nil once sent, else why not.
+    func sendDraft(_ need: PaiGlance.Need, fields: [String: String], done: @escaping (String?) -> Void) {
+        guard let draft = need.draft else { return }
+        answering.insert(need.id)
+        let finish = { (error: String?) in
+            DispatchQueue.main.async {
+                self.answering.remove(need.id)
+                if error == nil, let glance = self.glance {
+                    self.apply(glance: glance.removing(need: need.id))
+                    self.refresh()
+                }
+                done(error)
+            }
+        }
+        guard let config = PaiVault.config else {
+            relayDraft(draft.id, fields: fields, finish: finish)
+            return
+        }
+        PaiGlanceLiveSource(config: config).sendDraft(id: draft.id, fields: fields) { result in
+            switch result {
+            case .success: finish(nil)
+            // The box was reached and said no: the phone would hear the same.
+            case let .failure(PaiGlanceError.refused(reason)): finish(reason)
+            case .failure: self.relayDraft(draft.id, fields: fields, finish: finish)
+            }
+        }
+    }
+
+    /// The whole draft from the box, for one whose glance body was cut; nil when the box cannot be reached directly.
+    func loadDraft(_ id: Int, completion: @escaping (PaiGlance.Need.Draft?) -> Void) {
+        guard let config = PaiVault.config else {
+            completion(nil)
+            return
+        }
+        PaiGlanceLiveSource(config: config).draft(id: id) { result in
+            DispatchQueue.main.async { completion(try? result.get()) }
+        }
+    }
+
     // MARK: - Through the phone
 
     private func askPhone() {
@@ -123,6 +162,17 @@ final class PaiWatch: NSObject, WCSessionDelegate {
         session.sendMessage(["answer": need.id, "text": text], replyHandler: { reply in
             finish(reply["ok"] as? Bool ?? false)
         }, errorHandler: { _ in finish(false) })
+    }
+
+    private func relayDraft(_ id: Int, fields: [String: String], finish: @escaping (String?) -> Void) {
+        let session = WCSession.default
+        guard WCSession.isSupported(), session.activationState == .activated, session.isReachable else {
+            finish("Can't reach pai")
+            return
+        }
+        session.sendMessage(["sendDraft": id, "fields": fields], replyHandler: { reply in
+            finish(reply["ok"] as? Bool == true ? nil : reply["error"] as? String ?? "Not sent")
+        }, errorHandler: { _ in finish("Can't reach pai") })
     }
 
     /// The phone's application context or its reply: the box config (or its absence: signed out) and a glance.

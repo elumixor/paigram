@@ -123,7 +123,8 @@ public final class PaiGlanceSync: NSObject, WCSessionDelegate {
         DispatchQueue.main.async { self.sendStoredToWatch() }
     }
 
-    /// The watch asks for a fresh glance (`refresh`) or relays an answer (`answer` + `text`) it could not send itself.
+    /// The watch asks for a fresh glance (`refresh`), or relays what it could not send itself: an answer (`answer` + `text`)
+    /// or a draft with its edits (`sendDraft` + `fields`).
     public func session(_ session: WCSession, didReceiveMessage message: [String: Any], replyHandler: @escaping ([String: Any]) -> Void) {
         guard let config else {
             replyHandler(["error": "signed out"])
@@ -136,6 +137,19 @@ public final class PaiGlanceSync: NSObject, WCSessionDelegate {
                     DispatchQueue.main.async { self.refresh(force: true) }
                 }
                 replyHandler(["ok": (try? result.get()) != nil])
+            }
+            return
+        }
+        if let id = message["sendDraft"] as? Int {
+            source.sendDraft(id: id, fields: message["fields"] as? [String: String] ?? [:]) { result in
+                if case .success = result {
+                    DispatchQueue.main.async { self.refresh(force: true) }
+                }
+                var reply: [String: Any] = ["ok": (try? result.get()) != nil]
+                if case let .failure(PaiGlanceError.refused(reason)) = result {
+                    reply["error"] = reason
+                }
+                replyHandler(reply)
             }
             return
         }
