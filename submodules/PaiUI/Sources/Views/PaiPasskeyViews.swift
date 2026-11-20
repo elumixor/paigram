@@ -13,6 +13,8 @@ final class PaiPasskeyModel: ObservableObject {
     @Published private(set) var busy = false
     /// pai holds a watch key for this phone.
     @Published private(set) var watchAdded = false
+    /// The enrol found this phone already holds one of pai's passkeys.
+    var alreadySaved: Bool { PaiPasskeys.enrolledCredential == PaiPasskeys.alreadySaved }
     @Published var error: String?
     private var observer: NSObjectProtocol?
 
@@ -77,7 +79,7 @@ struct PaiPasskeySection: View {
     var body: some View {
         Section {
             if model.enrolled {
-                SettingsRow(symbol: "person.badge.key.fill", color: .blue, title: "Passkey", value: "Added")
+                SettingsRow(symbol: "person.badge.key.fill", color: .blue, title: "Passkey", value: model.alreadySaved ? "Saved on this iPhone" : "Added")
                 if let until = model.state?.untilDate, model.state?.unlocked == true {
                     SettingsRow(symbol: "lock.open.fill", color: .orange, title: "Unlocked", value: "until \(until.formatted(date: .omitted, time: .shortened))")
                     Button("Lock now") { Task { await model.lock() } }.disabled(model.busy)
