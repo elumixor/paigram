@@ -26,6 +26,12 @@ jobs:
     # A warm build takes 15–40 minutes; a cold cache about 90. Longer than this is a stalled Mac.
     timeout-minutes: 150
     steps:
+      # actions/checkout writes `git config --global` (safe.directory, the submodules' token and insteadOf) under a
+      # temporary HOME holding a copy of ~/.gitconfig; on this Mac that file is a symlink, so the writes landed in
+      # the user's own config and broke his pushes. Every git in the job uses a job-local global config instead.
+      - name: Job-local git global config
+        run: echo "GIT_CONFIG_GLOBAL=$RUNNER_TEMP/gitconfig" >> "$GITHUB_ENV"
+
       # The runner's own checkout of the dispatched ref, kept between runs (its Bazel output base is keyed
       # by this path), not the synced ~/dev tree, which holds other sessions' uncommitted work.
       - uses: actions/checkout@v5
