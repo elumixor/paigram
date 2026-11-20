@@ -96,7 +96,7 @@ public enum PaiPasskeys {
         guard let url = PaiPasskeyEnrol.url(base: PaiSecrets.baseURL, state: state, challenge: PKCE.challenge(for: verifier), name: name, invite: invite) else {
             throw PaiClientError(message: "Server address is not a valid URL")
         }
-        let callback = try PaiPasskeyEnrol.parse(callback: try await PaiWebSheet.run(url: url, callbackScheme: PaiPasskeyEnrol.callbackScheme), expectedState: state)
+        let callback = try PaiPasskeyEnrol.parse(callback: try await PaiWebSheet.run(url: url, callbackScheme: PaiPasskeyEnrol.callbackScheme, cookies: PaiPasskeyEnrol.sheetCookies), expectedState: state)
 
         let options = try await client.call(PasskeyCreationOptions.self, "/unlock/passkeys/options", method: "POST", body: try PasskeyEnrolOptionsBody(ticket: callback.ticket, codeVerifier: verifier).jsonObject(), keepTokenOn401: true)
         guard let challenge = Base64URL.decode(options.challenge), let userID = Base64URL.decode(options.user.id) else {

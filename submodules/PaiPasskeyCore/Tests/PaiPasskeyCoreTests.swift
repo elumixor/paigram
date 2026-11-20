@@ -354,3 +354,16 @@ final class InviteFlowTests: XCTestCase {
         XCTAssertEqual(enrolling.state, .enrolling)
     }
 }
+
+final class PaiWebSheetCookiesTests: XCTestCase {
+    /// An enrol sheet on Safari's cookies reuses an old sign-in, which the box refuses for a ticket: the page then
+    /// loops through the suite's sign-in and never returns one.
+    func testEnrolSheetStartsWithoutSafariCookies() {
+        XCTAssertEqual(PaiPasskeyEnrol.sheetCookies, .fresh)
+        XCTAssertTrue(PaiPasskeyEnrol.sheetCookies.prefersEphemeralSession)
+    }
+
+    func testSharedSheetKeepsSafariCookies() {
+        XCTAssertFalse(PaiWebSheetCookies.shared.prefersEphemeralSession)
+    }
+}

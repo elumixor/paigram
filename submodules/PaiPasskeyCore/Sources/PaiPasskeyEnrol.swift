@@ -14,9 +14,25 @@ public enum PaiPasskeyEnrolError: LocalizedError, Equatable {
     }
 }
 
+/// Whose cookies a web sign-in sheet starts with.
+public enum PaiWebSheetCookies: Equatable {
+    /// Safari's: a phone already signed in to Desk only confirms.
+    case shared
+    /// None: the person signs in inside the sheet, every time.
+    case fresh
+
+    /// `ASWebAuthenticationSession.prefersEphemeralWebBrowserSession`.
+    public var prefersEphemeralSession: Bool { self == .fresh }
+}
+
 /// The web hand-off of an enrol: the page at `/link` returns `paigram://pai-auth?ticket=&expires=&state=`.
 public enum PaiPasskeyEnrol {
     public static let callbackScheme = "paigram"
+
+    /// The box mints an enrol ticket only for a sign-in at most five minutes old. Safari's session is usually older:
+    /// the page then signs out and goes round the suite's sign-in, and Add passkey looped that way without ever
+    /// returning a ticket. A sheet without Safari's cookies makes the sign-in a new one.
+    public static let sheetCookies: PaiWebSheetCookies = .fresh
 
     /// A random value the page echoes back, so a callback from another request is refused.
     public static func makeState() -> String {

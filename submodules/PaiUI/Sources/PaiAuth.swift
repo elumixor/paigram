@@ -1,6 +1,7 @@
 import AuthenticationServices
 import Foundation
 import PaiCallRecording
+import PaiPasskeyCore
 import Security
 import TelegramCore
 import UIKit
@@ -126,14 +127,14 @@ public enum PaiAuth {
     }
 }
 
-/// `ASWebAuthenticationSession` as one async call; it shares Safari's cookies, so a phone already signed in to Desk
-/// only confirms. Also how a mailbox is connected (Google's consent, answered with `paigram://pai-mailbox`).
+/// `ASWebAuthenticationSession` as one async call; by default it shares Safari's cookies, so a phone already signed in
+/// to Desk only confirms (`cookies: .fresh` = a sheet of its own, where he signs in anew). Also how a mailbox is connected (Google's consent, answered with `paigram://pai-mailbox`).
 final class PaiWebSheet: NSObject, ASWebAuthenticationPresentationContextProviding {
     private static var running: PaiWebSheet?
     private var session: ASWebAuthenticationSession?
 
     @MainActor
-    static func run(url: URL, callbackScheme: String) async throws -> URL {
+    static func run(url: URL, callbackScheme: String, cookies: PaiWebSheetCookies = .shared) async throws -> URL {
         try await withCheckedThrowingContinuation { continuation in
             let signIn = PaiWebSheet()
             let session = ASWebAuthenticationSession(url: url, callbackURLScheme: callbackScheme) { callback, error in
@@ -147,6 +148,7 @@ final class PaiWebSheet: NSObject, ASWebAuthenticationPresentationContextProvidi
                 }
             }
             session.presentationContextProvider = signIn
+            session.prefersEphemeralWebBrowserSession = cookies.prefersEphemeralSession
             signIn.session = session
             running = signIn
             if !session.start() {
