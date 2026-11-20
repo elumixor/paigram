@@ -15,6 +15,8 @@ public enum PaiGlanceError: Error {
     case notSignedIn
     case http(Int)
     case badResponse
+    /// The box refused, saying why (`{error}`).
+    case refused(String)
 }
 
 /// Where a glance comes from: the box, or canned data for previews and until the box is reachable.
@@ -246,8 +248,75 @@ public final class PaiGlanceLiveSource: PaiGlanceSource {
             question: question,
             options: raw["options"] as? [String] ?? [],
             freeText: raw["freeText"] as? Bool ?? true,
-            createdAt: date(raw["createdAt"]) ?? Date()
+            createdAt: date(raw["createdAt"]) ?? Date(),
+            kind: raw["kind"] as? String,
+            draft: (raw["draft"] as? [String: Any]).flatMap { draft in
+                (raw["draftId"] as? Int).flatMap { Self.draft(id: $0, raw: draft) }
+            }
         )
+    }
+
+    /// Longest draft body a glance carries; a longer one is marked `cut` and loaded whole before editing.
+    static let draftBodyLimit = 2000
+
+    /// A draft from `GET /drafts/:id`.
+    public static func draft(_ raw: [String: Any]) -> PaiGlance.Need.Draft? {
+        guard let id = raw["id"] as? Int else { return nil }
+        return draft(id: id, raw: raw, limit: nil)
+    }
+
+    /// A draft from its `{channel, fields, status}` (a need's `draft` or the draft itself).
+    static func draft(id: Int, raw: [String: Any], limit: Int? = draftBodyLimit) -> PaiGlance.Need.Draft? {
+        guard let channel = raw["channel"] as? String, let fields = raw["fields"] as? [String: Any] else { return nil }
+        let body = fields["body"] as? String ?? ""
+        let cut = limit.map { body.count > $0 } ?? false
+        return PaiGlance.Need.Draft(
+            id: id,
+            channel: channel,
+            to: (fields["to"] as? String).flatMap { $0.isEmpty ? nil : $0 },
+            subject: (fields["subject"] as? String).flatMap { $0.isEmpty ? nil : $0 },
+            body: cut ? String(body.prefix(limit ?? 0)) : body,
+            cut: cut,
+            status: raw["status"] as? String,
+            awaitsRecipient: !((fields["candidates"] as? [Any])?.isEmpty ?? true)
+        )
+    }
+
+    /// The whole draft, for editing one whose glance body was cut.
+    public func draft(id: Int, completion: @escaping (Result<PaiGlance.Need.Draft, Error>) -> Void) {
+        get("/drafts/\(id)") { result in
+            completion(result.flatMap { data -> Result<PaiGlance.Need.Draft, Error> in
+                guard let raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let draft = Self.draft(raw) else {
+                    return .failure(PaiGlanceError.badResponse)
+                }
+                return .success(draft)
+            })
+        }
+    }
+
+    /// Sends a draft as the user, with his edits (`body`, `subject`) applied first. Empty `fields` sends it as drafted.
+    public func sendDraft(id: Int, fields: [String: String], completion: @escaping (Result<Void, Error>) -> Void) {
+        guard let url = URL(string: config.baseURL + "/drafts/\(id)/send") else {
+            completion(.failure(PaiGlanceError.badResponse))
+            return
+        }
+        var request = request(url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: fields)
+        session.dataTask(with: request) { data, response, error in
+            if let error {
+                completion(.failure(error))
+                return
+            }
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            if (200 ..< 300).contains(status) {
+                completion(.success(()))
+                return
+            }
+            let reason = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }?["error"] as? String
+            completion(.failure(reason.map(PaiGlanceError.refused) ?? PaiGlanceError.http(status)))
+        }.resume()
     }
 
     /// The compact endpoint (see PAIGRAM.md for its shape); nil when it is missing or malformed.

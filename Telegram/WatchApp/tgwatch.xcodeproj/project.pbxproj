@@ -123,6 +123,7 @@
 		8C8BCE36457D487F05F2DD65 /* PaiGlanceSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = B04417D1AF4DB776A13924FA /* PaiGlanceSource.swift */; };
 		10FD82842D583F561398A710 /* PaiGlanceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65F5BC181FCB054B38736A3F /* PaiGlanceStore.swift */; };
 		571898B3126AC539D1EE184D /* PaiWatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2919BC189D11B889C7DF7699 /* PaiWatch.swift */; };
+		3C2C9FA35072AAC392FB8BCC /* PaiDraftView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58D1448B55BCFA01BF57CDFA /* PaiDraftView.swift */; };
 		9B84941188B61C198A29A16C /* PaiGlanceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 770D841F38E02F0DAC4D905A /* PaiGlanceView.swift */; };
 		B9F4BF9525B6D72564EC9ABA /* PaiVault.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15F1C338DDE5CA2C5A723392 /* PaiVault.swift */; };
 		6C9F8191D1E7223BD8682FBE /* PaiFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F0FB7697272ED6417DE7908 /* PaiFormat.swift */; };
@@ -276,6 +277,7 @@
 		65F5BC181FCB054B38736A3F /* PaiGlanceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaiGlanceStore.swift; sourceTree = "<group>"; };
 		2919BC189D11B889C7DF7699 /* PaiWatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaiWatch.swift; sourceTree = "<group>"; };
 		770D841F38E02F0DAC4D905A /* PaiGlanceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaiGlanceView.swift; sourceTree = "<group>"; };
+		58D1448B55BCFA01BF57CDFA /* PaiDraftView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaiDraftView.swift; sourceTree = "<group>"; };
 		3F0021B91E33D148C62AC566 /* PaiComplications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaiComplications.swift; sourceTree = "<group>"; };
 		CB458E0639B46DC9CB959598 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		22D1EEAAB361EA706E4DA106 /* PaiComplications.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PaiComplications.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -506,6 +508,7 @@
 			children = (
 				2919BC189D11B889C7DF7699 /* PaiWatch.swift */,
 				770D841F38E02F0DAC4D905A /* PaiGlanceView.swift */,
+				58D1448B55BCFA01BF57CDFA /* PaiDraftView.swift */,
 			);
 			path = Pai;
 			sourceTree = "<group>";
@@ -624,6 +627,7 @@
 			files = (
 				9B84941188B61C198A29A16C /* PaiGlanceView.swift in Sources */,
 				571898B3126AC539D1EE184D /* PaiWatch.swift in Sources */,
+				3C2C9FA35072AAC392FB8BCC /* PaiDraftView.swift in Sources */,
 				10FD82842D583F561398A710 /* PaiGlanceStore.swift in Sources */,
 				8C8BCE36457D487F05F2DD65 /* PaiGlanceSource.swift in Sources */,
 				743961B96A28072242663786 /* PaiGlance.swift in Sources */,

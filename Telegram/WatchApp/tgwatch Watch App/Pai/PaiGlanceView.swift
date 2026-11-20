@@ -249,7 +249,11 @@ struct PaiNeedScreen: View {
 
     var body: some View {
         if let need = pai.glance?.needs.first(where: { $0.id == id }) {
-            PaiNeedView(need: need)
+            if let draft = need.draft {
+                PaiDraftView(need: need, draft: draft)
+            } else {
+                PaiNeedView(need: need)
+            }
         } else {
             Text("Answered").font(.footnote).foregroundStyle(.secondary)
         }

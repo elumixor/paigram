@@ -50,8 +50,49 @@ public struct PaiGlance: Codable, Equatable {
         public let options: [String]
         public let freeText: Bool
         public let createdAt: Date
+        /// "draft" for a draft card (offer_draft), "ask", "card", … Nil from a box or glance without it.
+        public let kind: String?
+        /// The draft a `kind == "draft"` need offers to send.
+        public let draft: Draft?
 
-        public init(id: String, agent: String?, from: String, question: String, options: [String], freeText: Bool, createdAt: Date) {
+        /// A message an agent drafted for the user to send as himself, editable before Send.
+        public struct Draft: Codable, Equatable {
+            public let id: Int
+            /// "email", "telegram", "whatsapp", …
+            public let channel: String
+            public let to: String?
+            public let subject: String?
+            public let body: String
+            /// The body was shortened to travel in the glance: the full one has to be loaded before editing.
+            public let cut: Bool
+            /// "pending" or "sending".
+            public let status: String?
+            /// The recipient is unsure and has to be picked among candidates on the iPhone before Send.
+            public let awaitsRecipient: Bool
+
+            public init(id: Int, channel: String, to: String?, subject: String?, body: String, cut: Bool, status: String?, awaitsRecipient: Bool) {
+                self.id = id
+                self.channel = channel
+                self.to = to
+                self.subject = subject
+                self.body = body
+                self.cut = cut
+                self.status = status
+                self.awaitsRecipient = awaitsRecipient
+            }
+
+            /// The channel as a name: "Email", "Telegram", "WhatsApp".
+            public var label: String {
+                switch channel {
+                case "whatsapp": return "WhatsApp"
+                default: return channel.prefix(1).uppercased() + channel.dropFirst()
+                }
+            }
+
+            public var sending: Bool { status == "sending" }
+        }
+
+        public init(id: String, agent: String?, from: String, question: String, options: [String], freeText: Bool, createdAt: Date, kind: String? = nil, draft: Draft? = nil) {
             self.id = id
             self.agent = agent
             self.from = from
@@ -59,6 +100,26 @@ public struct PaiGlance: Codable, Equatable {
             self.options = options
             self.freeText = freeText
             self.createdAt = createdAt
+            self.kind = kind
+            self.draft = draft
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case id, agent, from, question, options, freeText, createdAt, kind, draft
+        }
+
+        // Glances stored or relayed before drafts existed carry neither `kind` nor `draft`.
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decode(String.self, forKey: .id)
+            agent = try container.decodeIfPresent(String.self, forKey: .agent)
+            from = try container.decode(String.self, forKey: .from)
+            question = try container.decode(String.self, forKey: .question)
+            options = try container.decode([String].self, forKey: .options)
+            freeText = try container.decode(Bool.self, forKey: .freeText)
+            createdAt = try container.decode(Date.self, forKey: .createdAt)
+            kind = try container.decodeIfPresent(String.self, forKey: .kind)
+            draft = try? container.decodeIfPresent(Draft.self, forKey: .draft)
         }
 
         /// The question as one plain line: markdown emphasis and the trailing URNs dropped, for small surfaces.
