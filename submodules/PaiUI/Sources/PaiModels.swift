@@ -122,6 +122,13 @@ public struct PaiDraft: Codable, Identifiable, Equatable {
         public let account: String?
     }
 
+    /// A message of the email thread a reply answers: who sent it, when (ms since 1970) and its words as plain text.
+    public struct ThreadMessage: Codable, Equatable {
+        public let from: String
+        public let at: Double
+        public let text: String
+    }
+
     public let id: Int
     public let agent: String?
     /// "email", "telegram", "whatsapp", "linkedin" or "post".
@@ -130,8 +137,11 @@ public struct PaiDraft: Codable, Identifiable, Equatable {
     /// "pending" until sent or discarded.
     public let status: String
     public let note: String?
+    /// The thread an email reply answers, oldest first; absent (older daemons) or empty for everything else.
+    public let thread: [ThreadMessage]?
 
     public var isPending: Bool { status == "pending" }
+    public var threadMessages: [ThreadMessage] { thread ?? [] }
 }
 
 /// A routine (`GET /routines`): a schedule or an event, and what it does then.

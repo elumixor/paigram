@@ -307,6 +307,7 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
     var paiUsageObserver: NSObjectProtocol?
     var paiNeedsObserver: NSObjectProtocol?
     var paiWaitingObserver: NSObjectProtocol?
+    var paiDraftsObserver: NSObjectProtocol?
     var paiURNObserver: NSObjectProtocol?
     var paiRowsObserver: NSObjectProtocol?
     let paiUsageNode = PaiUsageRingNode()
@@ -7043,6 +7044,9 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
         if let paiWaitingObserver = self.paiWaitingObserver {
             NotificationCenter.default.removeObserver(paiWaitingObserver)
         }
+        if let paiDraftsObserver = self.paiDraftsObserver {
+            NotificationCenter.default.removeObserver(paiDraftsObserver)
+        }
         if let paiURNObserver = self.paiURNObserver {
             NotificationCenter.default.removeObserver(paiURNObserver)
         }
@@ -7778,6 +7782,7 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
             self.paiUsageObserver = NotificationCenter.default.addObserver(forName: PaiChat.usageChanged, object: nil, queue: .main, using: redrawTitle)
             self.paiNeedsObserver = NotificationCenter.default.addObserver(forName: PaiChat.needsChanged, object: nil, queue: .main, using: redrawTitle)
             self.paiWaitingObserver = NotificationCenter.default.addObserver(forName: PaiChat.waitingChanged, object: nil, queue: .main, using: redrawTitle)
+            self.paiDraftsObserver = NotificationCenter.default.addObserver(forName: PaiChat.draftsChanged, object: nil, queue: .main, using: redrawTitle)
             // A referenced record's look arrived: the messages naming one redraw its pill.
             self.paiURNObserver = NotificationCenter.default.addObserver(forName: PaiPill.resolved, object: nil, queue: .main, using: { [weak self] _ in
                 guard let self else { return }
