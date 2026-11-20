@@ -1,137 +1,340 @@
 import Foundation
-import SwiftSignalKit
+import AVFoundation
+import NaturalLanguage
 import Speech
+import SwiftSignalKit
 
-private var sharedRecognizers: [String: NSObject] = [:]
-
-private struct TranscriptionResult {
-    var text: String
-    var confidence: Float
-    var isFinal: Bool
-}
-
-private func transcribeAudio(path: String, locale: String) -> Signal<TranscriptionResult?, NoError> {
-    return Signal { subscriber in
-        let disposable = MetaDisposable()
-        
-        if #available(iOS 13.0, *) {
-            SFSpeechRecognizer.requestAuthorization { status in
-                Queue.mainQueue().async {
-                    switch status {
-                    case .notDetermined:
-                        subscriber.putNext(nil)
-                        subscriber.putCompletion()
-                    case .restricted:
-                        subscriber.putNext(nil)
-                        subscriber.putCompletion()
-                    case .denied:
-                        subscriber.putNext(nil)
-                        subscriber.putCompletion()
-                    case .authorized:
-                        let speechRecognizer: SFSpeechRecognizer
-                        if let sharedRecognizer = sharedRecognizers[locale] as? SFSpeechRecognizer {
-                            speechRecognizer = sharedRecognizer
-                        } else {
-                            guard let speechRecognizerValue = SFSpeechRecognizer(locale: Locale(identifier: locale)), speechRecognizerValue.isAvailable else {
-                                subscriber.putNext(nil)
-                                subscriber.putCompletion()
-                                
-                                return
-                            }
-                            speechRecognizerValue.defaultTaskHint = .dictation
-                            sharedRecognizers[locale] = speechRecognizerValue
-                            speechRecognizer = speechRecognizerValue
-                            
-                            if locale == "en-US" {
-                                speechRecognizer.supportsOnDeviceRecognition = true
-                            } else {
-                                speechRecognizer.supportsOnDeviceRecognition = false
-                            }
-                            speechRecognizer.supportsOnDeviceRecognition = true
-                        }
-                        
-                        let tempFilePath = NSTemporaryDirectory() + "/\(UInt64.random(in: 0 ... UInt64.max)).m4a"
-                        let _ = try? FileManager.default.copyItem(atPath: path, toPath: tempFilePath)
-                        
-                        let request = SFSpeechURLRecognitionRequest(url: URL(fileURLWithPath: tempFilePath))
-                        if #available(iOS 16.0, *) {
-                            request.addsPunctuation = true
-                        }
-                        request.requiresOnDeviceRecognition = speechRecognizer.supportsOnDeviceRecognition
-                        request.shouldReportPartialResults = false
-                        
-                        let task = speechRecognizer.recognitionTask(with: request, resultHandler: { result, error in
-                            if let result = result {
-                                var confidence: Float = 0.0
-                                for segment in result.bestTranscription.segments {
-                                    confidence += segment.confidence
-                                }
-                                confidence /= Float(result.bestTranscription.segments.count)
-                                subscriber.putNext(TranscriptionResult(text: result.bestTranscription.formattedString, confidence: confidence, isFinal: result.isFinal))
-                                
-                                if result.isFinal {
-                                    subscriber.putCompletion()
-                                }
-                            } else {
-                                print("transcribeAudio: locale: \(locale), error: \(String(describing: error))")
-                                
-                                subscriber.putNext(nil)
-                                subscriber.putCompletion()
-                            }
-                        })
-                        
-                        disposable.set(ActionDisposable {
-                            task.cancel()
-                        })
-                    @unknown default:
-                        subscriber.putNext(nil)
-                        subscriber.putCompletion()
-                    }
-                }
-            }
-        } else {
-            subscriber.putNext(nil)
-            subscriber.putCompletion()
-        }
-        
-        return disposable
-    }
-    |> runOn(.mainQueue())
-}
+/// Languages Paigram transcribes voice messages in, with their native names.
+public let voiceTranscriptionLanguages: [(locale: String, title: String)] = [
+    ("uk-UA", "Українська"),
+    ("ru-RU", "Русский"),
+    ("en-US", "English"),
+    ("cs-CZ", "Čeština")
+]
 
 public struct LocallyTranscribedAudio {
     public var text: String
+    public var locale: String
     public var isFinal: Bool
 }
 
-public func transcribeAudio(path: String, appLocale: String) -> Signal<LocallyTranscribedAudio?, NoError> {
-    var signals: [Signal<TranscriptionResult?, NoError>] = []
-    var locales: [String] = []
-    if !locales.contains(Locale.current.identifier) {
-        locales.append(Locale.current.identifier)
+/// Candidate locales ordered by the app language, then the system languages, then the rest.
+public func voiceTranscriptionLocaleOrder(appLanguageCode: String) -> [String] {
+    let all = voiceTranscriptionLanguages.map(\.locale)
+    var result: [String] = []
+    let codes = [appLanguageCode] + Locale.preferredLanguages
+    for code in codes {
+        let language = code.split(whereSeparator: { $0 == "-" || $0 == "_" }).first.map { String($0).lowercased() } ?? ""
+        if let locale = all.first(where: { $0.hasPrefix(language + "-") }), !result.contains(locale) {
+            result.append(locale)
+        }
     }
-    if locales.isEmpty {
-        locales.append("en-US")
+    for locale in all where !result.contains(locale) {
+        result.append(locale)
     }
-    for locale in locales {
-        signals.append(transcribeAudio(path: path, locale: locale))
+    return result
+}
+
+/// Transcribes an AAC/m4a file. Detects the language among `preferredLocales` unless `forcedLocale` is set.
+/// Order: iOS 26 SpeechAnalyzer (on-device), else SFSpeechRecognizer on-device, else SFSpeechRecognizer server in chunks.
+public func transcribeVoiceAudio(path: String, preferredLocales: [String], forcedLocale: String?) -> Signal<LocallyTranscribedAudio?, NoError> {
+    return Signal { subscriber in
+        let task = Task {
+            let result = await VoiceTranscriber.transcribe(url: URL(fileURLWithPath: path), locales: forcedLocale.map { [$0] } ?? preferredLocales, detect: forcedLocale == nil)
+            if !Task.isCancelled {
+                subscriber.putNext(result)
+                subscriber.putCompletion()
+            }
+        }
+        return ActionDisposable {
+            task.cancel()
+        }
     }
-    var resultSignal: Signal<[TranscriptionResult?], NoError> = .single([])
-    for signal in signals {
-        resultSignal = resultSignal |> mapToSignal { result -> Signal<[TranscriptionResult?], NoError> in
-            return signal |> map { next in
-                return result + [next]
+}
+
+private enum VoiceTranscriber {
+    static let detectionDuration: Double = 12.0
+    static let serverChunkDuration: Double = 50.0
+
+    struct Candidate {
+        var locale: String
+        var text: String
+        var score: Double
+    }
+
+    static func transcribe(url: URL, locales: [String], detect: Bool) async -> LocallyTranscribedAudio? {
+        guard var chosen = locales.first, let duration = audioDuration(url) else {
+            return nil
+        }
+        let authorized = await authorize()
+
+        if detect && authorized && locales.count > 1 {
+            let clip = duration <= detectionDuration ? url : writeSegment(of: url, start: 0.0, duration: detectionDuration)
+            if let clip, let best = await detectLanguage(url: clip, locales: locales) {
+                chosen = best.locale
+                if duration <= detectionDuration {
+                    return LocallyTranscribedAudio(text: best.text, locale: chosen, isFinal: true)
+                }
+            }
+        }
+        if Task.isCancelled {
+            return nil
+        }
+
+        #if compiler(>=6.2)
+        if #available(iOS 26.0, *) {
+            if let text = await analyzerTranscribe(url: url, locale: chosen), !text.isEmpty {
+                return LocallyTranscribedAudio(text: text, locale: chosen, isFinal: true)
+            }
+        }
+        #endif
+
+        guard authorized, let recognizer = SFSpeechRecognizer(locale: Locale(identifier: chosen)) else {
+            return nil
+        }
+        var text = ""
+        if recognizer.supportsOnDeviceRecognition || duration <= serverChunkDuration {
+            text = await recognize(url: url, locale: chosen)?.text ?? ""
+        } else {
+            var start = 0.0
+            while start < duration && !Task.isCancelled {
+                if let chunk = writeSegment(of: url, start: start, duration: serverChunkDuration), let part = await recognize(url: chunk, locale: chosen)?.text {
+                    text = join(text, part)
+                }
+                start += serverChunkDuration
+            }
+        }
+        if text.isEmpty {
+            return nil
+        }
+        return LocallyTranscribedAudio(text: text, locale: chosen, isFinal: true)
+    }
+
+    // MARK: - Detection
+
+    static func detectLanguage(url: URL, locales: [String]) async -> Candidate? {
+        let results = await withTaskGroup(of: (Int, (text: String, confidence: Double)?).self) { group in
+            for (index, locale) in locales.enumerated() {
+                group.addTask {
+                    return (index, await recognize(url: url, locale: locale))
+                }
+            }
+            var results: [(Int, (text: String, confidence: Double)?)] = []
+            for await result in group {
+                results.append(result)
+            }
+            return results
+        }
+        var best: Candidate?
+        for (index, result) in results {
+            guard let result, !result.text.isEmpty else {
+                continue
+            }
+            let locale = locales[index]
+            let recognizer = NLLanguageRecognizer()
+            recognizer.processString(result.text)
+            let language = String(locale.prefix(2))
+            let probability = recognizer.languageHypotheses(withMaximum: 6)[NLLanguage(rawValue: language)] ?? 0.0
+            let orderBonus = 0.05 * Double(locales.count - index) / Double(locales.count)
+            let score = result.confidence * (0.3 + 0.7 * probability) + orderBonus
+            if best == nil || score > best!.score {
+                best = Candidate(locale: locale, text: result.text, score: score)
+            }
+        }
+        return best
+    }
+
+    // MARK: - SFSpeechRecognizer
+
+    static func authorize() async -> Bool {
+        switch SFSpeechRecognizer.authorizationStatus() {
+        case .authorized:
+            return true
+        case .notDetermined:
+            return await withCheckedContinuation { continuation in
+                SFSpeechRecognizer.requestAuthorization { status in
+                    continuation.resume(returning: status == .authorized)
+                }
+            }
+        default:
+            return false
+        }
+    }
+
+    final class RecognitionState {
+        let lock = NSLock()
+        var recognizer: SFSpeechRecognizer?
+        var task: SFSpeechRecognitionTask?
+        var continuation: CheckedContinuation<(text: String, confidence: Double)?, Never>?
+
+        func finish(_ value: (text: String, confidence: Double)?) {
+            self.lock.lock()
+            let continuation = self.continuation
+            self.continuation = nil
+            self.lock.unlock()
+            continuation?.resume(returning: value)
+        }
+
+        func cancel() {
+            self.lock.lock()
+            let task = self.task
+            self.lock.unlock()
+            task?.cancel()
+            self.finish(nil)
+        }
+    }
+
+    /// One SFSpeech pass over a file: on-device when the locale supports it, else Apple's server.
+    static func recognize(url: URL, locale: String) async -> (text: String, confidence: Double)? {
+        guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: locale)), recognizer.isAvailable else {
+            return nil
+        }
+        let request = SFSpeechURLRecognitionRequest(url: url)
+        request.shouldReportPartialResults = false
+        request.taskHint = .dictation
+        request.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
+        if #available(iOS 16.0, *) {
+            request.addsPunctuation = true
+        }
+
+        let state = RecognitionState()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                state.lock.lock()
+                state.continuation = continuation
+                state.recognizer = recognizer
+                state.lock.unlock()
+                let task = recognizer.recognitionTask(with: request, resultHandler: { result, error in
+                    if let result, result.isFinal {
+                        let segments = result.bestTranscription.segments
+                        let confidence = segments.isEmpty ? 0.0 : Double(segments.reduce(Float(0.0), { $0 + $1.confidence })) / Double(segments.count)
+                        state.finish((result.bestTranscription.formattedString, confidence))
+                    } else if error != nil {
+                        state.finish(nil)
+                    }
+                })
+                state.lock.lock()
+                state.task = task
+                state.lock.unlock()
+                if Task.isCancelled {
+                    state.cancel()
+                }
+            }
+        } onCancel: {
+            state.cancel()
+        }
+    }
+
+    // MARK: - SpeechAnalyzer (iOS 26)
+
+    #if compiler(>=6.2)
+    @available(iOS 26.0, *)
+    static func analyzerTranscribe(url: URL, locale: String) async -> String? {
+        do {
+            let requested = Locale(identifier: locale)
+            if SpeechTranscriber.isAvailable, let supported = await SpeechTranscriber.supportedLocale(equivalentTo: requested) {
+                let transcriber = SpeechTranscriber(locale: supported, preset: .transcription)
+                if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
+                    try await request.downloadAndInstall()
+                }
+                let collector = Task {
+                    var text = ""
+                    for try await result in transcriber.results where result.isFinal {
+                        text = join(text, String(result.text.characters))
+                    }
+                    return text
+                }
+                try await analyze(url: url, modules: [transcriber], collector: collector)
+                return try await collector.value
+            } else if let supported = await DictationTranscriber.supportedLocale(equivalentTo: requested) {
+                let transcriber = DictationTranscriber(locale: supported, preset: .longDictation)
+                if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
+                    try await request.downloadAndInstall()
+                }
+                let collector = Task {
+                    var text = ""
+                    for try await result in transcriber.results where result.isFinal {
+                        text = join(text, String(result.text.characters))
+                    }
+                    return text
+                }
+                try await analyze(url: url, modules: [transcriber], collector: collector)
+                return try await collector.value
+            } else {
+                return nil
+            }
+        } catch {
+            return nil
+        }
+    }
+
+    @available(iOS 26.0, *)
+    static func analyze(url: URL, modules: [any SpeechModule], collector: Task<String, Error>) async throws {
+        let analyzer = SpeechAnalyzer(modules: modules)
+        let file = try AVAudioFile(forReading: url)
+        try await withTaskCancellationHandler {
+            if let lastSample = try await analyzer.analyzeSequence(from: file) {
+                try await analyzer.finalizeAndFinish(through: lastSample)
+            } else {
+                await analyzer.cancelAndFinishNow()
+            }
+        } onCancel: {
+            collector.cancel()
+            Task {
+                await analyzer.cancelAndFinishNow()
             }
         }
     }
-    
-    return resultSignal
-    |> map { results -> LocallyTranscribedAudio? in
-        let sortedResults = results.compactMap({ $0 }).sorted(by: { lhs, rhs in
-            return lhs.confidence > rhs.confidence
-        })
-        return sortedResults.first.flatMap { result -> LocallyTranscribedAudio in
-            return LocallyTranscribedAudio(text: result.text, isFinal: result.isFinal)
+    #endif
+
+    // MARK: - Audio
+
+    static func audioDuration(_ url: URL) -> Double? {
+        guard let file = try? AVAudioFile(forReading: url), file.fileFormat.sampleRate > 0 else {
+            return nil
         }
+        return Double(file.length) / file.fileFormat.sampleRate
+    }
+
+    /// Writes `duration` seconds from `start` to a temporary PCM .caf file.
+    static func writeSegment(of url: URL, start: Double, duration: Double) -> URL? {
+        do {
+            let input = try AVAudioFile(forReading: url)
+            let format = input.processingFormat
+            let startFrame = AVAudioFramePosition(start * format.sampleRate)
+            guard startFrame < input.length else {
+                return nil
+            }
+            input.framePosition = startFrame
+            var remaining = AVAudioFrameCount(min(Double(input.length - startFrame), duration * format.sampleRate))
+            let outputUrl = URL(fileURLWithPath: NSTemporaryDirectory() + "voice-\(UInt64.random(in: 0 ... UInt64.max)).caf")
+            let output = try AVAudioFile(forWriting: outputUrl, settings: format.settings, commonFormat: format.commonFormat, interleaved: format.isInterleaved)
+            while remaining > 0 {
+                let count = min(remaining, 32768)
+                guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: count) else {
+                    break
+                }
+                try input.read(into: buffer, frameCount: count)
+                if buffer.frameLength == 0 {
+                    break
+                }
+                try output.write(from: buffer)
+                remaining -= min(remaining, buffer.frameLength)
+            }
+            return outputUrl
+        } catch {
+            return nil
+        }
+    }
+
+    static func join(_ lhs: String, _ rhs: String) -> String {
+        let rhs = rhs.trimmingCharacters(in: .whitespacesAndNewlines)
+        if lhs.isEmpty {
+            return rhs
+        }
+        if rhs.isEmpty {
+            return lhs
+        }
+        return lhs + " " + rhs
     }
 }
