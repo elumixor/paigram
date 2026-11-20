@@ -177,6 +177,8 @@ public final class PresentationCallImpl: PresentationCall {
     
     private var transcriptRecorder: CallRecorder?
     private var didAutoStartTranscript = false
+    /// True while the auto-start waits for pai's should-record answer; the call ending or the transcript button clears it.
+    private var isAutoTranscriptPending = false
     private let isRecordingTranscriptPromise = ValuePromise<Bool>(false)
     public var isRecordingTranscript: Signal<Bool, NoError> {
         return self.isRecordingTranscriptPromise.get()
@@ -1577,6 +1579,7 @@ public final class PresentationCallImpl: PresentationCall {
             guard let self else {
                 return
             }
+            self.isAutoTranscriptPending = false
             if self.transcriptRecorder != nil {
                 CallRecordingLog.log("recording \(self.transcriptRecorder?.callId ?? ""): stopped from the call screen")
                 self.stopTranscriptRecording()
@@ -1600,7 +1603,36 @@ public final class PresentationCallImpl: PresentationCall {
             CallRecordingLog.log("call connected, not recorded: conference call")
             return
         }
-        self.startTranscriptRecording()
+        var phone: String?
+        var username: String?
+        if case let .user(user) = self.peer {
+            phone = user.phone
+            username = user.addressName
+        }
+        let policyPeer = CallRecordingPolicyPeer(
+            peerName: self.peer?.debugDisplayTitle,
+            peerPhone: phone,
+            peerUsername: username,
+            peerTelegramId: "\(self.peerId.id._internalGetInt64Value())"
+        )
+        self.isAutoTranscriptPending = true
+        Task { [weak self] in
+            let answer = await CallRecordingPolicy.shouldRecord(policyPeer)
+            Queue.mainQueue().async {
+                guard let self else {
+                    return
+                }
+                guard self.isAutoTranscriptPending else {
+                    return
+                }
+                self.isAutoTranscriptPending = false
+                guard answer.record else {
+                    CallRecordingLog.log("skipped: \(answer.reason)")
+                    return
+                }
+                self.startTranscriptRecording()
+            }
+        }
     }
     
     private func startTranscriptRecording() {
@@ -1636,6 +1668,7 @@ public final class PresentationCallImpl: PresentationCall {
     }
     
     private func stopTranscriptRecording() {
+        self.isAutoTranscriptPending = false
         guard let recorder = self.transcriptRecorder else {
             return
         }

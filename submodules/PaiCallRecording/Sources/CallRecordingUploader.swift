@@ -163,6 +163,13 @@ public final class CallRecordingUploader: @unchecked Sendable {
         return (baseURL, token, onUnauthorized)
     }
 
+    /// pai's base URL and bearer token, nil while signed out.
+    func signedIn() -> (URL, String)? {
+        let (baseURL, token, _) = credentials()
+        guard let baseURL, let token else { return nil }
+        return (baseURL, token)
+    }
+
     /// Uploads one recording and applies the decision to its files. Nil credentials keep it.
     @discardableResult
     public func upload(_ meta: CallRecordingMeta) async -> Decision {
