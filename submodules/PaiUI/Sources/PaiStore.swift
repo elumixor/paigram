@@ -188,6 +188,7 @@ public final class PaiStore: ObservableObject {
 
     private func handle(_ event: PaiEvent) {
         if event.kind.hasPrefix("agent.") { refreshAgents() }
+        if event.kind.hasPrefix("agent.") || event.kind.hasPrefix("ask.") || Self.refreshingKinds.contains(event.kind) { refreshWaiting() }
         if event.kind.hasPrefix("draft.") || event.kind == "message.new" { refreshDrafts() }
         // A task waiting on the user is one of the decisions `/needs` serves, so a task that was
         // finished anywhere — by him, by an agent, in conversation — has to take its card away.
@@ -266,6 +267,36 @@ public final class PaiStore: ObservableObject {
             self.settled.insert("agents")
             PaiChat.agents = fetched
             if fetched != self.agents { self.agents = fetched }
+        }
+    }
+
+    // MARK: What the open agent waits on
+
+    private var watchedAgent: String?
+    private var waitingTask: Task<Void, Never>?
+    /// While the agent waits on a dev session, its state is read again this often: a stall sends no event.
+    private static let waitingPoll: UInt64 = 30_000_000_000
+
+    /// The agent whose chat shows now (nil: none); its wait is read at once and kept current.
+    public func watch(agent slug: String?) {
+        guard slug != watchedAgent else { return }
+        watchedAgent = slug
+        refreshWaiting()
+    }
+
+    /// Reads the watched agent's wait again; repeats every `waitingPoll` while it waits on a dev session still at work.
+    public func refreshWaiting() {
+        waitingTask?.cancel()
+        guard let slug = watchedAgent else { return }
+        let debounce = PaiChat.waiting[slug] == nil ? 0 : Self.refreshDebounce
+        waitingTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: debounce)
+            while let self, !Task.isCancelled, self.watchedAgent == slug {
+                guard let fetched = try? await self.client.waiting(agent: slug), !Task.isCancelled else { return }
+                PaiChat.waiting[slug] = fetched
+                guard !fetched.liveDev.isEmpty else { return }
+                try? await Task.sleep(nanoseconds: Self.waitingPoll)
+            }
         }
     }
 

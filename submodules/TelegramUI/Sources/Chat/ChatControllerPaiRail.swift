@@ -126,9 +126,15 @@ final class PaiRailPanelComponent: Component {
             }
             x += overlap + 10.0
 
-            let accent = rail.isWaiting ? UIColor.systemOrange : theme.list.itemAccentColor
-            self.dot.backgroundColor = accent
-            self.startPulse(!rail.isWaiting)
+            switch rail.tone {
+            case .working:
+                self.dot.backgroundColor = theme.list.itemAccentColor
+            case .waiting, .devStalled:
+                self.dot.backgroundColor = UIColor.systemOrange
+            case .devRunning:
+                self.dot.backgroundColor = UIColor.systemGreen
+            }
+            self.startPulse(rail.tone == .working || rail.tone == .devRunning)
 
             self.chevron.isHidden = rail.target == nil
             self.chevron.tintColor = theme.list.itemSecondaryTextColor

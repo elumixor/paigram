@@ -1444,6 +1444,13 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
                 footerPanels.append(panel)
             }
         }
+        if #available(iOS 16.0, *), PaiChat.isBot(self.chatPresentationInterfaceState.renderedPeer?.peer) {
+            // The open topic's agent: what it waits on colours the strip, read now and kept current.
+            let slug = PaiChat.agent(thread: self.chatPresentationInterfaceState.chatLocation.threadId)?.slug ?? PaiChat.paiSlug
+            MainActor.assumeIsolated {
+                PaiHost.store.watch(agent: slug)
+            }
+        }
         if self.chatPresentationInterfaceState.search == nil, PaiChat.isBot(self.chatPresentationInterfaceState.renderedPeer?.peer), let rail = PaiRail.state(thread: self.chatPresentationInterfaceState.chatLocation.threadId) {
             footerPanels.append(HeaderPanelContainerComponent.Panel(
                 key: "pai-rail",
