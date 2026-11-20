@@ -9169,6 +9169,11 @@ public final class ChatControllerImpl: TelegramBaseController, ChatController, G
             if commit || !isScheduledMessages {
                 self.commitPurposefulAction()
                 
+                // A message to a pai agent's thread shows it busy at once, until its session answers (PaiExpected).
+                if !isScheduledMessages, PaiChat.isBot(self.presentationInterfaceState.renderedPeer?.peer), let slug = PaiChat.agent(thread: self.chatLocation.threadId)?.slug {
+                    PaiExpected.expect(slug)
+                }
+                
                 let _ = (enqueueMessages(account: self.context.account, peerId: peerId, messages: self.transformEnqueueMessages(messages, postpone: postpone))
                 |> deliverOnMainQueue).startStandalone(next: { [weak self] _ in
                     if let strongSelf = self, strongSelf.presentationInterfaceState.subject != .scheduledMessages {

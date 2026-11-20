@@ -67,8 +67,13 @@ public enum PaiNotificationAnswer {
             completion()
             return
         }
+        PaiSettled.add(id)
         Task {
-            try? await PaiClient().answer(need: id, text: text)
+            do {
+                try await PaiClient().answer(need: id, text: text)
+            } catch {
+                PaiSettled.remove(id)
+            }
             completion()
         }
     }

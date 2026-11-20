@@ -52,6 +52,7 @@ public enum PaiAgentStatus {
     /// only while a decision of the user's is actually open — otherwise it is pai's to move on, not the user's.
     public static func effective(agent slug: String?, posted: String?) -> String? {
         let live = PaiChat.agent(slug)?.status ?? posted
+        if let slug, PaiExpected.isExpected(slug) { return "working" }
         if let slug, PaiChat.needs(of: slug) > 0 { return "waiting" }
         return live == "waiting" ? "idle" : live
     }

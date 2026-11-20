@@ -131,9 +131,12 @@ public final class PaiGlanceSync: NSObject, WCSessionDelegate {
         }
         let source = PaiGlanceLiveSource(config: config)
         if let id = message["answer"] as? String, let text = message["text"] as? String {
+            PaiSettled.add(id)
             source.answer(need: id, text: text) { result in
                 if case .success = result {
                     DispatchQueue.main.async { self.refresh(force: true) }
+                } else {
+                    PaiSettled.remove(id)
                 }
                 replyHandler(["ok": (try? result.get()) != nil])
             }
