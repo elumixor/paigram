@@ -98,6 +98,8 @@ extension PaiChat {
 
     /// Posted on the main thread when `waiting` changes.
     public static let waitingChanged = Notification.Name("pai.waitingChanged")
+    /// Posted on the main thread when `PaiStore.drafts` changes.
+    public static let draftsChanged = Notification.Name("pai.draftsChanged")
 
     /// What each agent whose chat was open waits on, by slug: the strip colours by its dev sessions.
     public static var waiting: [String: PaiWaitingOn] = [:] {

@@ -27,7 +27,9 @@ public final class PaiStore: ObservableObject {
     @Published public private(set) var agents: [PaiAgent] = PaiChat.agents
     @Published public private(set) var connectionError: String?
     /// Messages agents wrote for the user to send, still waiting on him.
-    @Published public private(set) var drafts: [PaiDraft] = []
+    @Published public private(set) var drafts: [PaiDraft] = [] {
+        didSet { NotificationCenter.default.post(name: PaiChat.draftsChanged, object: nil) }
+    }
     @Published public private(set) var isLoading = false
 
     public let client = PaiClient()
@@ -133,6 +135,7 @@ public final class PaiStore: ObservableObject {
             }
         }
         refreshNeeds()
+        refreshDrafts()
         // `/threads/all` is the slow one: the list shows from tasks and projects, the held threads join when they come.
         async let held = Self.timed("load.threads") { try await client.allThreads() }
         let fetched: PaiTasks
