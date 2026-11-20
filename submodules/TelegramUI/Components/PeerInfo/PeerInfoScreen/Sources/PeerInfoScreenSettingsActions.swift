@@ -86,6 +86,10 @@ extension PeerInfoScreenNode {
             if #available(iOS 16.0, *) {
                 push(paiStatsController(context: self.context))
             }
+        case .paiSettings:
+            if #available(iOS 16.0, *) {
+                push(PaiSettingsController(context: self.context))
+            }
         case .email:
             guard #available(iOS 16.0, *) else {
                 break

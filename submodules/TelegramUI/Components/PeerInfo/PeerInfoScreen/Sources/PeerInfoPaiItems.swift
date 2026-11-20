@@ -101,9 +101,6 @@ func paiAgentInfoItems(peerId: EnginePeer.Id, context: AccountContext, presentat
             }))
         }
         result.append(("pai.given", given))
-        result.append(("pai.settings", [PeerInfoScreenDisclosureItem(id: "settings", text: "Settings", icon: paiRowIcon("gearshape.fill", .systemGray), action: {
-            push(.settings)
-        })]))
     }
     return result
 }
