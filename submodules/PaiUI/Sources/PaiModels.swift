@@ -376,6 +376,8 @@ public struct PaiAgent: Codable, Identifiable, Equatable {
     public var goal: String? = nil
     /// How many dev sessions it waits on run or stalled now.
     public var dev: DevCounts? = nil
+    /// Its current session, the one its chat talks to; its session events end an optimistic busy.
+    public var sessionId: String? = nil
 
     public struct SessionState: Codable, Equatable {
         public let state: String
@@ -387,7 +389,10 @@ public struct PaiAgent: Codable, Identifiable, Equatable {
     }
 
     public var id: String { slug }
-    public var isBusy: Bool { status == "working" || status == "queued" || session?.state == "busy" }
+    /// Busy by its own report, or sent a message a moment ago (`PaiExpected`).
+    public var isBusy: Bool { isReportedBusy || PaiExpected.isExpected(slug) }
+    /// Busy as the daemon reports it.
+    public var isReportedBusy: Bool { status == "working" || status == "queued" || session?.state == "busy" }
     public var isPai: Bool { slug == PaiChat.paiSlug }
     public var isClosed: Bool { status == "closed" }
     public var briefLine: String { (brief ?? "").split(separator: "\n").first.map(String.init)?.paiPlain ?? "" }

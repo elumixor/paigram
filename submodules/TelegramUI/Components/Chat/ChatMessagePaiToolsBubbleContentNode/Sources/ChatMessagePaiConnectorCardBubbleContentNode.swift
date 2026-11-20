@@ -164,7 +164,7 @@ public final class ChatMessagePaiConnectorCardBubbleContentNode: ChatMessageBubb
 
                     // Closed: the head and the closure only, no rows, no buttons.
                     if !card.isClosed {
-                        for cardRow in card.rows {
+                        for cardRow in card.rows.map({ PaiPressed.shown($0, card: row.id) }) {
                             y += sectionGap
                             let stateText = cardRow.isClosed ? PaiCardView.closure(cardRow.state, by: cardRow.supersededBy) : PaiCardView.label(cardRow.state)
                             let stateColor: UIColor
@@ -253,11 +253,19 @@ public final class ChatMessagePaiConnectorCardBubbleContentNode: ChatMessageBubb
                 let interaction = item.controllerInteraction
                 pressing.insert(key)
                 pressErrors[meta.id] = nil
+                // The row draws running and the card leaves every "waiting on you" at once; a refusal takes both back.
+                let need = "card:\(meta.id)"
+                if let row { PaiPressed.press(card: meta.id, row: row, was: meta.card?.rows.first { $0.id == row }?.state) }
+                PaiSettled.add(need)
                 interaction.requestMessageUpdate(messageId, false, nil)
                 Task { @MainActor in
                     let error = await PaiRows.press(card: meta.id, button: button, row: row, slug: slug)
                     pressing.remove(key)
                     pressErrors[meta.id] = error
+                    if error != nil {
+                        if let row { PaiPressed.release(card: meta.id, row: row) }
+                        PaiHost.store.unsettle(need)
+                    }
                     interaction.requestMessageUpdate(messageId, false, nil)
                 }
             }))

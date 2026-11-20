@@ -186,7 +186,13 @@ public final class PaiStore: ObservableObject {
         "session.question", "session.answer", "session.input", "session.error",
     ]
 
+    private static let answeringKinds: Set<String> = ["session.phase", "session.input", "session.turn_end", "session.exit"]
+
     private func handle(_ event: PaiEvent) {
+        // The agent's session spoke: the busy shown since the user's send gives way to its real status.
+        if Self.answeringKinds.contains(event.kind), let id = event.sessionId {
+            PaiExpected.unexpect(PaiChat.agents.first { $0.sessionId == id }?.slug)
+        }
         if event.kind.hasPrefix("agent.") { refreshAgents() }
         if event.kind.hasPrefix("agent.") || event.kind.hasPrefix("ask.") || Self.refreshingKinds.contains(event.kind) { refreshWaiting() }
         if event.kind.hasPrefix("draft.") || event.kind == "message.new" { refreshDrafts() }
@@ -217,6 +223,12 @@ public final class PaiStore: ObservableObject {
             PaiChat.needs = fetched
             PaiNotificationAnswer.withdrawAnswered(open: fetched)
         }
+    }
+
+    /// Takes back an optimistic settle the daemon refused; the need comes back with the refetch.
+    public func unsettle(_ key: String) {
+        PaiSettled.remove(key)
+        refreshNeeds()
     }
 
     // MARK: Drafts
@@ -266,6 +278,7 @@ public final class PaiStore: ObservableObject {
             PaiPerf.mark("load.agents")
             self.settled.insert("agents")
             PaiChat.agents = fetched
+            for agent in fetched where agent.isReportedBusy { PaiExpected.unexpect(agent.slug) }
             if fetched != self.agents { self.agents = fetched }
         }
     }

@@ -64,6 +64,21 @@ public struct PaiCardView: Decodable, Equatable {
         public let supersededBy: String?
         public let buttons: [Button]
 
+        public init(id: String, title: String, state: String?, message: String?, url: String?, supersededBy: String?, buttons: [Button]) {
+            self.id = id
+            self.title = title
+            self.state = state
+            self.message = message
+            self.url = url
+            self.supersededBy = supersededBy
+            self.buttons = buttons
+        }
+
+        /// Just pressed: running, "Starting…", no buttons, until the connector redraws it (`PaiPressed`).
+        public var running: Row {
+            Row(id: id, title: title, state: "running", message: "Starting…", url: url, supersededBy: supersededBy, buttons: [])
+        }
+
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             id = try c.decode(String.self, forKey: .id)

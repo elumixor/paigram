@@ -90,7 +90,7 @@ extension PaiChat {
     /// What waits on the user's decision now: the chat's title counts them, the hub lists them, agents wear a badge.
     /// The last list seen shows until the daemon answers.
     public static var needs: [PaiNeed] {
-        get { needsCache.current }
+        get { PaiSettled.filter(needsCache.current) }
         set {
             if needsCache.set(newValue) { DispatchQueue.main.async { NotificationCenter.default.post(name: needsChanged, object: nil) } }
         }
