@@ -177,7 +177,6 @@ public final class PresentationCallImpl: PresentationCall {
     
     private var transcriptRecorder: CallRecorder?
     private var didAutoStartTranscript = false
-    private var didSendTranscriptNotice = false
     private let isRecordingTranscriptPromise = ValuePromise<Bool>(false)
     public var isRecordingTranscript: Signal<Bool, NoError> {
         return self.isRecordingTranscriptPromise.get()
@@ -1634,11 +1633,6 @@ public final class PresentationCallImpl: PresentationCall {
             recorder.append(mic: mic, micRate: micRate, remote: remote, remoteRate: remoteRate)
         })
         self.isRecordingTranscriptPromise.set(true)
-        
-        if !self.didSendTranscriptNotice {
-            self.didSendTranscriptNotice = true
-            let _ = enqueueMessages(account: self.context.account, peerId: self.peerId, messages: [.message(text: "This call is recorded for a transcript.", attributes: [], inlineStickers: [:], mediaReference: nil, threadId: nil, replyToMessageId: nil, replyToStoryId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: [])]).startStandalone()
-        }
     }
     
     private func stopTranscriptRecording() {
