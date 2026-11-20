@@ -224,11 +224,15 @@ public enum PaiPasskeys {
         return PasskeyAssertionResponse(credentialID: assertion.credentialID, clientDataJSON: assertion.rawClientDataJSON, authenticatorData: assertion.rawAuthenticatorData, signature: assertion.signature, userHandle: assertion.userID)
     }
 
-    /// A POST on a passkey route; the box saying this phone has no passkey clears the local flag.
+    /// The box's errors meaning this phone holds no usable passkey.
+    private static let notEnrolledPrefixes = ["no passkey on this device", "that passkey is not bound to this device", "that passkey is not enrolled here"]
+
+    /// A POST on a passkey route; the box saying this phone has no usable passkey clears the local flag.
+    /// The flag is display-only (the Settings row): signing never reads it, the box decides.
     private static func passkeyCall<T: Decodable>(_ type: T.Type, _ path: String, body: Encodable?) async throws -> T {
         do {
             return try await client.call(type, path, method: "POST", body: try body?.jsonObject(), keepTokenOn401: true)
-        } catch let error as PaiClientError where error.message.hasPrefix("no passkey on this device") {
+        } catch let error as PaiClientError where notEnrolledPrefixes.contains(where: { error.message.hasPrefix($0) }) {
             setEnrolled(nil)
             throw error
         }
