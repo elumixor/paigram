@@ -164,11 +164,43 @@ public enum PaiPasskeys {
         _ = try await client.call(JSONValue.self, "/changes/\(escaped(hash))/deny", method: "POST", keepTokenOn401: true)
     }
 
+    // MARK: Apple Watch
+
+    /// A watch key pai holds for this phone (`GET /watch-keys`).
+    public struct WatchKey: Decodable, Equatable {
+        public let id: String
+        public let name: String
+    }
+
+    private struct WatchKeyOptionsBody: Encodable {
+        let publicKey: String
+    }
+
+    private struct WatchKeyBody: Encodable {
+        let publicKey: String
+        let name: String
+        let vouch: PasskeyAssertionResponse
+    }
+
+    public static func watchKeys() async throws -> [WatchKey] {
+        try await client.call([WatchKey].self, "/watch-keys", keepTokenOn401: true)
+    }
+
+    /// Adds the paired watch's approval key: the watch hands over its Secure Enclave key's public half, this phone's
+    /// passkey signs over exactly that key (Face ID), and pai keeps it bound to this phone. The watch then approves
+    /// ordinary change cards by itself.
+    @MainActor
+    public static func addWatch() async throws {
+        let watch = try await PaiGlanceSync.shared.watchKey()
+        let vouch = try await assert(challengePath: "/watch-keys/options", body: WatchKeyOptionsBody(publicKey: watch.publicKey))
+        _ = try await passkeyCall(WatchKey.self, "/watch-keys", body: WatchKeyBody(publicKey: watch.publicKey, name: watch.name, vouch: vouch))
+    }
+
     // MARK: Signing
 
     @MainActor
-    private static func assert(challengePath: String) async throws -> PasskeyAssertionResponse {
-        let options = try await passkeyCall(PasskeyRequestOptions.self, challengePath, body: nil)
+    private static func assert(challengePath: String, body: Encodable? = nil) async throws -> PasskeyAssertionResponse {
+        let options = try await passkeyCall(PasskeyRequestOptions.self, challengePath, body: body)
         guard let challenge = Base64URL.decode(options.challenge) else { throw PaiClientError(message: "The box sent a malformed passkey request") }
         let provider = ASAuthorizationPlatformPublicKeyCredentialProvider(relyingPartyIdentifier: try PaiPasskeyGuard.relyingParty(options.rpId, pinned: relyingParty))
         let request = provider.createCredentialAssertionRequest(challenge: challenge)

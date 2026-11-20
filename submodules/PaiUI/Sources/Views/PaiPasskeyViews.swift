@@ -11,6 +11,8 @@ final class PaiPasskeyModel: ObservableObject {
     @Published private(set) var enrolled = PaiPasskeys.enrolledCredential != nil
     @Published private(set) var state: PaiUnlockState?
     @Published private(set) var busy = false
+    /// pai holds a watch key for this phone.
+    @Published private(set) var watchAdded = false
     @Published var error: String?
     private var observer: NSObjectProtocol?
 
@@ -26,6 +28,12 @@ final class PaiPasskeyModel: ObservableObject {
 
     @MainActor func load() async {
         state = try? await PaiPasskeys.state()
+        if let keys = try? await PaiPasskeys.watchKeys() { watchAdded = !keys.isEmpty }
+    }
+
+    @MainActor func addWatch() async {
+        await run { try await PaiPasskeys.addWatch() }
+        await load()
     }
 
     @MainActor func enrol(invite: String?) async {
@@ -83,6 +91,12 @@ struct PaiPasskeySection: View {
                     }
                     .disabled(model.busy)
                 }
+                if PaiGlanceSync.shared.watchAvailable || model.watchAdded {
+                    Button { Task { await model.addWatch() } } label: {
+                        SettingsRow(symbol: "applewatch", color: .green, title: model.watchAdded ? "Apple Watch" : "Add Apple Watch", value: model.watchAdded ? "Added" : nil)
+                    }
+                    .disabled(model.busy)
+                }
             } else {
                 Menu {
                     Button("Add passkey") { Task { await model.enrol(invite: nil) } }
@@ -97,6 +111,8 @@ struct PaiPasskeySection: View {
         } footer: {
             if let error = model.error {
                 Text(error).foregroundStyle(.red)
+            } else if model.enrolled, !model.watchAdded, PaiGlanceSync.shared.watchAvailable {
+                Text("Add Apple Watch lets the watch approve pai's change cards with its own key, after Face ID here.")
             } else if !model.enrolled {
                 Text("A passkey on this phone unlocks pai and approves its changes. First passkey on Mac? Open pai on Mac › Settings › Account › Add another device, then Scan code from Mac here.")
             }
@@ -172,6 +188,8 @@ final class PaiChangeModel: ObservableObject {
     let hash: String
     @Published private(set) var change: PaiChange?
     @Published private(set) var busy = false
+    /// pai holds a watch key for this phone.
+    @Published private(set) var watchAdded = false
     @Published private(set) var error: String?
 
     init(hash: String) {

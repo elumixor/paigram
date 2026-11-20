@@ -123,6 +123,51 @@ public final class PaiGlanceSync: NSObject, WCSessionDelegate {
         DispatchQueue.main.async { self.sendStoredToWatch() }
     }
 
+    // MARK: - Watch key
+
+    private static let watchKeyDefault = "pai.watch.key"
+    private static let watchNameDefault = "pai.watch.name"
+
+    /// A watch with Paigram on it, paired with this phone: what Add Apple Watch needs.
+    public var watchAvailable: Bool {
+        guard WCSession.isSupported() else { return false }
+        let session = WCSession.default
+        return session.activationState == .activated && session.isPaired && session.isWatchAppInstalled
+    }
+
+    /// The watch hands over its approval key's public half once per key (`transferUserInfo`), kept for Add Apple Watch.
+    public func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
+        guard let key = userInfo["watchKey"] as? String else { return }
+        UserDefaults.standard.set(key, forKey: Self.watchKeyDefault)
+        UserDefaults.standard.set(userInfo["watchName"] as? String, forKey: Self.watchNameDefault)
+    }
+
+    /// The watch's approval key (SPKI DER, base64url) and its name: asked of the watch while it is reachable, else the
+    /// one it last handed over.
+    public func watchKey() async throws -> (publicKey: String, name: String) {
+        guard watchAvailable else { throw PaiClientError(message: "Install Paigram on your paired Apple Watch first") }
+        let session = WCSession.default
+        if session.isReachable {
+            do {
+                return try await withCheckedThrowingContinuation { continuation in
+                    session.sendMessage(["watchKey": true], replyHandler: { reply in
+                        if let key = reply["publicKey"] as? String {
+                            continuation.resume(returning: (key, reply["name"] as? String ?? "Apple Watch"))
+                        } else {
+                            continuation.resume(throwing: PaiClientError(message: reply["error"] as? String ?? "The watch sent no key"))
+                        }
+                    }, errorHandler: { continuation.resume(throwing: $0) })
+                }
+            } catch let error as PaiClientError {
+                throw error
+            } catch {}
+        }
+        if let key = UserDefaults.standard.string(forKey: Self.watchKeyDefault) {
+            return (key, UserDefaults.standard.string(forKey: Self.watchNameDefault) ?? "Apple Watch")
+        }
+        throw PaiClientError(message: "Open Paigram on your Apple Watch, then try again")
+    }
+
     /// The watch asks for a fresh glance (`refresh`), or relays what it could not send itself: an answer (`answer` + `text`)
     /// or a draft with its edits (`sendDraft` + `fields`).
     public func session(_ session: WCSession, didReceiveMessage message: [String: Any], replyHandler: @escaping ([String: Any]) -> Void) {
