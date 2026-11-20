@@ -77,8 +77,8 @@ extension ChatControllerImpl {
             }
             if let peer, let controller = self.context.sharedContext.makePeerInfoController(context: self.context, updatedPresentationData: self.updatedPresentationData, peer: peer, mode: .generic, avatarInitiallyExpanded: false, fromChat: true, requestsContext: nil) {
                 self.effectiveNavigationController?.pushViewController(controller)
-            } else if let settings = PaiProfile.controller(context: self.context, list: .settings) {
-                self.effectiveNavigationController?.pushViewController(settings)
+            } else if #available(iOS 16.0, *) {
+                self.effectiveNavigationController?.pushViewController(PaiSettingsController(context: self.context))
             }
         })
     }

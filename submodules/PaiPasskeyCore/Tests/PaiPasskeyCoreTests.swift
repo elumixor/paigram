@@ -287,3 +287,70 @@ final class ChangeFormatTests: XCTestCase {
         }
     }
 }
+
+final class InviteFlowTests: XCTestCase {
+    private func confirming(_ name: String = "me@x.com") -> PaiInviteFlow {
+        var flow = PaiInviteFlow()
+        flow.handle(.scanned(code: "abc"))
+        flow.handle(.prepared(accountName: name))
+        return flow
+    }
+
+    func testScanPreparesThenConfirmsWithTrimmedAccount() {
+        var flow = PaiInviteFlow()
+        XCTAssertTrue(flow.handle(.scanned(code: "abc")))
+        XCTAssertEqual(flow.state, .preparing(code: "abc"))
+        XCTAssertTrue(flow.handle(.prepared(accountName: "  me@x.com ")))
+        XCTAssertEqual(flow.state, .confirming(account: "me@x.com"))
+    }
+
+    func testAddPasskeyEnrols() {
+        var flow = confirming()
+        XCTAssertTrue(flow.handle(.confirm))
+        XCTAssertEqual(flow.state, .enrolling)
+    }
+
+    func testCancelClosesFromEveryStepBeforeEnrol() {
+        var scanning = PaiInviteFlow()
+        XCTAssertTrue(scanning.handle(.cancel))
+        XCTAssertEqual(scanning.state, .closed)
+        var preparing = PaiInviteFlow()
+        preparing.handle(.scanned(code: "abc"))
+        XCTAssertTrue(preparing.handle(.cancel))
+        XCTAssertEqual(preparing.state, .closed)
+        var flow = confirming()
+        XCTAssertTrue(flow.handle(.cancel))
+        XCTAssertEqual(flow.state, .closed)
+    }
+
+    func testSecondScanWhileConfirmingIsIgnored() {
+        var flow = confirming()
+        XCTAssertFalse(flow.handle(.scanned(code: "other")))
+        XCTAssertEqual(flow.state, .confirming(account: "me@x.com"))
+    }
+
+    func testFailureAndBackReturnToScanning() {
+        var flow = PaiInviteFlow()
+        flow.handle(.scanned(code: "abc"))
+        XCTAssertTrue(flow.handle(.failed))
+        XCTAssertEqual(flow.state, .scanning)
+        var back = confirming()
+        XCTAssertTrue(back.handle(.back))
+        XCTAssertEqual(back.state, .scanning)
+    }
+
+    func testEmptyNameFallsBack() {
+        XCTAssertEqual(confirming("  ").state, .confirming(account: PaiInviteFlow.fallbackAccount))
+    }
+
+    func testNothingLeavesClosedOrEnrolling() {
+        var flow = confirming()
+        flow.handle(.cancel)
+        XCTAssertFalse(flow.handle(.confirm))
+        XCTAssertFalse(flow.handle(.scanned(code: "abc")))
+        var enrolling = confirming()
+        enrolling.handle(.confirm)
+        XCTAssertFalse(enrolling.handle(.cancel))
+        XCTAssertEqual(enrolling.state, .enrolling)
+    }
+}

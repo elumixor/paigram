@@ -156,6 +156,7 @@ enum PeerInfoSettingsSection {
     case email
     case whatsApp
     case paiStats
+    case paiSettings
     case avatar
     case edit
     case proxy

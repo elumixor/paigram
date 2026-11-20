@@ -18,7 +18,6 @@ public enum PaiProfile {
         /// What the sessions are given, one kind: tool, skill, instruction, memory.
         case context(kind: String, title: String)
         case calls
-        case settings
     }
 
     /// The profile's own rows of pai's sessions: kind, title, SF Symbol.
@@ -53,9 +52,6 @@ public enum PaiProfile {
     public static func controller(context: AccountContext, list: List) -> ViewController? {
         guard #available(iOS 16.0, *) else {
             return nil
-        }
-        if case .settings = list {
-            return PaiSettingsController(context: context)
         }
         return PaiProfileListController(context: context, list: list)
     }
@@ -107,8 +103,6 @@ private struct PaiProfileListScreen: View {
                 .refreshable { await settings.load() }
         case .calls:
             PaiCallsList().navigationTitle("Calls")
-        case .settings:
-            EmptyView()
         }
     }
 }

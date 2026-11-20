@@ -6,22 +6,37 @@ import VisionKit
 
 /// Reads the add-device QR pai's web Settings shows on a device that already has a passkey
 /// (Settings › Account › Add another device), so this phone can enrol its own. A typed code works too. A code never
-/// enrols by itself: it opens a confirm screen first, and `onCode` fires only on its Add passkey.
+/// enrols by itself: the box's passkey request for it is fetched first (its `user.name` = the account the code is
+/// bound to), shown on a confirm screen, and `add` fires only on its Add passkey.
 @available(iOS 16.0, *)
 struct PaiInviteScannerView: View {
-    let onCode: (String) -> Void
-    @Environment(\.dismiss) private var dismiss
+    let close: () -> Void
+    let add: (PaiPasskeys.PreparedEnrol) -> Void
+    @State private var flow = PaiInviteFlow()
+    @State private var prepared: PaiPasskeys.PreparedEnrol?
     @State private var typed = ""
     @State private var hint: String?
-    /// The code read, waiting on the confirm screen.
-    @State private var pending: String?
-    @State private var done = false
+
+    private var preparing: Bool {
+        if case .preparing = flow.state { return true }
+        return false
+    }
+
+    private var confirmingAccount: String? {
+        if case let .confirming(account) = flow.state { return account }
+        return nil
+    }
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
                 PaiQRCamera { text in scanned(text) }
                     .ignoresSafeArea(edges: .horizontal)
+                    .overlay {
+                        if preparing {
+                            ProgressView().controlSize(.large).tint(.white)
+                        }
+                    }
                 VStack(alignment: .leading, spacing: 10) {
                     Text(hint ?? "On your Mac open pai › Settings › Account › Add another device, then point the camera at its QR.")
                         .font(.footnote)
@@ -34,7 +49,7 @@ struct PaiInviteScannerView: View {
                             .submitLabel(.done)
                             .onSubmit { submitTyped() }
                         Button("Next") { submitTyped() }
-                            .disabled(typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            .disabled(preparing || typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                 }
                 .padding()
@@ -42,10 +57,10 @@ struct PaiInviteScannerView: View {
             .navigationTitle("Scan code from Mac")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { cancel() } }
             }
-            .navigationDestination(isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } })) {
-                PaiInviteConfirmView(add: confirm, cancel: { dismiss() })
+            .navigationDestination(isPresented: Binding(get: { confirmingAccount != nil }, set: { if !$0 { back() } })) {
+                PaiInviteConfirmView(account: confirmingAccount ?? PaiInviteFlow.fallbackAccount, add: confirm, cancel: cancel)
             }
         }
     }
@@ -59,6 +74,7 @@ struct PaiInviteScannerView: View {
     }
 
     private func scanned(_ text: String) {
+        guard case .scanning = flow.state else { return }
         if let code = PaiPasskeyEnrol.invite(fromScanned: text, host: PaiPasskeys.relyingParty) {
             review(code)
         } else {
@@ -67,16 +83,34 @@ struct PaiInviteScannerView: View {
     }
 
     private func review(_ code: String) {
-        guard pending == nil, !done else { return }
+        guard flow.handle(.scanned(code: code)) else { return }
         hint = nil
-        pending = code
+        Task { @MainActor in
+            do {
+                let request = try await PaiPasskeys.prepare(invite: code)
+                prepared = request
+                if !flow.handle(.prepared(accountName: request.accountName)) { prepared = nil }
+            } catch {
+                if !(error is CancellationError) { hint = error.localizedDescription }
+                flow.handle(.failed)
+            }
+        }
+    }
+
+    private func back() {
+        if flow.handle(.back) { prepared = nil }
     }
 
     private func confirm() {
-        guard let code = pending, !done else { return }
-        done = true
-        dismiss()
-        onCode(code)
+        guard let request = prepared, flow.handle(.confirm) else { return }
+        prepared = nil
+        add(request)
+    }
+
+    private func cancel() {
+        flow.handle(.cancel)
+        prepared = nil
+        close()
     }
 }
 
@@ -84,6 +118,7 @@ struct PaiInviteScannerView: View {
 /// this phone's name as the box will list it.
 @available(iOS 16.0, *)
 private struct PaiInviteConfirmView: View {
+    let account: String
     let add: () -> Void
     let cancel: () -> Void
 
@@ -105,7 +140,7 @@ private struct PaiInviteConfirmView: View {
                 .listRowBackground(Color.clear)
             }
             Section {
-                row("Account", "pai account")
+                row("Account", account)
                 row("Site", PaiPasskeys.relyingParty)
                 row("This device", UIDevice.current.name)
             } footer: {
