@@ -329,6 +329,7 @@ public func stringWithAppliedEntities(_ text: String, entities: [MessageTextEnti
                 if nsString == nil {
                     nsString = string.string as NSString
                 }
+                string.addAttribute(NSAttributedString.Key(rawValue: TelegramTextAttributes.Pre), value: nsString!.substring(with: range), range: range)
                 if let codeBlockTitleColor, let codeBlockAccentColor, let codeBlockBackgroundColor {
                     let titleFont = boldFont.withSize(round(boldFont.pointSize * 0.8235294117647058))
                     var title: NSAttributedString?
