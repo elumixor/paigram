@@ -59,6 +59,8 @@ public func paiTranscribeVoiceMessage(context: AccountContext, message: EngineRa
         |> mapToSignal { result -> Signal<Never, NoError> in
             if let result, !result.text.isEmpty {
                 return context.engine.messages.storeLocallyTranscribedAudio(messageId: messageId, text: result.text, isFinal: true, error: nil)
+            } else if let result, result.speechPermissionDenied {
+                return context.engine.messages.storeLocallyTranscribedAudio(messageId: messageId, text: "", isFinal: true, error: .speechPermissionDenied)
             } else {
                 return context.engine.messages.storeLocallyTranscribedAudio(messageId: messageId, text: previousText, isFinal: true, error: previousText.isEmpty ? .generic : nil)
             }

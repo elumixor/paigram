@@ -4,6 +4,7 @@ public class AudioTranscriptionMessageAttribute: MessageAttribute, Equatable {
     public enum TranscriptionError: Int32, Error {
         case generic = 0
         case tooLong = 1
+        case speechPermissionDenied = 2
     }
     
     public let id: Int64
