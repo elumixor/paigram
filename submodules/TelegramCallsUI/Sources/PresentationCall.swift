@@ -182,7 +182,9 @@ public final class PresentationCallImpl: PresentationCall {
     /// When the call reached `.active`; the auto-start waits for remote audio, at most `autoTranscriptStartDelay` after it.
     private var autoTranscriptActiveAt: Double?
     private let autoTranscriptAudioDisposable = MetaDisposable()
-    private var autoTranscriptGeneration = 0
+    /// The should-record answer, asked once per call: a reconnect re-arms the auto-start but reuses it.
+    private var autoTranscriptPolicyAnswer: CallRecordingPolicy.Answer?
+    private var isAutoTranscriptPolicyInFlight = false
     private static let autoTranscriptStartDelay: Double = 3.0
     private let isRecordingTranscriptPromise = ValuePromise<Bool>(false)
     public var isRecordingTranscript: Signal<Bool, NoError> {
@@ -1396,6 +1398,8 @@ public final class PresentationCallImpl: PresentationCall {
                         // setting and should-record checks and arms the auto-start again.
                         CallRecordingLog.log("auto-recording deferred: call reconnecting before audio flowed")
                         self.didAutoStartTranscript = false
+                        // The level from before the blip would otherwise satisfy the re-armed wait at once.
+                        self.audioLevelPromise.set(0.0)
                     } else {
                         CallRecordingLog.log("auto-recording cancelled: call left active before audio flowed")
                     }
@@ -1633,26 +1637,38 @@ public final class PresentationCallImpl: PresentationCall {
         )
         self.isAutoTranscriptPending = true
         self.autoTranscriptActiveAt = CFAbsoluteTimeGetCurrent()
-        self.autoTranscriptGeneration += 1
-        let generation = self.autoTranscriptGeneration
+        if let answer = self.autoTranscriptPolicyAnswer {
+            self.applyAutoTranscriptPolicy(answer)
+            return
+        }
+        if self.isAutoTranscriptPolicyInFlight {
+            return
+        }
+        self.isAutoTranscriptPolicyInFlight = true
         Task { [weak self] in
             let answer = await CallRecordingPolicy.shouldRecord(policyPeer)
             Queue.mainQueue().async {
                 guard let self else {
                     return
                 }
-                // A policy answer from an attempt cancelled by a reconnect must not drive the re-armed one.
-                guard self.isAutoTranscriptPending, generation == self.autoTranscriptGeneration else {
+                self.isAutoTranscriptPolicyInFlight = false
+                self.autoTranscriptPolicyAnswer = answer
+                // Cancelled meanwhile (call ended, left active, or the transcript button): the answer is only kept.
+                guard self.isAutoTranscriptPending else {
                     return
                 }
-                guard answer.record else {
-                    self.cancelAutoTranscriptStart()
-                    CallRecordingLog.log("skipped: \(answer.reason)")
-                    return
-                }
-                self.startTranscriptRecordingOnceAudioFlows()
+                self.applyAutoTranscriptPolicy(answer)
             }
         }
+    }
+    
+    private func applyAutoTranscriptPolicy(_ answer: CallRecordingPolicy.Answer) {
+        guard answer.record else {
+            self.cancelAutoTranscriptStart()
+            CallRecordingLog.log("skipped: \(answer.reason)")
+            return
+        }
+        self.startTranscriptRecordingOnceAudioFlows()
     }
     
     /// Attaching the tap right at connect can race the audio device's own start, so the auto-start waits for the
@@ -1671,6 +1687,10 @@ public final class PresentationCallImpl: PresentationCall {
                 return
             }
             self.isAutoTranscriptPending = false
+            guard CallRecordingSettings.isEnabled else {
+                CallRecordingLog.log("skipped: Transcribe calls turned off before audio flowed")
+                return
+            }
             CallRecordingLog.log("auto-recording starts: \(trigger)")
             self.startTranscriptRecording()
         }))
