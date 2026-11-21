@@ -43,6 +43,10 @@ public enum PaiRunFold {
         guard let meta = PaiTrailer.find(message)?.meta else {
             return text.hasPrefix("🔴") ? .shown : .continuation
         }
+        // A call's transcript is for the user to read, whatever kind of row carried it.
+        if meta.callRecording != nil {
+            return .shown
+        }
         switch meta.kind {
         case "turn", "result":
             // A log row's report says whether the turn ended (`done`) or was an interim note (`progress`).

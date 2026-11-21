@@ -144,7 +144,7 @@ private func firstLine(_ text: String) -> String {
 func paiHistoryContent(row: PaiLogRow, slug: String, thread: Int64, agents: [PaiAgentInfo]) -> (String, [MessageTextEntity]) {
     let name = { (slug: String) -> String in agents.first(where: { $0.slug == slug })?.name ?? slug }
     var trailer: [String: Any] = ["v": 1, "session": slug, "agent": slug, "agentName": name(slug), "thread": thread, "author": row.from, "authorName": name(row.from), "logId": Int(row.id)]
-    for key in ["breadcrumb", "event", "icon", "priority"] {
+    for key in ["breadcrumb", "event", "icon", "priority", "callRecording"] {
         if let value = row.meta[key] {
             trailer[key] = value
         }

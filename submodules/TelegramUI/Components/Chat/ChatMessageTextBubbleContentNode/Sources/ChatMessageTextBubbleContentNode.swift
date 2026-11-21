@@ -475,7 +475,16 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
                         let (strippedText, strippedEntities) = PaiAsk.stripOptionLines(text: rawText, entities: messageEntities ?? [], options: rows.map { $0.label })
                         rawText = strippedText
                         messageEntities = strippedEntities
+                    } else if trailer.meta.callRecording != nil {
+                        let card = PaiCallTranscript.card(text: rawText, entities: messageEntities ?? [])
+                        rawText = card.text
+                        messageEntities = card.entities
                     }
+                } else if PaiChat.isBot(item.message.peers[item.message.id.peerId]), PaiCallTranscript.isHeader(rawText) {
+                    // A long transcript's first chunk: the trailer rides only on the last one.
+                    let card = PaiCallTranscript.card(text: rawText, entities: messageEntities ?? [])
+                    rawText = card.text
+                    messageEntities = card.entities
                 }
                 // Nor is the project line this client put in front of a thread's first message.
                 if PaiChat.isBot(item.message.peers[item.message.id.peerId]) {

@@ -123,9 +123,11 @@ public struct PaiRichMeta: Decodable, Equatable {
     public let thread: Int64?
     /// The message-log row this message draws, when the trailer names it (a topic's history from before the topic).
     public let logId: Int?
+    /// A call's transcript (the call recording's id): always shown, drawn as a transcript card (`PaiCallTranscript`).
+    public let callRecording: String?
 
     private enum CodingKeys: String, CodingKey {
-        case v, kind, session, project, tools, durationMs, state, tool, startedAt, agent, agentName, breadcrumb, event, icon, items, status, askId, options, optionDetails, multiSelect, questions, answer, priority, thread, logId
+        case v, kind, session, project, tools, durationMs, state, tool, startedAt, agent, agentName, breadcrumb, event, icon, items, status, askId, options, optionDetails, multiSelect, questions, answer, priority, thread, logId, callRecording
     }
 
     /// Only the version and kind are required: pai adds fields over time, and one that does not parse is left out,
@@ -157,6 +159,7 @@ public struct PaiRichMeta: Decodable, Equatable {
         priority = try? c.decodeIfPresent(String.self, forKey: .priority)
         thread = try? c.decodeIfPresent(Int64.self, forKey: .thread)
         logId = try? c.decodeIfPresent(Int.self, forKey: .logId)
+        callRecording = (try? c.decodeIfPresent(String.self, forKey: .callRecording)) ?? (try? c.decodeIfPresent(Int.self, forKey: .callRecording)).flatMap { $0.map(String.init) }
     }
 
     public static let version = 1
