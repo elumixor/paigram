@@ -179,6 +179,10 @@ public final class PresentationCallImpl: PresentationCall {
     private var didAutoStartTranscript = false
     /// True while the auto-start waits for pai's should-record answer; the call ending or the transcript button clears it.
     private var isAutoTranscriptPending = false
+    /// When the call reached `.active`; the auto-start waits for remote audio, at most `autoTranscriptStartDelay` after it.
+    private var autoTranscriptActiveAt: Double?
+    private let autoTranscriptAudioDisposable = MetaDisposable()
+    private static let autoTranscriptStartDelay: Double = 3.0
     private let isRecordingTranscriptPromise = ValuePromise<Bool>(false)
     public var isRecordingTranscript: Signal<Bool, NoError> {
         return self.isRecordingTranscriptPromise.get()
@@ -464,6 +468,7 @@ public final class PresentationCallImpl: PresentationCall {
         self.audioLevelDisposable?.dispose()
         self.batteryLevelDisposable?.dispose()
         self.audioSessionDisposable?.dispose()
+        self.autoTranscriptAudioDisposable.dispose()
         self.screencastFramesDisposable.dispose()
         self.screencastAudioDataDisposable.dispose()
         self.screencastStateDisposable.dispose()
@@ -1383,6 +1388,9 @@ public final class PresentationCallImpl: PresentationCall {
                 self.updateTone(presentationState, callContextState: callContextState, previous: previous, previousRemoteVideoState: previousRemoteVideoState)
                 if case .active = presentationState.state {
                     self.autoStartTranscriptRecordingIfNeeded()
+                } else if self.isAutoTranscriptPending {
+                    CallRecordingLog.log("auto-recording cancelled: call left active before audio flowed")
+                    self.cancelAutoTranscriptStart()
                 }
             }
         }
@@ -1579,7 +1587,7 @@ public final class PresentationCallImpl: PresentationCall {
             guard let self else {
                 return
             }
-            self.isAutoTranscriptPending = false
+            self.cancelAutoTranscriptStart()
             if self.transcriptRecorder != nil {
                 CallRecordingLog.log("recording \(self.transcriptRecorder?.callId ?? ""): stopped from the call screen")
                 self.stopTranscriptRecording()
@@ -1589,7 +1597,7 @@ public final class PresentationCallImpl: PresentationCall {
         }
     }
     
-    /// Every 1:1 call is recorded from the moment it connects, unless "Transcribe calls" is off in pai's settings.
+    /// Every 1:1 call is recorded once audio flows after it connects, unless "Transcribe calls" is off in pai's settings.
     private func autoStartTranscriptRecordingIfNeeded() {
         if self.didAutoStartTranscript {
             return
@@ -1616,6 +1624,7 @@ public final class PresentationCallImpl: PresentationCall {
             peerTelegramId: "\(self.peerId.id._internalGetInt64Value())"
         )
         self.isAutoTranscriptPending = true
+        self.autoTranscriptActiveAt = CFAbsoluteTimeGetCurrent()
         Task { [weak self] in
             let answer = await CallRecordingPolicy.shouldRecord(policyPeer)
             Queue.mainQueue().async {
@@ -1625,14 +1634,40 @@ public final class PresentationCallImpl: PresentationCall {
                 guard self.isAutoTranscriptPending else {
                     return
                 }
-                self.isAutoTranscriptPending = false
                 guard answer.record else {
+                    self.cancelAutoTranscriptStart()
                     CallRecordingLog.log("skipped: \(answer.reason)")
                     return
                 }
-                self.startTranscriptRecording()
+                self.startTranscriptRecordingOnceAudioFlows()
             }
         }
+    }
+    
+    /// Attaching the tap right at connect can race the audio device's own start, so the auto-start waits for the
+    /// first non-silent remote audio level, or `autoTranscriptStartDelay` after `.active`, whichever comes first.
+    private func startTranscriptRecordingOnceAudioFlows() {
+        let elapsed = CFAbsoluteTimeGetCurrent() - (self.autoTranscriptActiveAt ?? CFAbsoluteTimeGetCurrent())
+        let remaining = max(0.0, PresentationCallImpl.autoTranscriptStartDelay - elapsed)
+        let remoteAudio: Signal<String, NoError> = self.audioLevelPromise.get()
+        |> filter { $0 > 0.01 }
+        |> take(1)
+        |> map { _ in "remote audio" }
+        self.autoTranscriptAudioDisposable.set((remoteAudio
+        |> timeout(remaining, queue: Queue.mainQueue(), alternate: .single("\(PresentationCallImpl.autoTranscriptStartDelay) s after connect"))
+        |> deliverOnMainQueue).start(next: { [weak self] trigger in
+            guard let self, self.isAutoTranscriptPending else {
+                return
+            }
+            self.isAutoTranscriptPending = false
+            CallRecordingLog.log("auto-recording starts: \(trigger)")
+            self.startTranscriptRecording()
+        }))
+    }
+    
+    private func cancelAutoTranscriptStart() {
+        self.isAutoTranscriptPending = false
+        self.autoTranscriptAudioDisposable.set(nil)
     }
     
     private func startTranscriptRecording() {
@@ -1668,7 +1703,7 @@ public final class PresentationCallImpl: PresentationCall {
     }
     
     private func stopTranscriptRecording() {
-        self.isAutoTranscriptPending = false
+        self.cancelAutoTranscriptStart()
         guard let recorder = self.transcriptRecorder else {
             return
         }
