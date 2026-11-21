@@ -123,7 +123,7 @@ public struct PaiRichMeta: Decodable, Equatable {
     public let thread: Int64?
     /// The message-log row this message draws, when the trailer names it (a topic's history from before the topic).
     public let logId: Int?
-    /// A call's transcript (the call recording's id): always shown, drawn as a transcript card (`PaiCallTranscript`).
+    /// A call's transcript (the call recording's id): always shown, drawn as a transcript card (`PaiCallTranscriptCard`).
     public let callRecording: String?
 
     private enum CodingKeys: String, CodingKey {

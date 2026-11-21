@@ -4,7 +4,7 @@ import TelegramCore
 /// A recorded call's transcript in General's chat (`render` in `pai/src/domain/call-recordings.ts`), drawn as a card:
 /// a bold title, "📞 Call with <peer> · <duration>", a quiet line with the direction, app and start, any summary as is,
 /// and the transcript itself (the `[m:ss] Speaker: …` lines) in a collapsed quote that opens on a tap.
-public enum PaiCallTranscript {
+public enum PaiCallTranscriptCard {
     /// "📞 Incoming Telegram call with Anna, +420…, 21 Nov 14:03, 12:34".
     private static let header = try! NSRegularExpression(pattern: "^📞 (Incoming|Outgoing) (.+?) call with (.+), (.+?) (\\d{1,2}:\\d{2}), (\\d+(?::\\d{2})+)$")
     /// The first transcript line, or the line saying there is none.

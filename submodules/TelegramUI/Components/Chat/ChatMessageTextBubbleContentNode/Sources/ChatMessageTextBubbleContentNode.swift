@@ -476,13 +476,13 @@ public class ChatMessageTextBubbleContentNode: ChatMessageBubbleContentNode {
                         rawText = strippedText
                         messageEntities = strippedEntities
                     } else if trailer.meta.callRecording != nil {
-                        let card = PaiCallTranscript.card(text: rawText, entities: messageEntities ?? [])
+                        let card = PaiCallTranscriptCard.card(text: rawText, entities: messageEntities ?? [])
                         rawText = card.text
                         messageEntities = card.entities
                     }
-                } else if PaiChat.isBot(item.message.peers[item.message.id.peerId]), PaiCallTranscript.isHeader(rawText) {
+                } else if PaiChat.isBot(item.message.peers[item.message.id.peerId]), PaiCallTranscriptCard.isHeader(rawText) {
                     // A long transcript's first chunk: the trailer rides only on the last one.
-                    let card = PaiCallTranscript.card(text: rawText, entities: messageEntities ?? [])
+                    let card = PaiCallTranscriptCard.card(text: rawText, entities: messageEntities ?? [])
                     rawText = card.text
                     messageEntities = card.entities
                 }
