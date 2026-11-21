@@ -2,6 +2,7 @@ import AccountContext
 import AsyncDisplayKit
 import Display
 import Foundation
+import PaiCallRecording
 import SwiftUI
 import TelegramPresentationData
 import UIKit
@@ -91,6 +92,7 @@ struct SettingsView: View {
                 header
                 statusSection
                 usageSection
+                PaiCallsSection()
                 PaiPasskeySection()
                 PaiPlacesSection()
                 PaiSignOutSection()
@@ -180,6 +182,33 @@ struct SettingsView: View {
         if s < 3600 { return "\(s / 60)m" }
         if s < 86400 { return "\(s / 3600)h \(s % 3600 / 60)m" }
         return "\(s / 86400)d \(s % 86400 / 3600)h"
+    }
+}
+
+/// The "Transcribe calls" switch: on (the default), every 1:1 Telegram call is recorded from the moment it connects
+/// and sent to pai, which posts the transcript to the General chat.
+@available(iOS 16.0, *)
+struct PaiCallsSection: View {
+    @State private var transcribe = CallRecordingSettings.isEnabled
+
+    var body: some View {
+        Section {
+            Toggle(isOn: $transcribe) {
+                HStack(spacing: 12) {
+                    Image(systemName: "waveform")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 29, height: 29)
+                        .background(Color.red, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    Text("Transcribe calls")
+                }
+            }
+            .onChange(of: transcribe) { CallRecordingSettings.isEnabled = $0 }
+        } header: {
+            Text("Calls")
+        } footer: {
+            Text("Records every Telegram call and posts its transcript to General. Stop it during a call with the transcript button.")
+        }
     }
 }
 

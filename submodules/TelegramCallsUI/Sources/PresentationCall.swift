@@ -176,6 +176,16 @@ public final class PresentationCallImpl: PresentationCall {
     private var isMovedToConference: Bool = false
     
     private var transcriptRecorder: CallRecorder?
+    private var didAutoStartTranscript = false
+    /// True while the auto-start waits for pai's should-record answer; the call ending or the transcript button clears it.
+    private var isAutoTranscriptPending = false
+    /// When the call reached `.active`; the auto-start waits for remote audio, at most `autoTranscriptStartDelay` after it.
+    private var autoTranscriptActiveAt: Double?
+    private let autoTranscriptAudioDisposable = MetaDisposable()
+    /// The should-record answer, asked once per call: a reconnect re-arms the auto-start but reuses it.
+    private var autoTranscriptPolicyAnswer: CallRecordingPolicy.Answer?
+    private var isAutoTranscriptPolicyInFlight = false
+    private static let autoTranscriptStartDelay: Double = 3.0
     private let isRecordingTranscriptPromise = ValuePromise<Bool>(false)
     public var isRecordingTranscript: Signal<Bool, NoError> {
         return self.isRecordingTranscriptPromise.get()
@@ -461,6 +471,7 @@ public final class PresentationCallImpl: PresentationCall {
         self.audioLevelDisposable?.dispose()
         self.batteryLevelDisposable?.dispose()
         self.audioSessionDisposable?.dispose()
+        self.autoTranscriptAudioDisposable.dispose()
         self.screencastFramesDisposable.dispose()
         self.screencastAudioDataDisposable.dispose()
         self.screencastStateDisposable.dispose()
@@ -479,6 +490,11 @@ public final class PresentationCallImpl: PresentationCall {
         
         if let proximityManagerIndex = self.proximityManagerIndex {
             DeviceProximityManager.shared().remove(proximityManagerIndex)
+        }
+        
+        if let recorder = self.transcriptRecorder {
+            CallRecordingLog.log("recording \(recorder.callId): call released while recording, finishing")
+            PresentationCallImpl.finishTranscript(recorder, audioDevice: self.sharedAudioContext?.audioDevice)
         }
     }
     
@@ -1373,6 +1389,21 @@ public final class PresentationCallImpl: PresentationCall {
             if let presentationState {
                 self.statePromise.set(presentationState)
                 self.updateTone(presentationState, callContextState: callContextState, previous: previous, previousRemoteVideoState: previousRemoteVideoState)
+                if case .active = presentationState.state {
+                    self.autoStartTranscriptRecordingIfNeeded()
+                } else if self.isAutoTranscriptPending {
+                    self.cancelAutoTranscriptStart()
+                    if case .reconnecting = presentationState.state {
+                        // A network blip must not cost the call its recording: the next `.active` re-runs the
+                        // setting and should-record checks and arms the auto-start again.
+                        CallRecordingLog.log("auto-recording deferred: call reconnecting before audio flowed")
+                        self.didAutoStartTranscript = false
+                        // The level from before the blip would otherwise satisfy the re-armed wait at once.
+                        self.audioLevelPromise.set(0.0)
+                    } else {
+                        CallRecordingLog.log("auto-recording cancelled: call left active before audio flowed")
+                    }
+                }
             }
         }
     }
@@ -1562,54 +1593,165 @@ public final class PresentationCallImpl: PresentationCall {
         self.setIsMuted(!self.isMutedValue)
     }
     
+    /// The in-call transcript button: stops a running recording, or resumes into a new one.
     public func toggleTranscriptRecording() {
         Queue.mainQueue().async { [weak self] in
             guard let self else {
                 return
             }
+            self.cancelAutoTranscriptStart()
             if self.transcriptRecorder != nil {
+                CallRecordingLog.log("recording \(self.transcriptRecorder?.callId ?? ""): stopped from the call screen")
                 self.stopTranscriptRecording()
-                return
+            } else {
+                self.startTranscriptRecording()
             }
-            guard self.canRecordTranscript, let audioDevice = self.sharedAudioContext?.audioDevice else {
-                return
-            }
-            var number: String?
-            if case let .user(user) = self.peer {
-                number = user.phone
-            }
-            let meta = CallRecordingMeta(
-                startedAt: Date(),
-                direction: self.isOutgoing ? .outgoing : .incoming,
-                peer: CallRecordingPeer(name: self.peer?.debugDisplayTitle, number: number, telegramId: "\(self.peerId.id._internalGetInt64Value())")
-            )
-            guard let recorder = try? CallRecorder(store: .shared, meta: meta) else {
-                Logger.shared.log("PresentationCall", "transcript recorder failed to start")
-                return
-            }
-            recorder.setMicMuted(self.isMutedValue)
-            self.transcriptRecorder = recorder
-            audioDevice.startRecording(handler: { mic, micRate, remote, remoteRate in
-                recorder.append(mic: mic, micRate: micRate, remote: remote, remoteRate: remoteRate)
-            })
-            self.isRecordingTranscriptPromise.set(true)
-            
-            let _ = enqueueMessages(account: self.context.account, peerId: self.peerId, messages: [.message(text: "This call is recorded for a transcript.", attributes: [], inlineStickers: [:], mediaReference: nil, threadId: nil, replyToMessageId: nil, replyToStoryId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: [])]).startStandalone()
         }
     }
     
+    /// Every 1:1 call is recorded once audio flows after it connects, unless "Transcribe calls" is off in pai's settings.
+    private func autoStartTranscriptRecordingIfNeeded() {
+        if self.didAutoStartTranscript {
+            return
+        }
+        self.didAutoStartTranscript = true
+        guard CallRecordingSettings.isEnabled else {
+            CallRecordingLog.log("call connected, not recorded: Transcribe calls is off")
+            return
+        }
+        if self.conferenceCallContext != nil || self.isMovedToConference {
+            CallRecordingLog.log("call connected, not recorded: conference call")
+            return
+        }
+        var phone: String?
+        var username: String?
+        if case let .user(user) = self.peer {
+            phone = user.phone
+            username = user.addressName
+        }
+        let policyPeer = CallRecordingPolicyPeer(
+            peerName: self.peer?.debugDisplayTitle,
+            peerPhone: phone,
+            peerUsername: username,
+            peerTelegramId: "\(self.peerId.id._internalGetInt64Value())"
+        )
+        self.isAutoTranscriptPending = true
+        self.autoTranscriptActiveAt = CFAbsoluteTimeGetCurrent()
+        if let answer = self.autoTranscriptPolicyAnswer {
+            self.applyAutoTranscriptPolicy(answer)
+            return
+        }
+        if self.isAutoTranscriptPolicyInFlight {
+            return
+        }
+        self.isAutoTranscriptPolicyInFlight = true
+        Task { [weak self] in
+            let answer = await CallRecordingPolicy.shouldRecord(policyPeer)
+            Queue.mainQueue().async {
+                guard let self else {
+                    return
+                }
+                self.isAutoTranscriptPolicyInFlight = false
+                self.autoTranscriptPolicyAnswer = answer
+                // Cancelled meanwhile (call ended, left active, or the transcript button): the answer is only kept.
+                guard self.isAutoTranscriptPending else {
+                    return
+                }
+                self.applyAutoTranscriptPolicy(answer)
+            }
+        }
+    }
+    
+    private func applyAutoTranscriptPolicy(_ answer: CallRecordingPolicy.Answer) {
+        guard answer.record else {
+            self.cancelAutoTranscriptStart()
+            CallRecordingLog.log("skipped: \(answer.reason)")
+            return
+        }
+        self.startTranscriptRecordingOnceAudioFlows()
+    }
+    
+    /// Attaching the tap right at connect can race the audio device's own start, so the auto-start waits for the
+    /// first non-silent remote audio level, or `autoTranscriptStartDelay` after `.active`, whichever comes first.
+    private func startTranscriptRecordingOnceAudioFlows() {
+        let elapsed = CFAbsoluteTimeGetCurrent() - (self.autoTranscriptActiveAt ?? CFAbsoluteTimeGetCurrent())
+        let remaining = max(0.0, PresentationCallImpl.autoTranscriptStartDelay - elapsed)
+        let remoteAudio: Signal<String, NoError> = self.audioLevelPromise.get()
+        |> filter { $0 > 0.01 }
+        |> take(1)
+        |> map { _ in "remote audio" }
+        self.autoTranscriptAudioDisposable.set((remoteAudio
+        |> timeout(remaining, queue: Queue.mainQueue(), alternate: .single("\(PresentationCallImpl.autoTranscriptStartDelay) s after connect"))
+        |> deliverOnMainQueue).start(next: { [weak self] trigger in
+            guard let self, self.isAutoTranscriptPending else {
+                return
+            }
+            self.isAutoTranscriptPending = false
+            guard CallRecordingSettings.isEnabled else {
+                CallRecordingLog.log("skipped: Transcribe calls turned off before audio flowed")
+                return
+            }
+            CallRecordingLog.log("auto-recording starts: \(trigger)")
+            self.startTranscriptRecording()
+        }))
+    }
+    
+    private func cancelAutoTranscriptStart() {
+        self.isAutoTranscriptPending = false
+        self.autoTranscriptAudioDisposable.set(nil)
+    }
+    
+    private func startTranscriptRecording() {
+        if self.transcriptRecorder != nil {
+            return
+        }
+        guard self.canRecordTranscript, let audioDevice = self.sharedAudioContext?.audioDevice else {
+            CallRecordingLog.log("call not recorded: no shared audio device (movedToConference: \(self.isMovedToConference))")
+            return
+        }
+        var number: String?
+        if case let .user(user) = self.peer {
+            number = user.phone
+        }
+        let meta = CallRecordingMeta(
+            startedAt: Date(),
+            direction: self.isOutgoing ? .outgoing : .incoming,
+            peer: CallRecordingPeer(name: self.peer?.debugDisplayTitle, number: number, telegramId: "\(self.peerId.id._internalGetInt64Value())")
+        )
+        let recorder: CallRecorder
+        do {
+            recorder = try CallRecorder(store: .shared, meta: meta)
+        } catch {
+            CallRecordingLog.log("call not recorded: recorder failed to start: \(error)")
+            return
+        }
+        recorder.setMicMuted(self.isMutedValue)
+        self.transcriptRecorder = recorder
+        audioDevice.startRecording(handler: { mic, micRate, remote, remoteRate in
+            recorder.append(mic: mic, micRate: micRate, remote: remote, remoteRate: remoteRate)
+        })
+        self.isRecordingTranscriptPromise.set(true)
+    }
+    
     private func stopTranscriptRecording() {
+        self.cancelAutoTranscriptStart()
         guard let recorder = self.transcriptRecorder else {
             return
         }
         self.transcriptRecorder = nil
         self.isRecordingTranscriptPromise.set(false)
+        CallRecordingLog.log("recording \(recorder.callId): stopping")
+        PresentationCallImpl.finishTranscript(recorder, audioDevice: self.sharedAudioContext?.audioDevice)
+    }
+    
+    /// Detaches the tap (its last drain lands first), closes the files and uploads.
+    private static func finishTranscript(_ recorder: CallRecorder, audioDevice: OngoingCallContext.AudioDevice?) {
         let finish: () -> Void = {
             recorder.finish(endedAt: Date(), completion: { _ in
                 CallRecordingUploader.shared.retryPending()
             })
         }
-        if let audioDevice = self.sharedAudioContext?.audioDevice {
+        if let audioDevice {
             audioDevice.stopRecording(completion: finish)
         } else {
             finish()

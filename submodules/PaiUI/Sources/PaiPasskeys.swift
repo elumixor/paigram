@@ -2,6 +2,7 @@ import AuthenticationServices
 import CryptoKit
 import Foundation
 import PaiPasskeyCore
+import TelegramCore
 import UIKit
 
 /// A change an agent wants to make that waits for a passkey (`GET /changes/<hash>`).
@@ -52,6 +53,9 @@ public enum PaiPasskeys {
         guard let key = enrolledKey else { return nil }
         return UserDefaults.standard.string(forKey: key)
     }
+
+    /// Stored instead of a credential id when the passkey prompt said this phone already holds one of the box's passkeys.
+    public static let alreadySaved = "already-saved"
 
     private static var enrolledKey: String? {
         guard let token = PaiAuth.token else { return nil }
@@ -117,7 +121,15 @@ public enum PaiPasskeys {
         if #available(iOS 17.4, *) {
             request.excludedCredentials = (options.excludeCredentials ?? []).compactMap(\.idData).map(ASAuthorizationPlatformPublicKeyCredentialDescriptor.init(credentialID:))
         }
-        guard let registration = try await PaiPasskeyPrompt.perform(request) as? ASAuthorizationPlatformPublicKeyCredentialRegistration else {
+        let credential: ASAuthorizationCredential
+        do {
+            credential = try await PaiPasskeyPrompt.perform(request)
+        } catch PaiPasskeyPromptError.matchedExcludedCredential {
+            // The box excludes every passkey it holds for this account, so this phone's keychain already has one.
+            setEnrolled(alreadySaved)
+            return
+        }
+        guard let registration = credential as? ASAuthorizationPlatformPublicKeyCredentialRegistration else {
             throw PaiClientError(message: "The passkey prompt returned no passkey")
         }
         guard let attestation = registration.rawAttestationObject else { throw PaiClientError(message: "The passkey came without its attestation") }
@@ -212,11 +224,15 @@ public enum PaiPasskeys {
         return PasskeyAssertionResponse(credentialID: assertion.credentialID, clientDataJSON: assertion.rawClientDataJSON, authenticatorData: assertion.rawAuthenticatorData, signature: assertion.signature, userHandle: assertion.userID)
     }
 
-    /// A POST on a passkey route; the box saying this phone has no passkey clears the local flag.
+    /// The box's errors meaning this phone holds no usable passkey.
+    private static let notEnrolledPrefixes = ["no passkey on this device", "that passkey is not bound to this device", "that passkey is not enrolled here"]
+
+    /// A POST on a passkey route; the box saying this phone has no usable passkey clears the local flag.
+    /// The flag is display-only (the Settings row): signing never reads it, the box decides.
     private static func passkeyCall<T: Decodable>(_ type: T.Type, _ path: String, body: Encodable?) async throws -> T {
         do {
             return try await client.call(type, path, method: "POST", body: try body?.jsonObject(), keepTokenOn401: true)
-        } catch let error as PaiClientError where error.message.hasPrefix("no passkey on this device") {
+        } catch let error as PaiClientError where notEnrolledPrefixes.contains(where: { error.message.hasPrefix($0) }) {
             setEnrolled(nil)
             throw error
         }
@@ -227,12 +243,18 @@ public enum PaiPasskeys {
     }
 }
 
+enum PaiPasskeyPromptError: Error {
+    /// The request excluded a passkey this device already holds.
+    case matchedExcludedCredential
+}
+
 /// One `ASAuthorizationController` request as an async call.
 @available(iOS 16.0, *)
 final class PaiPasskeyPrompt: NSObject, ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
     private static var running: PaiPasskeyPrompt?
     private var continuation: CheckedContinuation<ASAuthorizationCredential, Error>?
     private var controller: ASAuthorizationController?
+    private var registering = false
 
     @MainActor
     static func perform(_ request: ASAuthorizationRequest) async throws -> ASAuthorizationCredential {
@@ -243,6 +265,7 @@ final class PaiPasskeyPrompt: NSObject, ASAuthorizationControllerDelegate, ASAut
             controller.presentationContextProvider = prompt
             prompt.controller = controller
             prompt.continuation = continuation
+            prompt.registering = request is ASAuthorizationPlatformPublicKeyCredentialRegistrationRequest
             running = prompt
             controller.performRequests()
         }
@@ -260,10 +283,18 @@ final class PaiPasskeyPrompt: NSObject, ASAuthorizationControllerDelegate, ASAut
     }
 
     func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
-        if let error = error as? ASAuthorizationError, error.code == .canceled {
-            finish(.failure(CancellationError()))
-        } else {
+        guard let error = error as? ASAuthorizationError else {
             finish(.failure(error))
+            return
+        }
+        Logger.shared.log("PaiPasskey", "authorization error \(error.code.rawValue)")
+        switch error.code.rawValue {
+        case ASAuthorizationError.canceled.rawValue:
+            finish(.failure(CancellationError()))
+        case 1006: // ASAuthorizationError.matchedExcludedCredential (iOS 18 SDK)
+            finish(.failure(PaiPasskeyPromptError.matchedExcludedCredential))
+        default:
+            finish(.failure(PaiClientError(message: registering ? "Couldn't add passkey. Try again." : "Couldn't use passkey. Try again.")))
         }
     }
 

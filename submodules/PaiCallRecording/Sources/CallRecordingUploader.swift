@@ -1,5 +1,4 @@
 import Foundation
-import os
 import UIKit
 
 /// Sends a prepared request with a body file; answers the HTTP status or throws on a network failure.
@@ -52,7 +51,6 @@ public final class CallRecordingUploader: @unchecked Sendable {
 
     public static let shared = CallRecordingUploader(store: .shared, transport: URLSessionCallRecordingTransport())
 
-    private static let log = OSLog(subsystem: "org.paigram", category: "call-recording")
     private static let abandonedAge: TimeInterval = 24 * 60 * 60
 
     public let store: CallRecordingStore
@@ -116,10 +114,14 @@ public final class CallRecordingUploader: @unchecked Sendable {
 
         while true {
             for callId in store.abandoned(olderThan: CallRecordingUploader.abandonedAge) {
-                os_log("dropping unfinished recording %{public}@", log: CallRecordingUploader.log, type: .error, callId)
+                CallRecordingLog.log("dropping unfinished recording \(callId)")
                 store.delete(callId)
             }
-            for meta in store.pending() {
+            let pending = store.pending()
+            if !pending.isEmpty {
+                CallRecordingLog.log("\(pending.count) recording(s) pending upload")
+            }
+            for meta in pending {
                 let decision = await upload(meta)
                 if decision == .keep || decision == .unauthorized {
                     break
@@ -161,18 +163,28 @@ public final class CallRecordingUploader: @unchecked Sendable {
         return (baseURL, token, onUnauthorized)
     }
 
+    /// pai's base URL and bearer token, nil while signed out.
+    func signedIn() -> (URL, String)? {
+        let (baseURL, token, _) = credentials()
+        guard let baseURL, let token else { return nil }
+        return (baseURL, token)
+    }
+
     /// Uploads one recording and applies the decision to its files. Nil credentials keep it.
     @discardableResult
     public func upload(_ meta: CallRecordingMeta) async -> Decision {
         let (baseURL, token, onUnauthorized) = credentials()
-        guard let baseURL, let token else { return .keep }
+        guard let baseURL, let token else {
+            CallRecordingLog.log("recording \(meta.callId): not uploaded, pai not signed in (kept)")
+            return .keep
+        }
 
         let callId = meta.callId
         let mic = store.micURL(callId)
         let remote = store.remoteURL(callId)
         let fileManager = FileManager.default
         guard fileManager.fileExists(atPath: mic.path), fileManager.fileExists(atPath: remote.path), let metaData = try? meta.encoded() else {
-            os_log("dropping recording %{public}@: tracks missing", log: CallRecordingUploader.log, type: .error, callId)
+            CallRecordingLog.log("dropping recording \(callId): tracks missing")
             store.delete(callId)
             return .drop
         }
@@ -183,20 +195,20 @@ public final class CallRecordingUploader: @unchecked Sendable {
         do {
             try CallRecordingMultipart.writeBody(meta: metaData, mic: mic, remote: remote, boundary: boundary, to: bodyFile)
         } catch {
-            os_log("recording %{public}@: body not written: %{public}@", log: CallRecordingUploader.log, type: .error, callId, String(describing: error))
+            CallRecordingLog.log("recording \(callId): body not written: \(error)")
             return .keep
         }
 
+        let bodySize = (try? fileManager.attributesOfItem(atPath: bodyFile.path)[.size] as? Int) ?? 0
+        CallRecordingLog.log("recording \(callId): uploading \(bodySize) bytes")
         let request = CallRecordingMultipart.request(baseURL: baseURL, token: token, boundary: boundary)
         let decision: Decision
         do {
             let status = try await transport.send(request, bodyFile: bodyFile)
             decision = CallRecordingUploader.decide(status: status)
-            if decision == .drop {
-                os_log("dropping recording %{public}@: pai answered %d", log: CallRecordingUploader.log, type: .error, callId, status)
-            }
+            CallRecordingLog.log("recording \(callId): pai answered \(status), \(decision)")
         } catch {
-            os_log("recording %{public}@: upload failed, will retry: %{public}@", log: CallRecordingUploader.log, type: .info, callId, String(describing: error))
+            CallRecordingLog.log("recording \(callId): upload failed, will retry: \(error)")
             decision = .keep
         }
 

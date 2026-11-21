@@ -731,6 +731,8 @@ public final class ChatMessageInteractiveFileNode: ASDisplayNode {
                             errorText = arguments.presentationData.strings.Message_AudioTranscription_ErrorEmpty
                         case .tooLong:
                             errorText = arguments.presentationData.strings.Message_AudioTranscription_ErrorTooLong
+                        case .speechPermissionDenied:
+                            errorText = "Speech recognition is off for Paigram. Turn it on in Settings → Paigram."
                         }
                         textString = NSAttributedString(string: errorText, font: errorTextFont, textColor: messageTheme.secondaryTextColor)
                     }

@@ -16,6 +16,27 @@ public struct LocallyTranscribedAudio {
     public var text: String
     public var locale: String
     public var isFinal: Bool
+    /// Speech recognition permission is off and nothing that works without it produced text.
+    public var speechPermissionDenied: Bool = false
+}
+
+/// Prefix of the temporary audio segments written for detection and chunked recognition.
+public let voiceSegmentFilePrefix = "voice-"
+
+/// Deletes voice segments in `directory` last modified more than `maxAge` seconds before `now`.
+public func sweepStaleVoiceSegments(in directory: URL, maxAge: TimeInterval = 3600.0, now: Date = Date()) {
+    let fileManager = FileManager.default
+    guard let urls = try? fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.contentModificationDateKey], options: [.skipsHiddenFiles]) else {
+        return
+    }
+    for url in urls where url.lastPathComponent.hasPrefix(voiceSegmentFilePrefix) && url.pathExtension == "caf" {
+        guard let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate else {
+            continue
+        }
+        if now.timeIntervalSince(modified) > maxAge {
+            try? fileManager.removeItem(at: url)
+        }
+    }
 }
 
 /// Candidate locales ordered by the app language, then the system languages, then the rest.
@@ -63,6 +84,7 @@ private enum VoiceTranscriber {
     }
 
     static func transcribe(url: URL, locales: [String], detect: Bool) async -> LocallyTranscribedAudio? {
+        sweepStaleVoiceSegments(in: URL(fileURLWithPath: NSTemporaryDirectory()))
         guard var chosen = locales.first, let duration = audioDuration(url) else {
             return nil
         }
@@ -70,7 +92,14 @@ private enum VoiceTranscriber {
 
         if detect && authorized && locales.count > 1 {
             let clip = duration <= detectionDuration ? url : writeSegment(of: url, start: 0.0, duration: detectionDuration)
-            if let clip, let best = await detectLanguage(url: clip, locales: locales) {
+            var best: Candidate?
+            if let clip {
+                best = await detectLanguage(url: clip, locales: locales)
+                if clip != url {
+                    try? FileManager.default.removeItem(at: clip)
+                }
+            }
+            if let best {
                 chosen = best.locale
                 if duration <= detectionDuration {
                     return LocallyTranscribedAudio(text: best.text, locale: chosen, isFinal: true)
@@ -89,7 +118,11 @@ private enum VoiceTranscriber {
         }
         #endif
 
-        guard authorized, let recognizer = SFSpeechRecognizer(locale: Locale(identifier: chosen)) else {
+        if !authorized {
+            // Apple's server recognition goes through SFSpeechRecognizer too, so nothing is left to try.
+            return LocallyTranscribedAudio(text: "", locale: chosen, isFinal: true, speechPermissionDenied: true)
+        }
+        guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: chosen)) else {
             return nil
         }
         var text = ""
@@ -98,8 +131,12 @@ private enum VoiceTranscriber {
         } else {
             var start = 0.0
             while start < duration && !Task.isCancelled {
-                if let chunk = writeSegment(of: url, start: start, duration: serverChunkDuration), let part = await recognize(url: chunk, locale: chosen)?.text {
-                    text = join(text, part)
+                if let chunk = writeSegment(of: url, start: start, duration: serverChunkDuration) {
+                    let part = await recognize(url: chunk, locale: chosen)?.text
+                    try? FileManager.default.removeItem(at: chunk)
+                    if let part {
+                        text = join(text, part)
+                    }
                 }
                 start += serverChunkDuration
             }
@@ -307,7 +344,7 @@ private enum VoiceTranscriber {
             }
             input.framePosition = startFrame
             var remaining = AVAudioFrameCount(min(Double(input.length - startFrame), duration * format.sampleRate))
-            let outputUrl = URL(fileURLWithPath: NSTemporaryDirectory() + "voice-\(UInt64.random(in: 0 ... UInt64.max)).caf")
+            let outputUrl = URL(fileURLWithPath: NSTemporaryDirectory() + voiceSegmentFilePrefix + "\(UInt64.random(in: 0 ... UInt64.max)).caf")
             let output = try AVAudioFile(forWriting: outputUrl, settings: format.settings, commonFormat: format.commonFormat, interleaved: format.isInterleaved)
             while remaining > 0 {
                 let count = min(remaining, 32768)
