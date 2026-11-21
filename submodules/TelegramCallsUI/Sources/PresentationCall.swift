@@ -182,6 +182,7 @@ public final class PresentationCallImpl: PresentationCall {
     /// When the call reached `.active`; the auto-start waits for remote audio, at most `autoTranscriptStartDelay` after it.
     private var autoTranscriptActiveAt: Double?
     private let autoTranscriptAudioDisposable = MetaDisposable()
+    private var autoTranscriptGeneration = 0
     private static let autoTranscriptStartDelay: Double = 3.0
     private let isRecordingTranscriptPromise = ValuePromise<Bool>(false)
     public var isRecordingTranscript: Signal<Bool, NoError> {
@@ -1389,8 +1390,15 @@ public final class PresentationCallImpl: PresentationCall {
                 if case .active = presentationState.state {
                     self.autoStartTranscriptRecordingIfNeeded()
                 } else if self.isAutoTranscriptPending {
-                    CallRecordingLog.log("auto-recording cancelled: call left active before audio flowed")
                     self.cancelAutoTranscriptStart()
+                    if case .reconnecting = presentationState.state {
+                        // A network blip must not cost the call its recording: the next `.active` re-runs the
+                        // setting and should-record checks and arms the auto-start again.
+                        CallRecordingLog.log("auto-recording deferred: call reconnecting before audio flowed")
+                        self.didAutoStartTranscript = false
+                    } else {
+                        CallRecordingLog.log("auto-recording cancelled: call left active before audio flowed")
+                    }
                 }
             }
         }
@@ -1625,13 +1633,16 @@ public final class PresentationCallImpl: PresentationCall {
         )
         self.isAutoTranscriptPending = true
         self.autoTranscriptActiveAt = CFAbsoluteTimeGetCurrent()
+        self.autoTranscriptGeneration += 1
+        let generation = self.autoTranscriptGeneration
         Task { [weak self] in
             let answer = await CallRecordingPolicy.shouldRecord(policyPeer)
             Queue.mainQueue().async {
                 guard let self else {
                     return
                 }
-                guard self.isAutoTranscriptPending else {
+                // A policy answer from an attempt cancelled by a reconnect must not drive the re-armed one.
+                guard self.isAutoTranscriptPending, generation == self.autoTranscriptGeneration else {
                     return
                 }
                 guard answer.record else {
