@@ -9,6 +9,8 @@ public enum PaiCallTranscriptCard {
     private static let header = try! NSRegularExpression(pattern: "^📞 (Incoming|Outgoing) (.+?) call with (.+), (.+?) (\\d{1,2}:\\d{2}), (\\d+(?::\\d{2})+)$")
     /// The first transcript line, or the line saying there is none.
     private static let transcriptStart = try! NSRegularExpression(pattern: "^(\\[\\d+(?::\\d{2})+\\]|Nothing was said)", options: [.anchorsMatchLines])
+    /// `**Me:**`: markdown bold left in the text.
+    private static let boldMarkdown = try! NSRegularExpression(pattern: "\\*\\*([^*\\n]+?)\\*\\*")
 
     public static func isHeader(_ text: String) -> Bool {
         let ns = text as NSString
@@ -30,23 +32,47 @@ public enum PaiCallTranscriptCard {
         let subtitle = "\(group(1)) \(group(2)) call, \(group(4)) \(group(5))"
         let head = "\(title)\n\(subtitle)"
         let headLength = (head as NSString).length
-        let delta = headLength - headerEnd
+
+        // Markdown bold that came through as text (`**Me:**`), drawn bold with its asterisks gone.
+        let body = ns.substring(from: headerEnd) as NSString
+        let stripped = NSMutableString()
+        var removed: [Int] = []
+        var bolds: [Range<Int>] = []
+        var cursor = 0
+        for bold in boldMarkdown.matches(in: body as String, range: NSRange(location: 0, length: body.length)) {
+            stripped.append(body.substring(with: NSRange(location: cursor, length: bold.range.location - cursor)))
+            let inner = body.substring(with: bold.range(at: 1))
+            let from = stripped.length
+            stripped.append(inner)
+            bolds.append(headLength + from ..< headLength + stripped.length)
+            removed.append(bold.range.location)
+            removed.append(bold.range.location + bold.range.length - 2)
+            cursor = bold.range.location + bold.range.length
+        }
+        stripped.append(body.substring(from: cursor))
+        // A body offset, past the head and less the asterisks before it (inside a pair of them, at its start).
+        let place = { (offset: Int) -> Int in
+            var shift = 0
+            for at in removed where at < offset { shift += min(2, offset - at) }
+            return headLength + offset - shift
+        }
 
         var result: [MessageTextEntity] = [
             MessageTextEntity(range: 0 ..< (title as NSString).length, type: .Bold),
             MessageTextEntity(range: (title as NSString).length + 1 ..< headLength, type: .Italic),
         ]
         for entity in entities where entity.range.lowerBound >= headerEnd {
-            result.append(MessageTextEntity(range: entity.range.lowerBound + delta ..< entity.range.upperBound + delta, type: entity.type))
+            let lower = place(entity.range.lowerBound - headerEnd), upper = place(entity.range.upperBound - headerEnd)
+            if upper > lower { result.append(MessageTextEntity(range: lower ..< upper, type: entity.type)) }
         }
-        let rest = NSRange(location: headerEnd, length: ns.length - headerEnd)
-        if let start = transcriptStart.firstMatch(in: text, range: rest)?.range.location {
-            var end = ns.length
-            while end > start, let scalar = UnicodeScalar(ns.character(at: end - 1)), CharacterSet.whitespacesAndNewlines.contains(scalar) { end -= 1 }
+        result += bolds.map { MessageTextEntity(range: $0, type: .Bold) }
+        if let start = transcriptStart.firstMatch(in: stripped as String, range: NSRange(location: 0, length: stripped.length))?.range.location {
+            var end = stripped.length
+            while end > start, let scalar = UnicodeScalar(stripped.character(at: end - 1)), CharacterSet.whitespacesAndNewlines.contains(scalar) { end -= 1 }
             if end > start {
-                result.append(MessageTextEntity(range: start + delta ..< end + delta, type: .BlockQuote(isCollapsed: true)))
+                result.append(MessageTextEntity(range: headLength + start ..< headLength + end, type: .BlockQuote(isCollapsed: true)))
             }
         }
-        return (head + ns.substring(from: headerEnd), result)
+        return (head + (stripped as String), result)
     }
 }
