@@ -23,6 +23,7 @@ swift_library(
         "//submodules/PaiGlance:PaiGlance",
         "//submodules/PaiPasskeyCore:PaiPasskeyCore",
         "//submodules/PaiPlaces:PaiPlaces",
+        "//submodules/PaiSleep:PaiSleep",
         "//submodules/PaiCallRecording:PaiCallRecording",
     ],
     visibility = [
