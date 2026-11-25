@@ -1,7 +1,8 @@
 /**
  * `bun run device [--no-build] [--device <name|udid>] [--ipa <path>]`: the release build TestFlight ships, signed Ad Hoc
  * instead, installed straight on an iPhone over USB or Wi-Fi and launched (with `--ipa`, written to `<path>` instead, for
- * the paired iPhone wherever it is: dev serves it as an over-the-air install link), and its watch app on the Apple
+ * the paired iPhone wherever it is, or on a GitHub runner (`CI`) for every device on the account: dev serves it as an
+ * over-the-air install link), and its watch app on the Apple
  * Watch paired with this Mac, when there is one (Developer Mode on the watch). No upload, no processing,
  * no version bump. The iPhone has to be paired with this Mac once by cable (`xcrun devicectl manage pair`,
  * Developer Mode on; `pymobiledevice3 lockdown set True com.apple.mobile.wireless_lockdown EnableWifiDebugging`
@@ -157,6 +158,19 @@ async function install(device: Device, watch: Device | undefined) {
   if (watch) await installWatch(watch, app);
 }
 
+/** On a GitHub runner (`CI`, `--ipa` only): no device here, so the IPA is signed for every device on the account. */
+async function buildOnRunner(path: string) {
+  await precheck();
+  await provision("adHoc");
+  await releaseBuild(adHocCodesigningPath, buildNumber, true);
+  await $`cp -f ${root}bazel-bin/Telegram/Telegram.ipa ${path}`;
+  console.log(`IPA for every registered device written to ${path}`);
+}
+
+if (ipaPath && process.env.CI) {
+  await buildOnRunner(ipaPath);
+  process.exit(0);
+}
 const device = await pickDevice();
 if (!ipaPath) await ensureHere(device);
 const [watch] = await paired("appleWatch");

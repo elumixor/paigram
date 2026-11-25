@@ -63,6 +63,20 @@ private func buttonImage(_ button: PaiCardView.Button, font: UIFont, accent: UIC
 }
 
 /// Presses in flight and the last error, by card: so the button says it is working and a refusal shows.
+/// A row's progress: a rounded track with the done part filled.
+private func progressImage(_ progress: Double, width: CGFloat, color: UIColor) -> UIImage? {
+    let size = CGSize(width: max(1.0, width), height: 4.0)
+    return UIGraphicsImageRenderer(size: size).image { _ in
+        let track = UIBezierPath(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: size.height / 2.0)
+        color.withAlphaComponent(0.2).setFill()
+        track.fill()
+        let done = CGFloat(min(1.0, max(0.0, progress))) * size.width
+        guard done > 0.0 else { return }
+        color.setFill()
+        UIBezierPath(roundedRect: CGRect(x: 0.0, y: 0.0, width: max(size.height, done), height: size.height), cornerRadius: size.height / 2.0).fill()
+    }
+}
+
 private var pressing: Set<String> = []
 private var pressErrors: [Int: String] = [:]
 
@@ -191,6 +205,10 @@ public final class ChatMessagePaiConnectorCardBubbleContentNode: ChatMessageBubb
                             if !cardRow.isClosed, let message = cardRow.message?.paiNonEmpty {
                                 y += lineGap
                                 place(wrappedImage(message, font: smallFont, color: colors.secondaryTextColor, maxWidth: maxWidth, lines: 3))
+                            }
+                            if !cardRow.isClosed, let progress = cardRow.progress {
+                                y += lineGap + 2.0
+                                place(progressImage(progress, width: min(maxWidth, 260.0), color: stateColor))
                             }
                             if !cardRow.isClosed {
                                 placeButtons(cardRow.buttons, card: row.id, row: cardRow.id)

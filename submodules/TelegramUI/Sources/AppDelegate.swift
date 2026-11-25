@@ -2860,6 +2860,12 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
     }
     
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
+        // A pushed app update (`paiInstall`, dev's itms-services link): opening it brings up iOS's Install prompt, and the
+        // build installs over this app.
+        if let link = response.notification.request.content.userInfo["paiInstall"] as? String, let url = URL(string: link) {
+            UIApplication.shared.open(url, options: [:], completionHandler: { _ in completionHandler() })
+            return
+        }
         // A tap on one of pai's answer buttons (or the watch's): the answer goes to the box, no chat opens.
         if PaiNotificationAnswer.handles(response.actionIdentifier) {
             PaiNotificationAnswer.answer(actionIdentifier: response.actionIdentifier, userText: (response as? UNTextInputNotificationResponse)?.userText, userInfo: response.notification.request.content.userInfo, completion: {
@@ -3058,6 +3064,12 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
     
     @available(iOS 10.0, *)
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        // An update pushed while the app is open: no banner, the app updates itself (iOS asks to Install once).
+        if let link = notification.request.content.userInfo["paiInstall"] as? String, let url = URL(string: link) {
+            UIApplication.shared.open(url, options: [:], completionHandler: nil)
+            completionHandler([])
+            return
+        }
         // New mail or a WhatsApp message while the app is open shows up in its chat, not as a banner.
         if EmailChats.isEmailPush(notification.request.content.userInfo) {
             EmailChats.syncNow()

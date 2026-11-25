@@ -66,8 +66,10 @@ public struct PaiCardView: Decodable, Equatable {
         public let url: String?
         public let supersededBy: String?
         public let buttons: [Button]
+        /// How far its work is, 0...1, drawn as a bar (an estimate).
+        public let progress: Double?
 
-        public init(id: String, title: String, state: String?, message: String?, url: String?, supersededBy: String?, buttons: [Button]) {
+        public init(id: String, title: String, state: String?, message: String?, url: String?, supersededBy: String?, buttons: [Button], progress: Double? = nil) {
             self.id = id
             self.title = title
             self.state = state
@@ -75,11 +77,12 @@ public struct PaiCardView: Decodable, Equatable {
             self.url = url
             self.supersededBy = supersededBy
             self.buttons = buttons
+            self.progress = progress
         }
 
         /// Just pressed: running, "Starting…", no buttons, until the connector redraws it (`PaiPressed`).
         public var running: Row {
-            Row(id: id, title: title, state: "running", message: "Starting…", url: url, supersededBy: supersededBy, buttons: [])
+            Row(id: id, title: title, state: "running", message: "Starting…", url: url, supersededBy: supersededBy, buttons: [], progress: progress)
         }
 
         public init(from decoder: Decoder) throws {
@@ -91,12 +94,13 @@ public struct PaiCardView: Decodable, Equatable {
             url = try? c.decodeIfPresent(String.self, forKey: .url)
             supersededBy = PaiCardView.idString(c, .supersededBy)
             buttons = (try? c.decodeIfPresent([Button].self, forKey: .buttons)) ?? []
+            progress = try? c.decodeIfPresent(Double.self, forKey: .progress)
         }
 
         /// Closed by the host: it lost its buttons and reads as its closure.
         public var isClosed: Bool { state == "superseded" || state == "invalidated" }
 
-        private enum CodingKeys: String, CodingKey { case id, title, state, message, url, supersededBy, buttons }
+        private enum CodingKeys: String, CodingKey { case id, title, state, message, url, supersededBy, buttons, progress }
     }
 
     public let title: String
