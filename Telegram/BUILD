@@ -598,6 +598,15 @@ official_background_gpu_fragment = """
 """
 background_gpu_fragment = official_background_gpu_fragment if telegram_bundle_id == "ph.telegra.Telegraph" else ""
 
+# Paigram: nightly sleep from Health to Balance (PaiSleep); the app id needs HealthKit. Background delivery wakes the
+# app for new sleep samples.
+healthkit_fragment = """
+<key>com.apple.developer.healthkit</key>
+<true/>
+<key>com.apple.developer.healthkit.background-delivery</key>
+<true/>
+"""
+
 # Paigram: NEHotspotNetwork.fetchCurrent for place arrivals (PaiPlaces); the app id needs Access WiFi Information.
 wifi_info_fragment = """
 <key>com.apple.developer.networking.wifi-info</key>
@@ -621,6 +630,7 @@ plist_fragment(
         signin_fragment,
         background_gpu_fragment,
         wifi_info_fragment,
+        healthkit_fragment,
     ])
 )
 
@@ -1662,6 +1672,10 @@ plist_fragment(
     <string>Telegram stores your contacts heavily encrypted in the cloud to let you connect with your friends across all your devices.</string>
     <key>NSFaceIDUsageDescription</key>
     <string>You can use Face ID to unlock the app.</string>
+    <key>NSHealthShareUsageDescription</key>
+    <string>Paigram sends each night's sleep to your assistant, which puts it on your Balance calendar.</string>
+    <key>NSHealthUpdateUsageDescription</key>
+    <string>Paigram only reads your sleep from Health and never writes to it.</string>
     <key>NSLocationAlwaysUsageDescription</key>
     <string>When you send your location to your friends, Telegram needs access to show them a map. You also need this to send locations from an Apple Watch.</string>
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>

@@ -1210,6 +1210,8 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
         EmailChats.configure()
         // Paigram: place fences; made here so a background relaunch for a region event reaches the location manager.
         PaiPlaceReminders.start()
+        // Paigram: sleep from Health to Balance; registered here so HealthKit background delivery reaches the observer.
+        PaiSleepSharing.start()
         let _ = (self.sharedContextPromise.get()
         |> mapToSignal { sharedApplicationContext -> Signal<AccountContext?, NoError> in
             return sharedApplicationContext.sharedContext.activeAccountContexts

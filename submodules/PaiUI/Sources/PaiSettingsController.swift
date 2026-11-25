@@ -95,6 +95,7 @@ struct SettingsView: View {
                 PaiCallsSection()
                 PaiPasskeySection()
                 PaiPlacesSection()
+                PaiSleepSection()
                 PaiSignOutSection()
             }
             .listStyle(.insetGrouped)
