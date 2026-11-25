@@ -89,6 +89,7 @@ Bazel builds, driven by Telegram's `build-system/Make/Make.py`. First time: `bun
 ```sh
 bun run sim [--no-build]          # simulator build, installed and launched on the newest iPhone simulator
 bun run device [--no-build] [--device <name>]   # the release build signed Ad Hoc, installed and launched on a paired iPhone over USB or Wi-Fi
+bun run ipa <path> [--no-build]   # the same build for the paired iPhone, written to <path>: dev's over-the-air install when the phone is away
 bun run ci-secrets                # once, on the Mac: fill the GitHub secrets CI needs from the box and the keychain
 bun run tag [--minor]             # bump the version, tag it `ios-vX.Y.Z` and push; builds nothing until pai's build card dispatches TestFlight on that tag
 bun run precheck                  # type-check Paigram's widget and watch Swift against the SDKs in seconds; the release scripts run it first

@@ -1,6 +1,7 @@
 /**
- * `bun run device [--no-build] [--device <name|udid>]`: the release build TestFlight ships, signed Ad Hoc
- * instead, installed straight on an iPhone over USB or Wi-Fi and launched, and its watch app on the Apple
+ * `bun run device [--no-build] [--device <name|udid>] [--ipa <path>]`: the release build TestFlight ships, signed Ad Hoc
+ * instead, installed straight on an iPhone over USB or Wi-Fi and launched (with `--ipa`, written to `<path>` instead, for
+ * the paired iPhone wherever it is: dev serves it as an over-the-air install link), and its watch app on the Apple
  * Watch paired with this Mac, when there is one (Developer Mode on the watch). No upload, no processing,
  * no version bump. The iPhone has to be paired with this Mac once by cable (`xcrun devicectl manage pair`,
  * Developer Mode on; `pymobiledevice3 lockdown set True com.apple.mobile.wireless_lockdown EnableWifiDebugging`
@@ -31,6 +32,9 @@ const waitLimitMs = 10 * 60_000;
 const skipBuild = process.argv.includes("--no-build");
 const deviceArgument = process.argv.indexOf("--device");
 const wanted = deviceArgument > 0 ? process.argv[deviceArgument + 1] : undefined;
+const ipaArgument = process.argv.indexOf("--ipa");
+const ipaPath = ipaArgument > 0 ? process.argv[ipaArgument + 1] : undefined;
+if (ipaArgument > 0 && !ipaPath) throw new Error("--ipa needs the path to write the IPA to");
 const { bundle_id: bundleId } = (await Bun.file(config).json()) as { bundle_id: string };
 
 async function paired(type: string): Promise<Device[]> {
@@ -154,7 +158,7 @@ async function install(device: Device, watch: Device | undefined) {
 }
 
 const device = await pickDevice();
-await ensureHere(device);
+if (!ipaPath) await ensureHere(device);
 const [watch] = await paired("appleWatch");
 if (!skipBuild) {
   await precheck();
@@ -165,4 +169,7 @@ if (!skipBuild) {
   if (registered || stale || missingEntitlements(granted).length) await provision("adHoc");
   await releaseBuild(adHocCodesigningPath, buildNumber, watch !== undefined);
 }
-await install(device, watch);
+if (ipaPath) {
+  await $`cp -f ${root}bazel-bin/Telegram/Telegram.ipa ${ipaPath}`;
+  console.log(`IPA for ${device.name} written to ${ipaPath}`);
+} else await install(device, watch);
