@@ -186,4 +186,12 @@ if (!skipBuild) {
 if (ipaPath) {
   await $`cp -f ${root}bazel-bin/Telegram/Telegram.ipa ${ipaPath}`;
   console.log(`IPA for ${device.name} written to ${ipaPath}`);
-} else await install(device, watch);
+} else {
+  // Exit 3: built, but the phone could not take it (asleep, off the Wi-Fi). dev then uploads this build as an install link.
+  try {
+    await install(device, watch);
+  } catch (err) {
+    console.error(`error: ${(err as Error).message}`);
+    process.exit(skipBuild ? 1 : 3);
+  }
+}

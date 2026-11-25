@@ -1,0 +1,122 @@
+name: Ad Hoc build (one GitHub image)
+
+# The Ad Hoc build on one GitHub macOS image, called by `adhoc.yml` for the macOS 26 image and again for the macOS 15
+# image when no machine of the first kind came.
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: the runs-on label (macos-26, macos-15)
+        required: true
+        type: string
+      sha:
+        required: true
+        type: string
+      job:
+        required: true
+        type: string
+      slug:
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 300
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.sha }}
+          submodules: recursive
+
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          pinned=$(python3 -c 'import json;print(json.load(open("versions.json"))["xcode"])')
+          app="/Applications/Xcode_$pinned.app"
+          if [ ! -d "$app" ]; then
+            app=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+            echo "::warning::Xcode $pinned is not installed on this runner; building with $app"
+          fi
+          sudo xcode-select -s "$app/Contents/Developer"
+          if [ -L /Applications/Xcode.app ] || [ ! -e /Applications/Xcode.app ]; then
+            sudo ln -sfn "$app" /Applications/Xcode.app
+          fi
+          echo "XCODE_APP=$app" >> "$GITHUB_ENV"
+          xcodebuild -version
+
+      - name: Free disk space
+        run: |
+          set -euo pipefail
+          for app in /Applications/Xcode_*.app; do
+            [ "$app" = "$XCODE_APP" ] || sudo rm -rf "$app"
+          done
+          sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes/* ~/Library/Developer/CoreSimulator/Caches
+          df -h /
+
+      - name: Restore Bazel cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/telegram-bazel-cache
+          key: bazel-${{ inputs.sha }}
+          restore-keys: bazel-
+
+      - name: Prepare signing and configuration
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          TEAM_ID: ${{ secrets.TEAM_ID }}
+          DIST_CERT_P12: ${{ secrets.DIST_CERT_P12 }}
+          DIST_CERT_P12_PASSWORD: ${{ secrets.DIST_CERT_P12_PASSWORD }}
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          PAI_BOX_URL: ${{ secrets.PAI_BOX_URL }}
+          PAI_BOT_USERNAME: ${{ secrets.PAI_BOT_USERNAME }}
+        run: bun scripts/ci.ts
+
+      # Ad Hoc profiles for every enabled device on the account, the release build with the watch app, the IPA.
+      - name: Build
+        timeout-minutes: 270
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          TEAM_ID: ${{ secrets.TEAM_ID }}
+          PAI_BOX_URL: ${{ secrets.PAI_BOX_URL }}
+          PAI_BOT_USERNAME: ${{ secrets.PAI_BOT_USERNAME }}
+        run: bun run ipa "$RUNNER_TEMP/app.ipa"
+
+      # DEV_OTA_TOKEN opens only dev's IPA upload. The answer's install link reaches the phone through dev and pai.
+      - name: Upload
+        env:
+          DEV_URL: ${{ secrets.DEV_URL }}
+          DEV_OTA_TOKEN: ${{ secrets.DEV_OTA_TOKEN }}
+          SLUG: ${{ inputs.slug }}
+          JOB: ${{ inputs.job }}
+        run: |
+          set -euo pipefail
+          IPA="$RUNNER_TEMP/app.ipa"
+          PLIST=$(unzip -Z1 "$IPA" | grep -E '^Payload/[^/]+\.app/Info\.plist$' | head -1)
+          unzip -p "$IPA" "$PLIST" > "$RUNNER_TEMP/Info.plist"
+          key() { /usr/libexec/PlistBuddy -c "Print :$1" "$RUNNER_TEMP/Info.plist" 2>/dev/null || true; }
+          SLUG_PATH=$(python3 -c 'import os, urllib.parse; print(urllib.parse.quote(os.environ["SLUG"], safe=""))')
+          curl -fsS --retry 3 -T "$IPA" -H "authorization: Bearer $DEV_OTA_TOKEN" -H "content-type: application/octet-stream" \
+            --url-query "bundle=$(key CFBundleIdentifier)" --url-query "version=$(key CFBundleShortVersionString)" \
+            --url-query "title=$(key CFBundleDisplayName)" --url-query "job=$JOB" "$DEV_URL/ota/$SLUG_PATH"
+
+      - name: Trim Bazel cache
+        if: always()
+        continue-on-error: true
+        run: bun scripts/trim-cache.ts "$HOME/telegram-bazel-cache" 8
+
+      - name: Save Bazel cache
+        if: always()
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ~/telegram-bazel-cache
+          key: bazel-${{ inputs.sha }}
