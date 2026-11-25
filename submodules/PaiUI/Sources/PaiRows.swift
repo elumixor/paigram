@@ -10,6 +10,8 @@ public struct PaiArtifact: Decodable, Equatable {
     public let name: String
     public let size: Int
     public let title: String?
+    /// A UI mock's page (pai's `protocol/mock.ts`): the card draws its version and Approve & build under it.
+    public let mock: PaiMockRef?
 
     public static let maxBytes = 2 * 1024 * 1024
     public static let maxPerMessage = 4
@@ -23,13 +25,14 @@ public struct PaiArtifact: Decodable, Equatable {
         name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? ""
         size = (try? c.decodeIfPresent(Int.self, forKey: .size)) ?? 0
         title = try? c.decodeIfPresent(String.self, forKey: .title)
+        mock = try? c.decodeIfPresent(PaiMockRef.self, forKey: .mock)
     }
 
     var isDrawable: Bool {
         size > 0 && size <= PaiArtifact.maxBytes && PaiArtifact.pattern.firstMatch(in: file, range: NSRange(location: 0, length: (file as NSString).length)) != nil
     }
 
-    private enum CodingKeys: String, CodingKey { case file, name, size, title }
+    private enum CodingKeys: String, CodingKey { case file, name, size, title, mock }
 }
 
 /// A connector's card (`meta.card.view`, `@desk/connector`'s `CardView`): the dev connector's build card and its kin.

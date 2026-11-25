@@ -196,6 +196,7 @@ public final class PaiStore: ObservableObject {
         if Self.answeringKinds.contains(event.kind), let id = event.sessionId {
             PaiExpected.unexpect(PaiChat.agents.first { $0.sessionId == id }?.slug)
         }
+        if event.kind == "mock.changed" { PaiMocks.apply(event.payload) }
         if event.kind.hasPrefix("agent.") { refreshAgents() }
         if event.kind.hasPrefix("agent.") || event.kind.hasPrefix("ask.") || Self.refreshingKinds.contains(event.kind) { refreshWaiting() }
         if event.kind.hasPrefix("draft.") || event.kind == "message.new" { refreshDrafts() }
