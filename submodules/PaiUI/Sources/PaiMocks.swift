@@ -115,6 +115,7 @@ public enum PaiMocks {
     /// His Approve & build on one version; the error the box gave, nil when it went.
     @discardableResult
     public static func approve(_ id: String, version: Int) async -> String? {
+        guard #available(iOS 16.0, *) else { return "Needs iOS 16" }
         lock.lock()
         guard !approving.contains(id) else {
             lock.unlock()
@@ -141,6 +142,7 @@ public enum PaiMocks {
     }
 
     private static func load(_ id: String) {
+        guard #available(iOS 16.0, *) else { return }
         Task {
             let state = try? await PaiClient().call(PaiMockState.self, "/mocks/\(id)")
             lock.lock()
