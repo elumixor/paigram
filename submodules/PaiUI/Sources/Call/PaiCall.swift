@@ -2,6 +2,7 @@ import AVFoundation
 import CallKit
 import Foundation
 import UIKit
+import PaiCallRecording
 
 /// The one voice call with an agent: started from anywhere (`PaiCall.shared.start(agent:)`), shown in its own
 /// window over the app, carried by CallKit so it is a real call (lock screen, AirPods controls, keeps running with
@@ -60,18 +61,6 @@ public final class PaiCall: NSObject, ObservableObject {
     private override init() {
         engine = UserDefaults.standard.string(forKey: Self.engineKey) ?? "claude"
         super.init()
-        if Self.callKitAvailable {
-            let configuration = CXProviderConfiguration()
-            configuration.supportsVideo = false
-            configuration.maximumCallGroups = 1
-            configuration.maximumCallsPerCallGroup = 1
-            configuration.supportedHandleTypes = [.generic]
-            configuration.includesCallsInRecents = false
-            configuration.iconTemplateImageData = UIImage(systemName: "waveform")?.pngData()
-            let provider = CXProvider(configuration: configuration)
-            provider.setDelegate(self, queue: nil)
-            self.provider = provider
-        }
         audio.onCapture = { [weak self] chunk in
             guard let self, self.streaming, let socket = self.socket else { return }
             socket.send(.data(chunk)) { _ in }
@@ -166,8 +155,30 @@ public final class PaiCall: NSObject, ObservableObject {
 
     // MARK: Lifecycle
 
+    /// Telegram's calls have their own provider in this process and CallKit hands a transaction to any of the
+    /// app's providers, so this one exists only for the length of an agent call (see `CallKitOwnership`).
+    private func makeProvider() -> CXProvider? {
+        guard CallKitOwnership.agentProviderNeeded(agentCallActive: active, callKitAvailable: Self.callKitAvailable) else { return nil }
+        let configuration = CXProviderConfiguration()
+        configuration.supportsVideo = false
+        configuration.maximumCallGroups = 1
+        configuration.maximumCallsPerCallGroup = 1
+        configuration.supportedHandleTypes = [.generic]
+        configuration.includesCallsInRecents = false
+        configuration.iconTemplateImageData = UIImage(systemName: "waveform")?.pngData()
+        let provider = CXProvider(configuration: configuration)
+        provider.setDelegate(self, queue: nil)
+        self.provider = provider
+        return provider
+    }
+
+    private func dropProvider() {
+        provider?.invalidate()
+        provider = nil
+    }
+
     private func begin() {
-        if let provider {
+        if let provider = makeProvider() {
             let uuid = UUID()
             self.uuid = uuid
             usesCallKit = true
@@ -179,6 +190,7 @@ public final class PaiCall: NSObject, ObservableObject {
                     // CallKit refused (another call, restrictions): the call still runs, just not as a system call.
                     self.usesCallKit = false
                     self.uuid = nil
+                    self.dropProvider()
                     self.beginWithoutCallKit()
                 }
             }
@@ -360,6 +372,11 @@ public final class PaiCall: NSObject, ObservableObject {
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         }
         uuid = nil
+        usesCallKit = false
+        let ending = provider
+        provider = nil
+        // Let CallKit take the end report before the provider goes away.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { ending?.invalidate() }
         NotificationCenter.default.post(name: Self.ended, object: nil)
         DispatchQueue.main.asyncAfter(deadline: .now() + (failed ? 3.0 : 1.2)) { [weak self] in
             guard let self, !self.active else { return }
@@ -371,10 +388,15 @@ public final class PaiCall: NSObject, ObservableObject {
 @available(iOS 16.0, *)
 extension PaiCall: CXProviderDelegate {
     public func providerDidReset(_ provider: CXProvider) {
+        guard provider === self.provider else { return }
         finish(reason: "reset", failed: false, local: true)
     }
 
     public func provider(_ provider: CXProvider, perform action: CXStartCallAction) {
+        guard CallKitOwnership.agentOwnsAction(actionCallUUID: action.callUUID, agentCallUUID: uuid) else {
+            action.fail()
+            return
+        }
         do {
             try PaiCallAudio.configureSession()
         } catch {
@@ -387,19 +409,27 @@ extension PaiCall: CXProviderDelegate {
     }
 
     public func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
-        if active { startAudio() }
+        if active, provider === self.provider { startAudio() }
     }
 
     public func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {
-        audio.stop()
+        if provider === self.provider { audio.stop() }
     }
 
     public func provider(_ provider: CXProvider, perform action: CXEndCallAction) {
+        guard CallKitOwnership.agentOwnsAction(actionCallUUID: action.callUUID, agentCallUUID: uuid) else {
+            action.fail()
+            return
+        }
         hangUpLocally()
         action.fulfill()
     }
 
     public func provider(_ provider: CXProvider, perform action: CXSetMutedCallAction) {
+        guard CallKitOwnership.agentOwnsAction(actionCallUUID: action.callUUID, agentCallUUID: uuid) else {
+            action.fail()
+            return
+        }
         applyMute(action.isMuted)
         action.fulfill()
     }

@@ -9,6 +9,12 @@ final class NoticeView: OverlayMaskContainerView {
     private let textContainer: UIView
     private let iconView: UIImageView
     private let textView: TextView
+    /// Set for a notice that is also a control (the transcript toggle); nil leaves taps to the call screen.
+    var action: (() -> Void)? {
+        didSet {
+            self.isUserInteractionEnabled = self.action != nil
+        }
+    }
     
     override init(frame: CGRect) {
         self.backgroundView = RoundedCornersView(color: .white)
@@ -26,6 +32,13 @@ final class NoticeView: OverlayMaskContainerView {
         self.textContainer.addSubview(self.iconView)
         self.textContainer.addSubview(self.textView)
         self.addSubview(self.textContainer)
+        
+        self.isUserInteractionEnabled = false
+        self.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(self.tapped)))
+    }
+    
+    @objc private func tapped() {
+        self.action?()
     }
     
     required init?(coder: NSCoder) {

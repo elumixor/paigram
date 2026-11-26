@@ -828,14 +828,6 @@ public final class PrivateCallScreen: OverlayMaskContainerView, AVPictureInPictu
                 self.endCallAction?()
             })
         ]
-        if let isTranscriptRecording = params.state.isTranscriptRecording {
-            buttons.insert(ButtonGroupView.Button(content: .record(isActive: isTranscriptRecording), isEnabled: !isTerminated, action: { [weak self] in
-                guard let self else {
-                    return
-                }
-                self.recordTranscriptAction?()
-            }), at: buttons.count - 1)
-        }
         if self.activeLocalVideoSource != nil {
             buttons.insert(ButtonGroupView.Button(content: .flipCamera, isEnabled: !isTerminated, action: { [weak self] in
                 guard let self else {
@@ -854,8 +846,11 @@ public final class PrivateCallScreen: OverlayMaskContainerView, AVPictureInPictu
         
         var notices: [ButtonGroupView.Notice] = []
         if !isTerminated {
-            if params.state.isTranscriptRecording == true {
-                notices.append(ButtonGroupView.Notice(id: AnyHashable(4 as Int), icon: "record.circle.fill", text: "Transcribing"))
+            // The transcript toggle lives in its notice, not the button row: a fifth button crowds the row on a phone.
+            if let isTranscriptRecording = params.state.isTranscriptRecording {
+                notices.append(ButtonGroupView.Notice(id: AnyHashable((isTranscriptRecording ? 4 : 5) as Int), icon: isTranscriptRecording ? "record.circle.fill" : "record.circle", text: isTranscriptRecording ? "Transcribing · tap to stop" : "Transcript off · tap to start", action: { [weak self] in
+                    self?.recordTranscriptAction?()
+                }))
             }
             if params.state.isLocalAudioMuted {
                 notices.append(ButtonGroupView.Notice(id: AnyHashable(0 as Int), icon: "Call/CallToastMicrophone", text: params.state.strings.Call_YourMicrophoneOff))
