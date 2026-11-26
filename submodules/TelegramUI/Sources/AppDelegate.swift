@@ -224,6 +224,7 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
     
     private var buildConfig: BuildConfig?
     let episodeId = arc4random()
+    private var paiRootPath: String?
     
     private let isInForegroundPromise = ValuePromise<Bool>(false, ignoreRepeated: true)
     private var isInForegroundValue = false
@@ -729,6 +730,8 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
         let logsPath = rootPath + "/logs/app-logs"
         let _ = try? FileManager.default.createDirectory(atPath: logsPath, withIntermediateDirectories: true, attributes: nil)
         Logger.setSharedLogger(Logger(rootPath: rootPath, basePath: logsPath))
+        self.paiRootPath = rootPath
+        PaiLogMirror.mirror(rootPath: rootPath)
 
         setManagedAudioSessionLogger({ s in
             Logger.shared.log("ManagedAudioSession", s)
@@ -1199,7 +1202,8 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
         }
         self.sharedContextPromise.set(sharedContextSignal
         |> mapToSignal { sharedApplicationContext, loggingSettings -> Signal<SharedApplicationContext, NoError> in
-            Logger.shared.logToFile = loggingSettings.logToFile
+            // Paigram: always log to file, so a failed call can be diagnosed from the device (PaiLogMirror).
+            Logger.shared.logToFile = true
             Logger.shared.logToConsole = loggingSettings.logToConsole
             Logger.shared.redactSensitiveData = loggingSettings.redactSensitiveData
             
@@ -1945,6 +1949,9 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
     }
 
     func applicationDidEnterBackground(_ application: UIApplication) {
+        if let paiRootPath = self.paiRootPath {
+            PaiLogMirror.mirror(rootPath: paiRootPath)
+        }
         let _ = (self.sharedContextPromise.get()
         |> take(1)
         |> deliverOnMainQueue).start(next: { sharedApplicationContext in
