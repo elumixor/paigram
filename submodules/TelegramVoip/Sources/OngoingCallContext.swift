@@ -10,6 +10,7 @@ import TgVoipWebrtc
 #if os(iOS)
 import UIKit
 import AppBundle
+import OngoingCallVersionPolicy
 import Accelerate
 #endif
 
@@ -916,7 +917,7 @@ public final class OngoingCallContext {
     
     public static func versions(includeExperimental: Bool, includeReference: Bool) -> [(version: String, supportsVideo: Bool)] {
         var result: [(version: String, supportsVideo: Bool)] = []
-        result.append(contentsOf: OngoingCallThreadLocalContextWebrtc.versions(withIncludeReference: includeReference).map { version -> (version: String, supportsVideo: Bool) in
+        result.append(contentsOf: OngoingCallVersionPolicy.advertisedVersions(OngoingCallThreadLocalContextWebrtc.versions(withIncludeReference: includeReference)).map { version -> (version: String, supportsVideo: Bool) in
             return (version, true)
         })
         return result
