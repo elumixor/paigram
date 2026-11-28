@@ -69,7 +69,7 @@ extension ChatControllerImpl {
     /// An agent's profile: Telegram's profile screen on its peer, with Call; the agent of this topic by default
     /// (pai's in the main topic). Before pai's agent list has been read there is no peer yet: pai's settings then.
     func openPaiProfile(slug: String? = nil) {
-        let slug = slug ?? PaiChat.agent(thread: self.chatLocation.threadId)?.slug ?? PaiChat.paiSlug
+        let slug = slug ?? PaiChat.agent(thread: self.chatLocation.threadId)?.slug ?? PaiChat.rootSlug
         let _ = (self.context.engine.data.get(TelegramEngine.EngineData.Item.Peer.Peer(id: PaiAgentList.peerId(slug: slug)))
         |> deliverOnMainQueue).startStandalone(next: { [weak self] peer in
             guard let self else {
@@ -177,7 +177,7 @@ extension ChatControllerImpl {
     /// A voice call with the agent whose topic this is; pai's own anywhere else in the bot chat.
     func startPaiCall() {
         guard #available(iOS 16.0, *) else { return }
-        let slug = PaiChat.agent(thread: self.chatLocation.threadId)?.slug ?? PaiChat.paiSlug
+        let slug = PaiChat.agent(thread: self.chatLocation.threadId)?.slug ?? PaiChat.rootSlug
         PaiCall.shared.start(agent: slug)
     }
 
@@ -202,7 +202,7 @@ func paiTitleContent(_ interfaceState: ChatPresentationInterfaceState, base: Cha
     var crumbs: [String]
     if let agent = PaiChat.agent(thread: threadId), !agent.isPai {
         crumbs = PaiChat.chain(to: agent.slug).map(\.name)
-        if PaiChat.chain(to: agent.slug).first?.slug != PaiChat.paiSlug {
+        if PaiChat.chain(to: agent.slug).first?.slug != PaiChat.rootSlug {
             crumbs.insert("pai", at: 0)
         }
     } else if threadId == nil {

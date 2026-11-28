@@ -149,7 +149,7 @@ public final class ChatMessagePaiEventBubbleContentNode: ChatMessageBubbleConten
         }
         // A finished call: the tap calls the agent again.
         if line.event == "call.ended" {
-            let slug = line.agent ?? PaiChat.agent(thread: item.message.threadId)?.slug ?? PaiChat.paiSlug
+            let slug = line.agent ?? PaiChat.agent(thread: item.message.threadId)?.slug ?? PaiChat.rootSlug
             return ChatMessageBubbleContentTapAction(content: .custom({
                 if #available(iOS 16.0, *) {
                     PaiCall.shared.start(agent: slug)

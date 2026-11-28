@@ -38,13 +38,13 @@ public struct PaiRail: Equatable {
 
     /// The strip for a topic of the bot chat (nil or pai's main topic: every agent); nil when nothing runs or waits.
     public static func state(thread: Int64?) -> PaiRail? {
-        return state(agent: PaiChat.agent(thread: thread)?.slug ?? PaiChat.paiSlug)
+        return state(agent: PaiChat.agent(thread: thread)?.slug ?? PaiChat.rootSlug)
     }
 
     /// The strip for an agent's chat: it and the agents under it (pai's: every agent).
     public static func state(agent scopeSlug: String) -> PaiRail? {
         let live = PaiChat.agents.filter { $0.status != "done" && $0.status != "closed" }
-        let members = scopeSlug == PaiChat.paiSlug
+        let members = scopeSlug == PaiChat.rootSlug
             ? live.filter { !$0.isPai }
             : live.filter { $0.slug == scopeSlug || PaiChat.isAncestor(scopeSlug, of: $0.slug) }
         let needs = PaiChat.needs
@@ -52,10 +52,10 @@ public struct PaiRail: Equatable {
         let working = members.filter { agent in agent.isBusy && !waiting.contains(agent) }
         // An ask whose agent is pai itself, finished or unknown still waits on the user: the strip says so.
         if waiting.isEmpty, let need = needs.first(where: { need in
-            scopeSlug == PaiChat.paiSlug || need.agent == scopeSlug || need.agent.map { PaiChat.isAncestor(scopeSlug, of: $0) } == true
+            scopeSlug == PaiChat.rootSlug || need.agent == scopeSlug || need.agent.map { PaiChat.isAncestor(scopeSlug, of: $0) } == true
         }) {
             let agent = PaiChat.agent(need.agent)
-            let isSelf = (need.agent ?? PaiChat.paiSlug) == scopeSlug
+            let isSelf = (need.agent ?? PaiChat.rootSlug) == scopeSlug
             let faces = agent.map { [Face(slug: $0.slug, name: $0.name, avatar: $0.avatar)] } ?? []
             let title = isSelf ? "Waiting on you" : "\(agent?.name ?? need.from) waits on you"
             return PaiRail(faces: faces, title: title, subtitle: need.question.paiPlain, isWaiting: true, target: isSelf ? nil : need.agent)

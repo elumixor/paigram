@@ -74,7 +74,7 @@ private func openPaiNeed(_ need: PaiNeed, context: AccountContext, navigationCon
         guard let navigationController else {
             return
         }
-        PaiAgentList.open(slug: need.agent ?? PaiChat.paiSlug, context: context, navigationController: navigationController)
+        PaiAgentList.open(slug: need.agent ?? PaiChat.rootSlug, context: context, navigationController: navigationController)
     }
     guard let askId = need.askId else {
         fallback()

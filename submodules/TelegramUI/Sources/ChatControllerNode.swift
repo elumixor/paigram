@@ -1446,7 +1446,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
         }
         if #available(iOS 16.0, *), PaiChat.isBot(self.chatPresentationInterfaceState.renderedPeer?.peer) {
             // The open topic's agent: what it waits on colours the strip, read now and kept current.
-            let slug = PaiChat.agent(thread: self.chatPresentationInterfaceState.chatLocation.threadId)?.slug ?? PaiChat.paiSlug
+            let slug = PaiChat.agent(thread: self.chatPresentationInterfaceState.chatLocation.threadId)?.slug ?? PaiChat.rootSlug
             MainActor.assumeIsolated {
                 PaiHost.store.watch(agent: slug)
             }

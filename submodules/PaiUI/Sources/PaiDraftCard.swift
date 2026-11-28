@@ -7,8 +7,8 @@ public enum PaiDraftCard {
     @available(iOS 16.0, *)
     @MainActor
     public static func drafts(thread: Int64?) -> [PaiDraft] {
-        let slug = PaiChat.agent(thread: thread)?.slug ?? PaiChat.paiSlug
-        return PaiHost.store.drafts.filter { $0.agent == slug || (slug == PaiChat.paiSlug && $0.agent == nil) }
+        let slug = PaiChat.agent(thread: thread)?.slug ?? PaiChat.rootSlug
+        return PaiHost.store.drafts.filter { $0.agent == slug || (slug == PaiChat.rootSlug && $0.agent == nil) }
     }
 
     /// The thread messages always shown: the last two.

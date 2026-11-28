@@ -64,7 +64,7 @@ extension PaiChat {
 
 extension PaiChat {
     /// pai's own slug in the agent tree; its chat is the bot chat's main topic.
-    public static let paiSlug = "pai"
+    public static let rootSlug = "root"
 
     private static let mainThreadKey = "pai.mainThreadId"
     private static let agentsCache = PaiCachedValue<[PaiAgent]>("agents", legacyKey: "pai.agents", empty: [])
@@ -113,7 +113,7 @@ extension PaiChat {
 
     /// The topic a decision is asked in: its agent's, else pai's main one.
     public static func thread(of need: PaiNeed) -> Int64? {
-        return thread(of: need.agent ?? paiSlug) ?? mainThreadId
+        return thread(of: need.agent ?? rootSlug) ?? mainThreadId
     }
 
     /// How many decisions wait in the bot's chat: all of them for the chat itself (nil), else those of one topic.
@@ -181,12 +181,12 @@ extension PaiChat {
     public static func agent(thread: Int64?) -> PaiAgent? {
         guard let thread else { return nil }
         if let agent = agents.first(where: { $0.threadId == thread }) { return agent }
-        return thread == mainThreadId ? agent(paiSlug) : nil
+        return thread == mainThreadId ? agent(rootSlug) : nil
     }
 
     /// The topic an agent's chat is in: its own, pai's main one; nil for a sub-agent, whose chat is in the app.
     public static func thread(of slug: String) -> Int64? {
-        if slug == paiSlug { return mainThreadId ?? agent(slug)?.threadId }
+        if slug == rootSlug { return mainThreadId ?? agent(slug)?.threadId }
         return agent(slug)?.threadId
     }
 
@@ -222,10 +222,10 @@ extension PaiChat {
             result.append(agent)
             for child in children(of: agent.slug) { walk(child) }
         }
-        if let pai = agent(paiSlug) { walk(pai) }
+        if let pai = agent(rootSlug) { walk(pai) }
         let slugs = Set(agents.map(\.slug))
         // Agents whose parent is unknown hang under pai.
-        for orphan in agents where orphan.parent.map({ !slugs.contains($0) }) ?? (orphan.slug != paiSlug) {
+        for orphan in agents where orphan.parent.map({ !slugs.contains($0) }) ?? (orphan.slug != rootSlug) {
             walk(orphan)
         }
         return result

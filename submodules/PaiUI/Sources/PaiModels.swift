@@ -403,7 +403,7 @@ public struct PaiAgent: Codable, Identifiable, Equatable {
     public var isBusy: Bool { isReportedBusy || PaiExpected.isExpected(slug) }
     /// Busy as the daemon reports it.
     public var isReportedBusy: Bool { status == "working" || status == "queued" || session?.state == "busy" }
-    public var isPai: Bool { slug == PaiChat.paiSlug }
+    public var isPai: Bool { slug == PaiChat.rootSlug }
     public var isClosed: Bool { status == "closed" }
     public var briefLine: String { (brief ?? "").split(separator: "\n").first.map(String.init)?.paiPlain ?? "" }
     /// What it is for, in a line: what it owns, else the page it works on, else the brief's first line.
@@ -497,7 +497,7 @@ public struct PaiLogMessage: Codable, Identifiable, Equatable {
     }
 
     public let id: Int
-    /// "user", "pai", an agent's slug, "routine:<id>", "watcher:<source>".
+    /// "user", "root", an agent's slug, "routine:<id>", "watcher:<source>".
     public let from: String
     public let to: String
     /// chat, delegate, report, request, response, ask, answer, notice, event.
