@@ -215,6 +215,33 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
     )
 }
 
+
+/// A pushed `paiInstall` link, only when it is pai's own: `itms-services://?action=download-manifest&url=<manifest>` or a plain
+/// link, either way https on desk.atmagaming.com. Anything else in the push is ignored.
+private func paiInstallURL(_ value: Any?) -> URL? {
+    guard let link = value as? String, let url = URL(string: link), let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+        return nil
+    }
+    func isOwnHttps(_ url: URL?) -> Bool {
+        guard let url, url.scheme?.lowercased() == "https", let host = url.host?.lowercased(), url.user == nil else {
+            return false
+        }
+        return host == "desk.atmagaming.com" || host.hasSuffix(".desk.atmagaming.com")
+    }
+    switch components.scheme?.lowercased() {
+    case "itms-services":
+        let items = components.queryItems ?? []
+        guard items.first(where: { $0.name == "action" })?.value == "download-manifest", let manifest = items.first(where: { $0.name == "url" })?.value else {
+            return nil
+        }
+        return isOwnHttps(URL(string: manifest)) ? url : nil
+    case "https":
+        return isOwnHttps(url) ? url : nil
+    default:
+        return nil
+    }
+}
+
 @objc(AppDelegate) class AppDelegate: UIResponder, UIApplicationDelegate, PKPushRegistryDelegate, UNUserNotificationCenterDelegate, URLSessionDelegate, URLSessionTaskDelegate {
     @objc var window: UIWindow?
     var nativeWindow: (UIWindow & WindowHost)?
@@ -2869,7 +2896,7 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
         // A pushed app update (`paiInstall`, dev's itms-services link): opening it brings up iOS's Install prompt, and the
         // build installs over this app.
-        if let link = response.notification.request.content.userInfo["paiInstall"] as? String, let url = URL(string: link) {
+        if let url = paiInstallURL(response.notification.request.content.userInfo["paiInstall"]) {
             UIApplication.shared.open(url, options: [:], completionHandler: { _ in completionHandler() })
             return
         }
@@ -3085,7 +3112,7 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
     @available(iOS 10.0, *)
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         // An update pushed while the app is open: no banner, the app updates itself (iOS asks to Install once).
-        if let link = notification.request.content.userInfo["paiInstall"] as? String, let url = URL(string: link) {
+        if let url = paiInstallURL(notification.request.content.userInfo["paiInstall"]) {
             UIApplication.shared.open(url, options: [:], completionHandler: nil)
             completionHandler([])
             return
