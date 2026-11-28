@@ -2880,9 +2880,22 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
             })
             return
         }
+        // A change card's Deny (here or from the watch) goes to the box; its Approve here opens the passkey prompt, as a tap does.
+        // On the watch, Approve launches the watch app, which signs with its own key.
+        if response.actionIdentifier == "pai.change.deny", let hash = (response.notification.request.content.userInfo["paiChange"] as? [String: Any])?["hash"] as? String {
+            guard #available(iOS 16.0, *) else {
+                completionHandler()
+                return
+            }
+            Task {
+                try? await PaiPasskeys.deny(hash)
+                DispatchQueue.main.async { completionHandler() }
+            }
+            return
+        }
         let _ = (accountIdFromNotification(response.notification, sharedContext: self.sharedContextPromise.get())
         |> deliverOnMainQueue).start(next: { accountId in
-            if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
+            if response.actionIdentifier == UNNotificationDefaultActionIdentifier || response.actionIdentifier == "pai.change.approve" {
                 // The box's usage and change pushes carry `paiUsage` / `paiChange` and no url when they skipped the notification service.
                 let userInfo = response.notification.request.content.userInfo
                 let paiChangeHash = (userInfo["paiChange"] as? [String: Any])?["hash"] as? String

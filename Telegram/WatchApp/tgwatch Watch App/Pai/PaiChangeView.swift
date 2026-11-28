@@ -2,6 +2,8 @@ import CryptoKit
 import Foundation
 import Security
 import SwiftUI
+import UserNotifications
+import WatchKit
 
 /// This watch's approval key. watchOS has no passkeys, so the watch signs pai's change approvals with a P-256 key made
 /// in its own Secure Enclave: it never leaves the watch and signs only while the watch is unlocked with a passcode.
@@ -84,19 +86,20 @@ enum PaiWatchKey {
 /// A sensitive change an agent asks to make: where, why and what it does, approved with this watch's key or denied.
 /// A root script or a datovka send says to approve it on the iPhone: pai takes only a passkey for those.
 struct PaiChangeView: View {
-    let need: PaiGlance.Need
+    /// Who asks, from the glance's need; nil when a notification opened it (the change's agent stands in).
+    let from: String?
     let hash: String
     @State private var pai = PaiWatch.shared
     @State private var change: PaiGlance.Change?
     @State private var message: String?
     @Environment(\.dismiss) private var dismiss
 
-    private var busy: Bool { pai.answering.contains(need.id) }
+    private var busy: Bool { pai.answering.contains("change:\(hash)") }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 6) {
-                Text(need.from).font(.footnote.weight(.semibold)).foregroundStyle(.orange)
+                if let who = from ?? change?.agent { Text(who).font(.footnote.weight(.semibold)).foregroundStyle(.orange) }
                 if let change {
                     if let site = change.site { Text(site).font(.headline) }
                     if let reason = change.reason, !reason.isEmpty { Text(reason).font(.footnote) }
@@ -120,11 +123,15 @@ struct PaiChangeView: View {
                     ProgressView().frame(maxWidth: .infinity)
                 }
                 if busy { ProgressView().frame(maxWidth: .infinity) }
-                if let message { Text(message).font(.footnote).foregroundStyle(.red) }
+                if let message = message ?? pai.changeFailure[hash] { Text(message).font(.footnote).foregroundStyle(.red) }
             }
         }
         .navigationTitle("Approve")
         .task { load() }
+        // An Approve from the notification signs while this screen shows; read the card again once it is done.
+        .onChange(of: busy) { _, now in
+            if !now { load() }
+        }
     }
 
     private func load() {
@@ -138,8 +145,86 @@ struct PaiChangeView: View {
 
     private func decide(approve: Bool) {
         message = nil
-        pai.decideChange(need, hash: hash, approve: approve) { error in
+        pai.decideChange(hash: hash, approve: approve) { error in
             if let error { message = error } else { dismiss() }
+        }
+    }
+}
+
+/// The long look of a `pai.change` push on the wrist: what the change does and its own Approve / Deny, which sign here with
+/// this watch's key (a notification forwarded from the iPhone does not reliably hand its action buttons to this app).
+final class PaiChangeNotificationController: WKUserNotificationHostingController<PaiChangeNotificationView> {
+    private var title = ""
+    private var text = ""
+    private var changeHash: String?
+
+    override class var isInteractive: Bool { true }
+
+    override var body: PaiChangeNotificationView {
+        PaiChangeNotificationView(title: title, text: text, hash: changeHash)
+    }
+
+    override func didReceive(_ notification: UNNotification) {
+        let content = notification.request.content
+        title = content.title
+        text = content.body
+        changeHash = PaiWatch.changeHash(content.userInfo)
+        // The view's own buttons sign in this process; the category's would go wherever watchOS sends them.
+        if changeHash != nil { notificationActions = [] }
+    }
+}
+
+struct PaiChangeNotificationView: View {
+    let title: String
+    let text: String
+    let hash: String?
+    @State private var pai = PaiWatch.shared
+    @State private var change: PaiGlance.Change?
+    @State private var message: String?
+    @State private var done: String?
+
+    private var busy: Bool { hash.map { pai.answering.contains("change:\($0)") } ?? false }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.headline)
+            if let change {
+                if let site = change.site { Text(site).font(.footnote.weight(.semibold)) }
+                if let reason = change.reason, !reason.isEmpty { Text(reason).font(.footnote) }
+                ForEach(Array(change.lines.prefix(6).enumerated()), id: \.offset) { _, line in
+                    Text(line).font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
+                }
+            } else {
+                Text(text).font(.footnote)
+            }
+            if let done {
+                Label(done, systemImage: "checkmark.circle.fill").font(.footnote).foregroundStyle(.green)
+            } else if let hash, change?.isPending ?? true {
+                if change?.needsPasskey == true {
+                    Text("Approve this one with your passkey on iPhone.").font(.footnote).foregroundStyle(.orange)
+                } else {
+                    Button { decide(hash, approve: true) } label: { Label("Approve", systemImage: "checkmark.seal.fill") }
+                        .tint(.green)
+                        .disabled(busy)
+                }
+                Button(role: .destructive) { decide(hash, approve: false) } label: { Label("Deny", systemImage: "xmark") }
+                    .disabled(busy)
+            } else if let change {
+                Text(change.status.capitalized).font(.footnote).foregroundStyle(.secondary)
+            }
+            if busy { ProgressView().frame(maxWidth: .infinity) }
+            if let message { Text(message).font(.footnote).foregroundStyle(.red) }
+        }
+        .task {
+            guard let hash else { return }
+            pai.change(hash) { if case let .success(change) = $0 { self.change = change } }
+        }
+    }
+
+    private func decide(_ hash: String, approve: Bool) {
+        message = nil
+        pai.decideChange(hash: hash, approve: approve) { error in
+            if let error { message = error } else { done = approve ? "Approved" : "Denied" }
         }
     }
 }

@@ -1,4 +1,5 @@
 import SwiftUI
+import WatchKit
 import TDShim
 
 @main
@@ -43,6 +44,7 @@ struct TgwatchApp: App {
                 .sheet(isPresented: $pai.telegramPresented) { accountContent }
                 .onOpenURL { PaiWatch.shared.open($0) }
         }
+        WKNotificationScene(controller: PaiChangeNotificationController.self, category: PaiWatch.changeCategory)
     }
 
     @ViewBuilder

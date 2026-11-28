@@ -2583,6 +2583,12 @@ final class NotificationService: UNNotificationServiceExtension {
             return
         }
 
+        // A change card pushed by pai's box: Approve and Deny, on the phone and the watch.
+        if PaiNotification.isBoxChange(request.content) {
+            PaiNotification.decorateBoxChange(request.content, completion: paiDeliver)
+            return
+        }
+
         // A usage threshold pushed by pai's box.
         if PaiNotification.isBoxUsage(request.content.userInfo) {
             paiDeliver(PaiNotification.decorateBoxUsage(request.content))

@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UserNotifications
 import WatchConnectivity
 import WatchKit
 import WidgetKit
@@ -31,6 +32,7 @@ final class PaiWatch: NSObject, WCSessionDelegate {
             WCSession.default.delegate = self
             WCSession.default.activate()
         }
+        registerChangeCategory()
     }
 
     /// The `paigram://` links complications open.
@@ -144,17 +146,19 @@ final class PaiWatch: NSObject, WCSessionDelegate {
 
     /// Approves change `hash` with this watch's Secure Enclave key (`PaiWatchKey`), or denies it. `done` gets nil once
     /// the box took it, else what to tell the user.
-    func decideChange(_ need: PaiGlance.Need, hash: String, approve: Bool, done: @escaping (String?) -> Void) {
+    /// The need `change:<hash>` stands for (also when no glance carries it: a notification opened it).
+    func decideChange(hash: String, approve: Bool, done: @escaping (String?) -> Void) {
+        let needId = "change:\(hash)"
         guard let config = PaiVault.config else {
             done("Open Paigram on your iPhone and sign in to pai.")
             return
         }
-        answering.insert(need.id)
+        answering.insert(needId)
         let finish = { (error: String?) in
             DispatchQueue.main.async {
-                self.answering.remove(need.id)
+                self.answering.remove(needId)
                 if error == nil, let glance = self.glance {
-                    self.apply(glance: glance.removing(need: need.id))
+                    self.apply(glance: glance.removing(need: needId))
                     self.refresh()
                 }
                 done(error)
@@ -182,6 +186,63 @@ final class PaiWatch: NSObject, WCSessionDelegate {
                     finish(error.localizedDescription)
                 }
             }
+        }
+    }
+
+    // MARK: - Change notifications
+
+    /// The box's `change.requested` push (category `pai.change`, `paiChange.hash`): Approve and Deny on the wrist. Approve is a
+    /// foreground action, so watchOS launches this app to sign with the Secure Enclave key, which never leaves the watch; the
+    /// long look (`PaiChangeNotificationController`) carries its own buttons, which sign in place.
+    static let changeCategory = "pai.change"
+    static let approveAction = "pai.change.approve"
+    static let denyAction = "pai.change.deny"
+
+    private func registerChangeCategory() {
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        let approve = UNNotificationAction(identifier: Self.approveAction, title: "Approve", options: [.authenticationRequired, .foreground])
+        let deny = UNNotificationAction(identifier: Self.denyAction, title: "Deny", options: [.destructive, .authenticationRequired])
+        center.getNotificationCategories { existing in
+            let others = existing.filter { $0.identifier != Self.changeCategory }
+            center.setNotificationCategories(others.union([UNNotificationCategory(identifier: Self.changeCategory, actions: [approve, deny], intentIdentifiers: [], options: [])]))
+        }
+    }
+
+    /// The change a notification is about.
+    static func changeHash(_ userInfo: [AnyHashable: Any]) -> String? {
+        guard let hash = (userInfo["paiChange"] as? [String: Any])?["hash"] as? String, !hash.isEmpty else { return nil }
+        return hash
+    }
+
+    /// Opens change `hash` over the dashboard.
+    func openChange(_ hash: String) {
+        telegramPresented = false
+        path = [.change(hash)]
+    }
+
+    /// Why the last approval from a notification failed, shown on the change screen.
+    private(set) var changeFailure: [String: String] = [:]
+
+    private func respond(to response: UNNotificationResponse, done: @escaping () -> Void) {
+        guard let hash = Self.changeHash(response.notification.request.content.userInfo) else {
+            done()
+            return
+        }
+        switch response.actionIdentifier {
+        case Self.approveAction, Self.denyAction:
+            let approve = response.actionIdentifier == Self.approveAction
+            if approve { openChange(hash) }
+            changeFailure[hash] = nil
+            decideChange(hash: hash, approve: approve) { error in
+                if let error { self.changeFailure[hash] = error }
+                done()
+            }
+        case UNNotificationDefaultActionIdentifier:
+            openChange(hash)
+            done()
+        default:
+            done()
         }
     }
 
@@ -317,5 +378,15 @@ private extension Result {
     var error: Failure? {
         if case let .failure(error) = self { return error }
         return nil
+    }
+}
+
+extension PaiWatch: UNUserNotificationCenterDelegate {
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
+        DispatchQueue.main.async { self.respond(to: response, done: completionHandler) }
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .sound])
     }
 }

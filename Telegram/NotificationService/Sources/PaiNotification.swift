@@ -114,6 +114,31 @@ enum PaiNotification {
         attach(need, to: content, completion: completion)
     }
 
+    // MARK: Change cards pushed by the box
+
+    /// A change card an Apple Watch key may approve (`change.requested` with category `pai.change`, `paiChange.hash`).
+    static func isBoxChange(_ content: UNNotificationContent) -> Bool {
+        return content.categoryIdentifier == changeCategory && content.userInfo["paiChange"] is [String: Any] && content.userInfo["from_id"] == nil
+    }
+
+    static let changeCategory = "pai.change"
+
+    /// Registers `pai.change` before the banner shows. Approve is a foreground action: on the iPhone it opens the passkey
+    /// prompt (`AppDelegate`), on the watch it launches the watch app, which signs with its Secure Enclave key. Deny goes to
+    /// the box from wherever it is tapped.
+    static func decorateBoxChange(_ content: UNNotificationContent, completion: @escaping (UNNotificationContent) -> Void) {
+        let approve = UNNotificationAction(identifier: "pai.change.approve", title: "Approve", options: [.authenticationRequired, .foreground])
+        let deny = UNNotificationAction(identifier: "pai.change.deny", title: "Deny", options: [.destructive, .authenticationRequired])
+        let category = UNNotificationCategory(identifier: changeCategory, actions: [approve, deny], intentIdentifiers: [], options: [])
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationCategories { existing in
+            center.setNotificationCategories(existing.filter { $0.identifier != changeCategory }.union([category]))
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.4) {
+                completion(content)
+            }
+        }
+    }
+
     // MARK: Usage pushed by the box
 
     /// A usage window crossing 50/80/100%, pushed by the box (`paiUsage`: window, percent, threshold, resetsAt).

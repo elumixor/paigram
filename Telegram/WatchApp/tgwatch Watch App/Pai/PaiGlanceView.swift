@@ -80,6 +80,7 @@ struct PaiHomeView: View {
                 switch route {
                 case let .agent(slug): PaiAgentView(slug: slug)
                 case let .need(id): PaiNeedScreen(id: id)
+                case let .change(hash): PaiChangeView(from: pai.glance?.needs.first { $0.id == "change:\(hash)" }?.from, hash: hash)
                 }
             }
             .toolbar {
@@ -108,6 +109,8 @@ struct PaiHomeView: View {
 enum PaiRoute: Hashable {
     case agent(String)
     case need(String)
+    /// A change card by hash: a `pai.change` notification opened it.
+    case change(String)
 }
 
 struct PaiStatusDot: View {
@@ -250,7 +253,7 @@ struct PaiNeedScreen: View {
     var body: some View {
         if let need = pai.glance?.needs.first(where: { $0.id == id }) {
             if need.id.hasPrefix("change:") {
-                PaiChangeView(need: need, hash: String(need.id.dropFirst("change:".count)))
+                PaiChangeView(from: need.from, hash: String(need.id.dropFirst("change:".count)))
             } else if let draft = need.draft {
                 PaiDraftView(need: need, draft: draft)
             } else {
